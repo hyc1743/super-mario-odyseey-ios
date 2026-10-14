@@ -897,3 +897,50 @@ thread_selftest   内核线程族：15 条（真并发）
 并在注释里写明这个坑。
 
 **另外**：这个环境的 bash heredoc 会吃掉反斜杠（`\n` 变成真换行），写含 `\n` 的代码要用 edit 工具而不是 heredoc。
+
+---
+
+# 第十三轮：NVN 图形接口层（469 个名字的接管骨架）
+
+## 2.46 做了什么
+
+| 位置 | 内容 |
+|---|---|
+| `smo/gfx/nvn/names.txt` | 游戏向 `nvnBootstrapLoader` 索取的 **469 个名字**（从 main.bin 抽出的字符串，事实记录） |
+| `smo/gfx/nvn/hle_nvn.c` | 接管 `nvnBootstrapLoader`；命令记录（Metal 重放的接缝）；未实现入口 |
+| `smo/gfx/nvn/nvn_table.c` | 【生成】名字 → 宿主实现（469 项，248 已接核心家族，221 接未实现入口） |
+| `smo/gfx/nvn/nvn_record_names.inc` | 【生成】记录桩（统一签名下一条宏展开 248 个） |
+| `smo/gfx/README.md` | 这一层到哪一步、下一步要什么 |
+
+**统一签名**：所有 NVN 函数都按 `(a0..a7) → u64` 收。理由与参考项目一致：苹果 AAPCS64 与 Switch
+的差异主要在 <32 位参数的扩展与可变参数，统一收 8 个寄存器参数把差异挡在接口层。
+
+## 2.47 生成器的名字一致性检查抓到了我两次手写错误
+
+我按记忆手写了「要实现哪些 NVN 函数」，生成器的检查报出 **21 个名字游戏根本没要**：
+- 游戏**不调用任何 `*BuilderCreate`** —— 它直接在对象上 `nvnXxxInitialize`
+- `BeginRecord` / `EndRecord` 的真名是 **`BeginRecording` / `EndRecording`**
+- `nvnSyncIncrement/GetValue/Reset` 不存在（游戏用的是别的名字）
+
+所以现在**不手写名字**：按家族前缀（Device/MemoryPool/Buffer/Sync/Window/Program/Texture/Sampler/
+Queue/Event）从真实名字表里选，生成器带 `--check` 保证生成物与名字表一致（CI 会跑）。
+
+## 2.48 单测（不需要游戏文件、不需要 Metal）
+
+```
+✅ 表里名字数 > 400（469）
+✅ 每个名字都能按名取到函数地址
+✅ 已实现数与生成时登记的一致（248）
+✅ 不在表里的名字返回 0（NVN 的真实行为：取不到就是 0，游戏自己处理）
+✅ 空名字返回 0
+✅ 调用进命令记录；可以清空（每帧重放前清）
+✅ 未实现入口累计调用次数
+```
+
+## 2.49 图形层下一步（明确要什么）
+
+1. **NVN 的真实结构布局**（各 `NVNxxx` 对象的大小与字段偏移）：公开的 `nvn.h` 里有声明，
+   参考项目收录在 `gfx/nvn/include/nvn.h`（89 KB，MIT）。**本仓还没有这份头** —— 没有它，
+   记录桩就只能记录、不能正确读写对象字段。这是下一批的第一件事。
+2. **Metal 重放**（参考项目 `nvn_mtl.m` 626 KB，这一层最大的工作量）。
+3. **着色器取用**：18470 个着色器已离线翻译完；`nvnProgramSetShaders` 收到控制段后算键查表即可。
