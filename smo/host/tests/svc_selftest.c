@@ -26,6 +26,8 @@ void gate_register(uint64_t ret, const char *kind, int arg, uint64_t orig) { (vo
 uint64_t resolve_import(module_t *m, const char *name) { (void)m; (void)name; return 0x1000; }
 uint64_t dm_slot_key(unsigned i) { return 100 + i; }
 void dm_code_protect(void *p, size_t n) { (void)p; (void)n; }
+// 本单测只测内存族：线程族给个桩（真实现在 hle_thread.c，另有 thread_selftest 覆盖）
+int svc_thread(int num, uint64_t *regs) { (void)num; (void)regs; return 0; }
 void dm_ro_protect(void *p, size_t n) { (void)p; (void)n; }
 
 // 该文件里只用到内存族：把 hle_svc.c 之外的符号都挡掉

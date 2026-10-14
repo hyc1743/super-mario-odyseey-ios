@@ -803,3 +803,57 @@ $ ./svc_selftest
   `ArbitrateLock`/事件与 `ProcessWideKey`… —— 参考项目那份 671 行，是下一块。
   这一轮已经给它留好接口（`svc_thread()`，内存族不认识就转给它）。
 - SDK 初始化顺序、iOS 三段内嵌出包、446 条服务实现、NVN → Metal。
+
+---
+
+# 第十一轮：内核线程族 svc（实现 + 真并发单测 15 条断言）
+
+## 2.40 线程族做了什么（对应参考项目 `hle_thread.c`）
+
+`smo/host/hle_thread.c`：**每个客体线程 = 一个宿主 pthread**，跑在 SDK 给的客体栈上。
+SDK 的 `nn::os` 原样执行，只把它底下的内核换成宿主。
+
+| 类 | svc |
+|---|---|
+| 线程 | 0x08 CreateThread · 0x09 StartThread · 0x0A ExitThread · 0x0B SleepThread · 0x0C/0x0D 优先级 · 0x0E/0x0F 核掩码 · 0x10 当前核号 · 0x25 线程号 · 0x19 CancelSynchronization |
+| 锁 | 0x1A ArbitrateLock · 0x1B ArbitrateUnlock（标签字 = 持有者句柄 \| 0x40000000 有等待者） |
+| 条件 | 0x1C WaitProcessWideKeyAtomic · 0x1D SignalProcessWideKey |
+| 地址 | 0x34 WaitForAddress · 0x35 SignalToAddress |
+| 事件 | 0x45 CreateEvent · 0x11 SignalEvent · 0x12 ClearEvent · 0x17 ResetSignal · 0x18 WaitSynchronization · 0x16 CloseHandle |
+
+**调度顺序按公开内核行为**：优先级数值小者优先，同优先级**先登记者**优先（不是随意先到先得）。
+所有等待挂在一把全局锁 + 每线程一个条件变量上 —— 先求正确，性能后量（这是参考项目的取舍，也是本项目的）。
+
+**一条顺序上的关键点**（参考项目拿它当单测的负对照，我照抄并写明理由）：
+`WaitProcessWideKeyAtomic` 必须**先把手上的锁交出去、再置条件键**。反过来会出现
+「有人已经 Signal 过、而这里才登记等待」的窗口 ⇒ **唤醒丢失**。
+
+## 2.41 单测：15 条断言全过（真并发）
+
+`smo/host/tests/thread_selftest.c` 自己扮演客体代码，直接按 ABI 调 svc：
+
+| 组 | 断言 |
+|---|---|
+| 主线程登记 | 句柄非 0 |
+| 线程 | CreateThread + StartThread 真的跑起来；事件等待被唤醒并返回下标 0 |
+| **争锁互斥** | 两线程各 2000 次加锁/解锁 → **临界区零重叠**、计数 4000、解锁后锁字回 0 |
+| 条件变量 | 等者被 `SignalProcessWideKey` 唤醒，且**唤醒时锁已在手**（内核交回） |
+| 地址仲裁 | 有线程确实在 `WaitForAddress` 上等之后，`SignalToAddress` 能把它唤醒 |
+| 超时 | 无人触发时 `WaitSynchronization` 返回 `0xEA01` |
+| CloseHandle | 事件两端都关才释放 |
+
+顺手加了一个诊断口 `dm_thread_waiting(kind)`（当前各类等待的线程数）—— 真机上"卡住时谁在等什么"
+就靠它；单测也用它把时序变成确定的（否则测的是竞态，不是语义）。
+
+**自己踩的两个坑**（都写进注释了）：
+1. 等待链登记写错（`if (!t->next) t->next = g_wait; g_wait = t;`）会重复挂链/丢链；
+2. `thread_exit` 里重复加全局锁会死锁，而且 `pthread_exit` 前**必须放锁**，否则全局锁永远锁死。
+   另外单测一开始写成了「先 yield 一会儿再 signal」——那是竞态；改成用 `dm_thread_waiting` 固定时序。
+
+## 2.42 现在单测矩阵（全部不需要游戏文件）
+
+```
+loader_selftest   装载器：真实产物上的强断言（本机）+ 合成产物（CI）
+svc_selftest      内核内存族：20 条
+thread_selftest   内核线程族：15 条（真并发）
+```

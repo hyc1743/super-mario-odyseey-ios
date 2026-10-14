@@ -79,9 +79,8 @@ uint64_t dm_guest_heap_base(void) { return (uint64_t)(uintptr_t)g_heap; }
 uint64_t dm_guest_heap_cur(void)  { return g_heap_cur; }
 int dm_guest_heap_rejects(void)   { return g_heap_rejects; }
 
-// 线程族在 hle_thread.c（这一轮先留空实现，见 STATUS.md）
-int svc_thread(int num, uint64_t *regs);
-int svc_thread(int num, uint64_t *regs) { (void)num; (void)regs; return 0; }
+// 线程族在 hle_thread.c
+#include "hle_thread.h"
 
 // Horizon 的内存状态码（QueryMemory 用；取自参考项目的实测值）
 enum { MS_FREE = 0, MS_CODE = 3, MS_HEAP = 5, MS_STACK = 0xB };

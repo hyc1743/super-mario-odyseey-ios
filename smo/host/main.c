@@ -10,6 +10,7 @@
 //   · SDK 运行时的初始化顺序（参考项目是「按 SDK 自己的启动顺序初始化 SDK 运行时」再进 nnMain）
 //   · 前端（窗口/图形）与 HLE 服务实现（当前服务层全部是生成的桩）
 #include "dm.h"
+#include "hle_thread.h"
 #include <unistd.h>
 
 void host_thread_keys_create(void);
@@ -43,6 +44,10 @@ int main(int argc, char **argv) {
     host_thread_keys_create();
     load_modules(dir, mods, nmods);
     if (list_only) { unimpl_report(); return 0; }
+
+    // 主线程登记（句柄之后交给 SDK 的 nn::os；真机上 SDK 会拿它当主线程）
+    uint32_t main_h = svc_thread_main_init();
+    LOG("主线程句柄 %#x", main_h);
 
     // 扮演 rtld 的 InitModules：按装载顺序调各模块 DT_INIT（模块自己的 init_array 在 _init 里跑）
     run_module_inits();

@@ -8,7 +8,7 @@
 CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
-SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_force_gen.c main.c entry.S
+SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_force_gen.c main.c entry.S
 
 smo_host: $(SRC) dm.h hle.h
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS)
@@ -21,14 +21,19 @@ loader_selftest: loader_core.c tests/loader_selftest.c dm.h
 svc_selftest: hle_svc.c tests/svc_selftest.c dm.h hle.h
 	$(CC) $(CFLAGS) -I. -o $@ hle_svc.c tests/svc_selftest.c
 
-test: loader_selftest svc_selftest
+# 线程族单测：真并发（争锁互斥、条件唤醒、事件、地址仲裁、超时）
+thread_selftest: hle_thread.c tests/thread_selftest.c dm.h hle_thread.h
+	$(CC) $(CFLAGS) -I. -o $@ hle_thread.c tests/thread_selftest.c
+
+test: loader_selftest svc_selftest thread_selftest
 	./loader_selftest work/synthetic sdk main
 	./svc_selftest
+	./thread_selftest
 
 run: smo_host
 	./smo_host work/rewrite rtld sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host loader_selftest svc_selftest
+	rm -f smo_host loader_selftest svc_selftest thread_selftest
 
 .PHONY: test run clean
