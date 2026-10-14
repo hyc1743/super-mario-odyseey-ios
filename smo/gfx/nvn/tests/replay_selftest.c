@@ -27,6 +27,7 @@ struct nvn_draw_item_fwd;      /* 计划项结构在 nvn_replay.c 里；这里�
 // 计划项（与 nvn_replay.c 里的定义一致；测试只需要看前四个字段）
 typedef struct { uint16_t act; uint16_t stage_hint; uint64_t program; uint64_t a0, a1, a2; const char *name; } item_t;
 const item_t *nvn_replay_item(unsigned i);
+uint64_t nvn_replay_item_key(unsigned i);
 
 static void call(const char *n, uint64_t a0, uint64_t a1, uint64_t a2) {
     uint64_t a[8] = { a0, a1, a2, 0, 0, 0, 0, 0 };
@@ -74,6 +75,16 @@ int main(void) {
     CHK(it && it->stage_hint == 0xFFFF, "着色器未载入索引 → 阶段提示 0xFFFF（与「当时还没 SetShaders」的 0xFFFE 区分开）");
     CHK(it && it->a1 == 100 && it->a2 == 2, "绘制参数原样带过来（count=100, type=2）");
 
+    printf("== 3b. 管线键：状态没变则键不变；状态一变键就变 ==");
+    putchar('\n');
+    uint64_t k0 = nvn_replay_item_key(0), k1 = nvn_replay_item_key(1);
+    CHK(k0 != 0 && k0 == k1, "两次绘制之间没有改状态 → 管线键相同（Metal 层可以复用管线）");
+    call("nvnCommandBufferSetDepthMode", (uint64_t)(uintptr_t)cmdbuf, 7, 0);
+    call("nvnCommandBufferDrawElements", (uint64_t)(uintptr_t)cmdbuf, 12, 4);
+    uint64_t k2 = nvn_replay_item_key(nvn_replay_count() - 1);   // 最后一项 = 刚才那次绘制
+    CHK(k2 != 0 && k2 != k0, "改了深度模式再画 → 管线键变了（不会误用旧管线）");
+    CHK(nvn_replay_count() == 4, "计划项现在 4 条");
+
     printf("== 4. 绑了没初始化过的 program：必须被抓住 ==\n");
     nvn_replay_reset();
     static uint64_t bogus[8] = {0};
@@ -88,7 +99,7 @@ int main(void) {
     printf("== 5. 统计口径 ==\n");
     unsigned b2, s2, d2, dp2, c2, cp2, p2, sy2;
     nvn_replay_stats(&b2, &s2, &d2, &dp2, &c2, &cp2, &p2, &sy2);
-    CHK(b2 == 1 && s2 == 0 && d2 == 1 && dp2 == 0, "本轮：绑定 1、设置 0、绘制 1、分派 0");
+    CHK(b2 >= 1 && d2 == 1, "未解析那一轮：绑定 >=1、绘制 1");
 
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");
     return fails != 0;

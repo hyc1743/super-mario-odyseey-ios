@@ -23,11 +23,21 @@ typedef struct {
 
 #define PLAN_MAX 65536
 static nvn_draw_item g_plan[PLAN_MAX];
+static uint64_t      g_keys[PLAN_MAX];
 static unsigned g_plan_n;
 static unsigned g_binds, g_sets, g_draws, g_dispatches, g_clears, g_copies, g_presents, g_syncs;
 static unsigned g_unresolved;                 // 绑定了状态表里没有的对象 = 记账出错
 static const char *g_unresolved_name;
 static uint64_t   g_cur_program;
+// 「状态哈希」：把绑定/设置类调用按顺序混进来。管线键 = 状态哈希 + 当前 program 的着色器键。
+// 为什么这么做而不是逐字段解析状态：字段语义要靠真机日志逐个确认，但**键只需要"状态变了键就变"**——
+// 混哈希就能满足这一点，而且现在就能用、不会因为某个字段解析错而悄悄把两条不同状态的绘制合成一条管线。
+static uint64_t   g_state_hash = 1469598103934665603ULL;
+
+static void mix(uint64_t *h, const void *p, size_t n) {
+    const uint8_t *b = p;
+    for (size_t i = 0; i < n; i++) { *h ^= b[i]; *h *= 1099511628211ULL; }
+}
 
 static uint16_t classify(const char *n) {
     // 名字形如 nvnCommandBufferXxx / nvnQueueXxx / nvnWindowXxx
@@ -54,7 +64,10 @@ static uint64_t bind_object(const char *n, uint64_t a1) {
     return a1;
 }
 
+uint64_t nvn_replay_item_key(unsigned i) { return i < g_plan_n ? g_keys[i] : 0; }
+
 void nvn_replay_reset(void) {
+    g_state_hash = 1469598103934665603ULL;
     g_plan_n = g_binds = g_sets = g_draws = g_dispatches = g_clears = g_copies = g_presents = g_syncs = 0;
     g_unresolved = 0;
     g_unresolved_name = NULL;
@@ -67,6 +80,8 @@ int nvn_replay_call(const char *name, const uint64_t *a) {
     switch (act) {
     case ACT_BIND: {
         g_binds++;
+        mix(&g_state_hash, name, strlen(name));
+        mix(&g_state_hash, &a[1], 8);
         uint64_t obj = bind_object(name, a[1]);
         // 绑定的是 program 时记下来（绘制计划要带上它）
         if (strstr(name, "Program")) {
@@ -78,8 +93,15 @@ int nvn_replay_call(const char *name, const uint64_t *a) {
         // 别的绑定对象（pool/texture/sampler/buffer）不强求在表里：有的走的是 pool 里的句柄
         return 0;
     }
-    case ACT_SET: g_sets++; return 0;
-    case ACT_SYNC: g_syncs++; return 0;
+    case ACT_SET:
+        g_sets++;
+        mix(&g_state_hash, name, strlen(name));
+        mix(&g_state_hash, a, 8 * sizeof a[0]);
+        return 0;
+    case ACT_SYNC:
+        g_syncs++;
+        mix(&g_state_hash, name, strlen(name));
+        return 0;
     case ACT_CLEAR: g_clears++; return 0;
     case ACT_COPY: g_copies++; return 0;
     case ACT_PRESENT: g_presents++; return 0;
@@ -93,6 +115,16 @@ int nvn_replay_call(const char *name, const uint64_t *a) {
             it->program = g_cur_program;
             it->a0 = a[0]; it->a1 = a[1]; it->a2 = a[2];
             it->name = name;
+            // 管线键：状态哈希 + 当前 program 的着色器键（Metal 层按它缓存 MTLRenderPipelineState）
+            uint64_t k = g_state_hash;
+            nvn_st_ent *pp = nvn_st_get((void *)(uintptr_t)g_cur_program, 10);
+            if (pp && pp->v[1]) {
+                const nvn_shader_ent *se2 = nvn_shader_find_control((const uint8_t *)(uintptr_t)pp->v[1], (size_t)pp->v[2]);
+                uint64_t sk = se2 ? se2->key : 0;
+                mix(&k, &sk, 8);
+            }
+            mix(&k, &it->program, 8);
+            if (g_plan_n < PLAN_MAX) g_keys[g_plan_n - 1] = k;
             // 程序的着色器阶段：从状态表里 program 记下的控制段查索引（SetShaders 时记的）
             nvn_st_ent *pe = nvn_st_get((void *)(uintptr_t)g_cur_program, 10);
             if (pe && pe->v[1]) {
