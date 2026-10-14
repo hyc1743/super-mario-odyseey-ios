@@ -51,9 +51,30 @@ jobs:
         run: brew install xcodegen
       - name: 构建并打包
         env:
-          SMO_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+          # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
+          # MARKETING_VERSION（CFBundleShortVersionString 只允许数字与点，脚本里会归化）
+          SMO_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.1.0' }}
         run: bash smo/ios/shell_build.sh
+      - name: 失败时把构建日志传上来
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: smo/ios/out/xcodebuild.log
+          if-no-files-found: warn
+      - name: 失败时把报错发成注解
+        # 注释：GitHub 的「运行日志」要仓库管理员才能下载，而 check-run 的
+        # annotations 是公开可读的 —— 把报错行发成注解，维护者/协作方就能直接看到真实原因
+        if: failure()
+        run: |
+          LOG=smo/ios/out/xcodebuild.log
+          [ -f "$LOG" ] || { echo "::error::没有 $LOG（构建脚本还没跑到 xcodebuild）"; exit 0; }
+          echo "===== xcodebuild 日志尾部 ====="
+          tail -25 "$LOG"
+          echo "===== error 行 ====="
+          grep -nE "error:|error " "$LOG" | head -10 | while IFS= read -r l; do echo "::error::$l"; done
       - name: 产物摘要
+        if: success()
         run: |
           ls -la smo/ios/out
           unzip -l smo/ios/out/SMOMobile-shell.ipa | head -20
