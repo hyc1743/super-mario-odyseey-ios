@@ -1002,3 +1002,61 @@ smo/tools/check_x18.py  →  main / sdk / subsdk0 / rtld：0 条指令写通用 
 2. 枚举值：`smo/gfx/nvn/include/nvn.h`（h1k421 的 MIT 重建版，从 Darksiders II 的 DWARF 重建）
    提供 enums，用于后面的 Metal 翻译；结构布局只作交叉参考。
 3. Metal 重放层。
+
+---
+
+# 第十五轮：NVN 核心家族的真实现（38 个函数）
+
+## 2.54 状态层的设计选择：宿主侧表，不写客体对象内存
+
+`nvn_state.c` 用「客体对象指针 → 宿主侧状态」的开放寻址表。**宿主一个字节都不写客体对象**，
+理由：客体对象的大小/字段布局取决于**游戏编译时的 NVN 版本**，我们手上只有第三方重建的 nvn.h
+（从别的游戏的 DWARF 重建），版本未必一致 —— 往客体对象里写字段就有踩出分配范围的风险。
+不写它，就完全不依赖布局。代价是要一张表 + 类型检查（同址异类由 `type` 挡住）。
+删除用「整表重排」而不是后移/墓碑：对象几百个、删除很少，简单且不容易写错。
+
+**例外**：出参指针（如 `nvnDeviceGetInteger` 的 out）必须写客体内存，宽度只能靠调用点定 ——
+所以这一条现在只写 0 并打日志（写错宽度比不写更糟）。
+
+## 2.55 本轮实现的 38 个（都是游戏真实索取的名字）
+
+| 家族 | 函数 |
+|---|---|
+| Device | BuilderSetDefaults/SetFlags、Initialize/Finalize/GetInteger、**GetProcAddress** |
+| MemoryPool | BuilderSetDefaults/SetDevice/SetStorage/SetFlags、Initialize/Finalize、**Map**、GetFlags、Flush/InvalidateMappedRange |
+| Buffer | BuilderSetDefaults/SetDevice/SetStorage、Initialize/Finalize、GetAddress |
+| Sync | Initialize/Finalize/Wait（+ 宿主侧 `nvn_sync_signal`） |
+| Sampler | BuilderSetDefaults/SetDevice/SetMinMagFilter/SetWrapMode/SetLodBias/SetMaxAnisotropy/SetCompare/SetReductionFilter、Initialize/Finalize |
+| Program | Initialize/Finalize/SetShaders |
+
+几个关键判断：
+
+- **`nvnDeviceGetProcAddress` 是整个图形层最关键的一个函数**：AGL 先用 `nvnBootstrapLoader` 取到它，
+  再交给 main 里的 `nvnLoadCProcs` 去解析 461 个 NVN 函数。我们返回什么，游戏的每一次 NVN 调用就打到哪里。
+- **`nvnMemoryPoolMap` 直接返回客体给的存储地址**（不需要拷贝、也不需要"映射"）：
+  客体代码在本机原生执行，客体地址就是宿主地址 —— 这是"原生执行"路线相对模拟器的一处实打实的便宜
+  （实测它是调用点最多的一个：122 处）。
+- `Flush/InvalidateMappedRange` 是**空操作而不是"没实现"**：主机与 GPU 看到同一块内存。
+- `nvnProgramSetShaders` 把控制段（Maxwell 着色器 blob）记下来并打印头 16 字节 —— Metal 重放层
+  接上后按它去查那 18470 个已译好的着色器。
+
+## 2.56 两条新学到的坑（都写进了代码注释）
+
+1. **float 参数不在 x1 里，在 s0**：统一 8×u64 签名对 `nvnSamplerBuilderSetLodBias(builder, float)` 不成立。
+   这类函数必须用真正的 `float` 形参写实现（表里仍旧按统一函数指针存，因为调用方是客体、按自己的约定传参）。
+   自检里专门验了这条：`SetLodBias(1.5f)` 存进去的位模式必须是 `0x3FC00000`。
+2. **sdk 自己导出 `nvnBootstrapLoader`**（0x2f05ec，184 字节）—— 它的实现要去和真 NVN 驱动
+   （nvdrv 的 ioctl）说话，在 iOS 上那条路不通。装载器的解析顺序是「① 强制接管表 → ② 本模块 →
+   ③ 别模块导出 → ④ 桩」，所以必须把名字放进接管清单（`gen_hle_force.py` 的 `EXPLICIT`）才能先接管。
+   这一条已经写进 CI 检查（清单里没有它就红）。
+
+## 2.57 自检（38 条断言，不需要游戏文件、不需要 Metal）
+
+```
+nvn_core_selftest：builder → Initialize → Map/GetAddress → Sync 超时/信号/自动复位
+                   → 采样器 float 走 s0 → 类型检查 → ProgramSetShaders → 名字表整体  全部通过 ✅
+nvn_selftest（接口层）：469 个名字都能按名取到、取不到返回 0、命令记录可用          全部通过 ✅
+```
+
+Makefile（`make -C smo/host test`）与 CI 都已接上；图形源文件也已进宿主构建
+（`SRC` 增加 4 个 gfx 源 + `hle_nvn_reg.c`），macOS job 会编它。

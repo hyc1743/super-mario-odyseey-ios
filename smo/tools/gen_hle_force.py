@@ -41,6 +41,11 @@ static uint64_t hle_stub_default(const char *what, const char *why, unsigned i) 
 """
 
 
+# 显式追加：图形层的唯一入口。它不属于任何服务家族，但**必须**接管 ——
+# 宿主接管整个 NVN 接口（469 个函数）就靠它（机制见 STATUS.md 2.46/2.51）。
+EXPLICIT = {"nvnBootstrapLoader"}
+
+
 def load_rows():
     rows = []
     with open(TSV, encoding="utf-8") as f:
@@ -54,7 +59,8 @@ def load_rows():
             #   · 服务客户端：即使被 sdk 导出，也必须接管（SDK 的实现要走 IPC）——
             #     它们的判定文本是「模块内(服务客户端，仍需接管)」，不是「宿主接管…」，别筛漏了
             #   · 无人提供的图形入口（nv::*）与网络（socket/ssl）
-            if ("服务客户端" in what) or what.startswith(("宿主接管", "宿主HLE", "网络")) or fam == "nv":
+            if (("服务客户端" in what) or what.startswith(("宿主接管", "宿主HLE", "网络"))
+                    or fam == "nv" or sym in EXPLICIT):
                 rows.append((mod, sym, fam, prov, what))
     # 去重（同一符号可能被多个模块引用；表里只能有一条）
     seen, uniq = set(), []

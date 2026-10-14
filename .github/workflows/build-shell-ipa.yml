@@ -66,6 +66,16 @@ jobs:
         run: |
           gcc -O2 -Wall -Wextra -Werror -Ismo/gfx/nvn -o /tmp/nvn_selftest               smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/tests/nvn_selftest.c
           /tmp/nvn_selftest 2>&1 | tee -a /tmp/selftests.log
+      - name: NVN 核心家族状态层单测（设备/池/缓冲/同步/采样器/程序）
+        run: |
+          gcc -O2 -Wall -Wextra -Werror -Ismo/host -Ismo/gfx/nvn -o /tmp/nvn_core_selftest smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/tests/nvn_core_selftest.c 2>&1 | tee -a /tmp/selftests.log
+          /tmp/nvn_core_selftest 2>&1 | tee -a /tmp/selftests.log
+      - name: 图形入口必须在接管清单里（否则游戏拿不到任何 NVN 函数）
+        run: |
+          if ! grep -q 'nvnBootstrapLoader' smo/host/hle_force_gen.c; then
+            echo '::error::接管清单里没有 nvnBootstrapLoader'; exit 1;
+          fi
+          echo '图形入口在接管清单里（抢在 sdk 自己的实现之前）'
       - name: x18 不变量检查（改写产物里不能有指令写通用 x18）
         run: python3 smo/tools/check_x18.py work/synthetic
       - name: 检查生成物与名字表一致（NVN 表与记录桩）

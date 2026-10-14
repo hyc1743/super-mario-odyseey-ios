@@ -75,3 +75,23 @@ smo/tools/check_x18.py     →  main / sdk / subsdk0 / rtld 四个改写产物�
 ```
 
 不变量成立，共用 x18 的设计站得住。
+
+## 2.7 状态层（第十五轮）
+
+`nvn_state.c/h`：客体对象指针 → 宿主侧状态的开放寻址表。**不写客体对象内存** ——
+所以不依赖 NVN 结构的版本细节（我们手上只有第三方重建的 nvn.h，从别的游戏的 DWARF 重建）。
+删除用「整表重排」而不是后移/墓碑：对象几百个、删除很少，简单且不容易写错。
+
+`nvn_core.c`：38 个手写实现（Device / MemoryPool / Buffer / Sync / Sampler / Program）。
+每次新增实现，要把名字加进 `smo/tools/gen_nvn_records.py` 的 `SKIP`，否则生成的记录桩会和它重复定义。
+
+`tests/nvn_core_selftest.c`：38 条断言，不需要游戏文件、不需要 Metal（客体对象就是几个本地数组）。
+
+**两个坑（都写进了代码注释与自检）**：
+
+1. **float 参数不在 x1，在 s0**：统一 8×u64 签名对 `nvnSamplerBuilderSetLodBias(builder, float)` 不成立。
+   这类函数必须用真正的 `float` 形参写实现（表里仍按统一函数指针存，因为调用方是客体、按自己的约定传参）。
+   同理适用于 CommandBufferSetAlphaRef 等带 float 的接口。
+2. **sdk 自己导出 `nvnBootstrapLoader`**（0x2f05ec，184 字节）：它的实现要去和真 NVN 驱动（nvdrv 的 ioctl）
+   说话，在 iOS 上不通。装载器的解析顺序是「① 强制接管表 → ② 本模块 → ③ 别模块导出 → ④ 桩」，
+   所以必须在接管清单里抢在它前面（`gen_hle_force.py` 的 `EXPLICIT`），CI 会检查这一条。

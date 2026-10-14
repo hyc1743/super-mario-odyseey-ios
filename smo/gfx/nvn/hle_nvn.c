@@ -67,15 +67,23 @@ unsigned nvn_unimpl_kinds(void) { return g_unimpl_n; }
 unsigned long long nvn_unimpl_calls(void) { return g_unimpl_calls; }
 
 // ---------------------------------------------------------------- bootstrap
-static const nvn_ent *lookup(const char *name) {
+const nvn_ent *nvn_lookup_ent(const char *name);
+
+const nvn_ent *nvn_lookup_ent(const char *name) {
     for (unsigned i = 0; i < g_nvn_table_n; i++)
         if (!strcmp(g_nvn_table[i].name, name)) return &g_nvn_table[i];
     return NULL;
 }
 
+// 对外：名字 → 统一签名的函数指针（nvn_core.c 的 DeviceGetProcAddress 用它）
+nvn_fn nvn_lookup(const char *name) {
+    const nvn_ent *e = nvn_lookup_ent(name);
+    return e ? e->fn : (nvn_fn)0;
+}
+
 uint64_t nvn_BootstrapLoader(const char *name) {
     static int said;
-    const nvn_ent *e = lookup(name);
+    const nvn_ent *e = nvn_lookup_ent(name);
     if (!e) { NVN_LOG("nvnBootstrapLoader：游戏要的名字不在表里：%s", name); return 0; }
     if (!said) {
         said = 1;

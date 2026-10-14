@@ -7,7 +7,7 @@
 #include "hle.h"
 
 // 通用桩：第一次调用打印一行，返回 0（与参考项目对「没有实现的导入」的处理一致）
-static unsigned g_stub_seen[446];
+static unsigned g_stub_seen[447];
 static uint64_t hle_stub_default(const char *what, const char *why, unsigned i) {
     if (!g_stub_seen[i]++) LOG("HLE 桩被调用：%s —— %s", what, why);
     return 0;
@@ -460,6 +460,7 @@ static uint64_t hle_s442(void);
 static uint64_t hle_s443(void);
 static uint64_t hle_s444(void);
 static uint64_t hle_s445(void);
+static uint64_t hle_s446(void);
 
 static uint64_t hle_s0(void) { return hle_stub_default("_ZN2nn2fs10CreateFileEPKcl", "模块内(服务客户端，仍需接管)；家族 nn::fs；main 引用", 0); }
 static uint64_t hle_s1(void) { return hle_stub_default("_ZN2nn2fs10DeleteFileEPKc", "模块内(服务客户端，仍需接管)；家族 nn::fs；main 引用", 1); }
@@ -851,62 +852,63 @@ static uint64_t hle_s386(void) { return hle_stub_default("nnsslContextDestroy", 
 static uint64_t hle_s387(void) { return hle_stub_default("nnsslContextGetContextId", "网络(宿主:离线桩)；家族 nn::ssl；main 引用", 387); }
 static uint64_t hle_s388(void) { return hle_stub_default("nnsslFinalize", "网络(宿主:离线桩)；家族 nn::ssl；main 引用", 388); }
 static uint64_t hle_s389(void) { return hle_stub_default("nnsslInitialize", "网络(宿主:离线桩)；家族 nn::ssl；main 引用", 389); }
-static uint64_t hle_s390(void) { return hle_stub_default("_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 390); }
-static uint64_t hle_s391(void) { return hle_stub_default("_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 391); }
-static uint64_t hle_s392(void) { return hle_stub_default("_ZN2nn2sf4hipc21GetMessageBufferOnTlsEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 392); }
-static uint64_t hle_s393(void) { return hle_stub_default("_ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 393); }
-static uint64_t hle_s394(void) { return hle_stub_default("_ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 394); }
-static uint64_t hle_s395(void) { return hle_stub_default("_ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 395); }
-static uint64_t hle_s396(void) { return hle_stub_default("_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor11SetupHeaderEPvmRKNS2_21HipcMessageHeaderInfoE", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 396); }
-static uint64_t hle_s397(void) { return hle_stub_default("_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor6SetTagEt", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 397); }
-static uint64_t hle_s398(void) { return hle_stub_default("_ZN2nn2sf4hipc6server24HipcServerSessionManager14ProcessMessageEPNS2_21HipcServerSessionBaseEPKNS1_6detail25HipcMessageBufferAccessorEPKNS6_21HipcMessageHeaderInfoEPvm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 398); }
-static uint64_t hle_s399(void) { return hle_stub_default("_ZN2nn2sf4hipc6server24HipcServerSessionManager15ProcessMessage2EPNS2_21HipcServerSessionBaseEPvmS6_m", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 399); }
-static uint64_t hle_s400(void) { return hle_stub_default("_ZN2nn2sf4hipc6server28HipcServerSessionManagerBase10AcceptBaseEPNS2_21HipcServerSessionBaseENS_3svc6HandleE", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 400); }
-static uint64_t hle_s401(void) { return hle_stub_default("_ZN2nn2sf4hipc6server34HipcServerSessionManagerWithDomain20ProcessManagerInvokeEPNS2_17HipcServerSessionEPKNS1_6detail25HipcMessageBufferAccessorEPKNS6_21HipcMessageHeaderInfoEPvm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 401); }
-static uint64_t hle_s402(void) { return hle_stub_default("_ZN2nn2sf4hipc6server34HipcServerSessionManagerWithDomain21Process2ManagerInvokeEPNS2_17HipcServerSessionEPvmS6_m", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 402); }
-static uint64_t hle_s403(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase14InitializePortEiiPKc", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 403); }
-static uint64_t hle_s404(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase27RegisterServerSessionToWaitEPNS2_17HipcServerSessionE", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 404); }
-static uint64_t hle_s405(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase5StartEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 405); }
-static uint64_t hle_s406(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase8LoopAutoEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 406); }
-static uint64_t hle_s407(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBaseC2EPNSt3__115aligned_storageILm48ELm8EE4typeEi", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 407); }
-static uint64_t hle_s408(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBaseD2Ev", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 408); }
-static uint64_t hle_s409(void) { return hle_stub_default("_ZN2nn2sf4impl6detail22ServiceObjectImplBase211ReleaseImplEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 409); }
-static uint64_t hle_s410(void) { return hle_stub_default("_ZN2nn2sf4impl6detail22ServiceObjectImplBase216AddReferenceImplEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 410); }
-static uint64_t hle_s411(void) { return hle_stub_default("_ZN2nn2sf6detail19DefaultAllocateImplEmmm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 411); }
-static uint64_t hle_s412(void) { return hle_stub_default("_ZN2nn2sf6detail21DefaultDeallocateImplEPvmmm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 412); }
-static uint64_t hle_s413(void) { return hle_stub_default("_ZN2nn3fgm7Request10InitializeENS0_6ModuleEjNS_2os14EventClearModeE", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 413); }
-static uint64_t hle_s414(void) { return hle_stub_default("_ZN2nn3fgm7Request10SetAndWaitEjj", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 414); }
-static uint64_t hle_s415(void) { return hle_stub_default("_ZN2nn3fgm7Request3GetEPj", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 415); }
-static uint64_t hle_s416(void) { return hle_stub_default("_ZN2nn3fgm7Request8FinalizeEv", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 416); }
-static uint64_t hle_s417(void) { return hle_stub_default("_ZN2nn3fgm7RequestC1Ev", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 417); }
-static uint64_t hle_s418(void) { return hle_stub_default("_ZN2nn3fgm7RequestD1Ev", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 418); }
-static uint64_t hle_s419(void) { return hle_stub_default("_ZN2nn4lmem13CreateExpHeapEPvmi", "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用", 419); }
-static uint64_t hle_s420(void) { return hle_stub_default("_ZN2nn4lmem13FreeToExpHeapEPNS0_6detail8HeapHeadEPv", "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用", 420); }
-static uint64_t hle_s421(void) { return hle_stub_default("_ZN2nn4lmem19AllocateFromExpHeapEPNS0_6detail8HeapHeadEm", "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用", 421); }
-static uint64_t hle_s422(void) { return hle_stub_default("_ZN2nn5audio12StopAudioOutEPNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 422); }
-static uint64_t hle_s423(void) { return hle_stub_default("_ZN2nn5audio13CloseAudioOutEPNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 423); }
-static uint64_t hle_s424(void) { return hle_stub_default("_ZN2nn5audio13StartAudioOutEPNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 424); }
-static uint64_t hle_s425(void) { return hle_stub_default("_ZN2nn5audio17GetSampleByteSizeENS0_12SampleFormatE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 425); }
-static uint64_t hle_s426(void) { return hle_stub_default("_ZN2nn5audio19OpenDefaultAudioOutEPNS0_8AudioOutERKNS0_17AudioOutParameterE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 426); }
-static uint64_t hle_s427(void) { return hle_stub_default("_ZN2nn5audio20AppendAudioOutBufferEPNS0_8AudioOutEPNS0_14AudioOutBufferE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 427); }
-static uint64_t hle_s428(void) { return hle_stub_default("_ZN2nn5audio21GetAudioOutSampleRateEPKNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 428); }
-static uint64_t hle_s429(void) { return hle_stub_default("_ZN2nn5audio21SetAudioOutBufferInfoEPNS0_14AudioOutBufferEPvmm", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 429); }
-static uint64_t hle_s430(void) { return hle_stub_default("_ZN2nn5audio23GetAudioOutChannelCountEPKNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 430); }
-static uint64_t hle_s431(void) { return hle_stub_default("_ZN2nn5audio23GetAudioOutSampleFormatEPKNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 431); }
-static uint64_t hle_s432(void) { return hle_stub_default("_ZN2nn5audio25GetAudioOutBufferDataSizeEPKNS0_14AudioOutBufferE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 432); }
-static uint64_t hle_s433(void) { return hle_stub_default("_ZN2nn5audio25GetReleasedAudioOutBufferEPNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 433); }
-static uint64_t hle_s434(void) { return hle_stub_default("_ZN2nn5audio27InitializeAudioOutParameterEPNS0_17AudioOutParameterE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 434); }
-static uint64_t hle_s435(void) { return hle_stub_default("_ZN2nn5audio28GetAudioOutBufferDataPointerEPKNS0_14AudioOutBufferE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 435); }
-static uint64_t hle_s436(void) { return hle_stub_default("_ZNKSt11logic_error4whatEv", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 436); }
-static uint64_t hle_s437(void) { return hle_stub_default("_ZNSt11logic_errorC2EPKc", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 437); }
-static uint64_t hle_s438(void) { return hle_stub_default("_ZTVSt12length_error", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 438); }
-static uint64_t hle_s439(void) { return hle_stub_default("_ZdaPv", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 439); }
-static uint64_t hle_s440(void) { return hle_stub_default("_ZdlPv", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 440); }
-static uint64_t hle_s441(void) { return hle_stub_default("_Znam", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 441); }
-static uint64_t hle_s442(void) { return hle_stub_default("_ZnamRKSt9nothrow_t", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 442); }
-static uint64_t hle_s443(void) { return hle_stub_default("_Znwm", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 443); }
-static uint64_t hle_s444(void) { return hle_stub_default("_ZnwmRKSt9nothrow_t", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 444); }
-static uint64_t hle_s445(void) { return hle_stub_default("_ZN2nn4init5StartEmmPFvvES2_", "模块内(服务客户端，仍需接管)；家族 nn::init；rtld 引用", 445); }
+static uint64_t hle_s390(void) { return hle_stub_default("nvnBootstrapLoader", "C 库/运行时(模块内或宿主 libc)；家族 nn::-；main 引用", 390); }
+static uint64_t hle_s391(void) { return hle_stub_default("_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 391); }
+static uint64_t hle_s392(void) { return hle_stub_default("_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 392); }
+static uint64_t hle_s393(void) { return hle_stub_default("_ZN2nn2sf4hipc21GetMessageBufferOnTlsEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 393); }
+static uint64_t hle_s394(void) { return hle_stub_default("_ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 394); }
+static uint64_t hle_s395(void) { return hle_stub_default("_ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 395); }
+static uint64_t hle_s396(void) { return hle_stub_default("_ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 396); }
+static uint64_t hle_s397(void) { return hle_stub_default("_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor11SetupHeaderEPvmRKNS2_21HipcMessageHeaderInfoE", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 397); }
+static uint64_t hle_s398(void) { return hle_stub_default("_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor6SetTagEt", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 398); }
+static uint64_t hle_s399(void) { return hle_stub_default("_ZN2nn2sf4hipc6server24HipcServerSessionManager14ProcessMessageEPNS2_21HipcServerSessionBaseEPKNS1_6detail25HipcMessageBufferAccessorEPKNS6_21HipcMessageHeaderInfoEPvm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 399); }
+static uint64_t hle_s400(void) { return hle_stub_default("_ZN2nn2sf4hipc6server24HipcServerSessionManager15ProcessMessage2EPNS2_21HipcServerSessionBaseEPvmS6_m", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 400); }
+static uint64_t hle_s401(void) { return hle_stub_default("_ZN2nn2sf4hipc6server28HipcServerSessionManagerBase10AcceptBaseEPNS2_21HipcServerSessionBaseENS_3svc6HandleE", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 401); }
+static uint64_t hle_s402(void) { return hle_stub_default("_ZN2nn2sf4hipc6server34HipcServerSessionManagerWithDomain20ProcessManagerInvokeEPNS2_17HipcServerSessionEPKNS1_6detail25HipcMessageBufferAccessorEPKNS6_21HipcMessageHeaderInfoEPvm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 402); }
+static uint64_t hle_s403(void) { return hle_stub_default("_ZN2nn2sf4hipc6server34HipcServerSessionManagerWithDomain21Process2ManagerInvokeEPNS2_17HipcServerSessionEPvmS6_m", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 403); }
+static uint64_t hle_s404(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase14InitializePortEiiPKc", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 404); }
+static uint64_t hle_s405(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase27RegisterServerSessionToWaitEPNS2_17HipcServerSessionE", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 405); }
+static uint64_t hle_s406(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase5StartEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 406); }
+static uint64_t hle_s407(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase8LoopAutoEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 407); }
+static uint64_t hle_s408(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBaseC2EPNSt3__115aligned_storageILm48ELm8EE4typeEi", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 408); }
+static uint64_t hle_s409(void) { return hle_stub_default("_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBaseD2Ev", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 409); }
+static uint64_t hle_s410(void) { return hle_stub_default("_ZN2nn2sf4impl6detail22ServiceObjectImplBase211ReleaseImplEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 410); }
+static uint64_t hle_s411(void) { return hle_stub_default("_ZN2nn2sf4impl6detail22ServiceObjectImplBase216AddReferenceImplEv", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 411); }
+static uint64_t hle_s412(void) { return hle_stub_default("_ZN2nn2sf6detail19DefaultAllocateImplEmmm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 412); }
+static uint64_t hle_s413(void) { return hle_stub_default("_ZN2nn2sf6detail21DefaultDeallocateImplEPvmmm", "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用", 413); }
+static uint64_t hle_s414(void) { return hle_stub_default("_ZN2nn3fgm7Request10InitializeENS0_6ModuleEjNS_2os14EventClearModeE", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 414); }
+static uint64_t hle_s415(void) { return hle_stub_default("_ZN2nn3fgm7Request10SetAndWaitEjj", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 415); }
+static uint64_t hle_s416(void) { return hle_stub_default("_ZN2nn3fgm7Request3GetEPj", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 416); }
+static uint64_t hle_s417(void) { return hle_stub_default("_ZN2nn3fgm7Request8FinalizeEv", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 417); }
+static uint64_t hle_s418(void) { return hle_stub_default("_ZN2nn3fgm7RequestC1Ev", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 418); }
+static uint64_t hle_s419(void) { return hle_stub_default("_ZN2nn3fgm7RequestD1Ev", "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用", 419); }
+static uint64_t hle_s420(void) { return hle_stub_default("_ZN2nn4lmem13CreateExpHeapEPvmi", "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用", 420); }
+static uint64_t hle_s421(void) { return hle_stub_default("_ZN2nn4lmem13FreeToExpHeapEPNS0_6detail8HeapHeadEPv", "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用", 421); }
+static uint64_t hle_s422(void) { return hle_stub_default("_ZN2nn4lmem19AllocateFromExpHeapEPNS0_6detail8HeapHeadEm", "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用", 422); }
+static uint64_t hle_s423(void) { return hle_stub_default("_ZN2nn5audio12StopAudioOutEPNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 423); }
+static uint64_t hle_s424(void) { return hle_stub_default("_ZN2nn5audio13CloseAudioOutEPNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 424); }
+static uint64_t hle_s425(void) { return hle_stub_default("_ZN2nn5audio13StartAudioOutEPNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 425); }
+static uint64_t hle_s426(void) { return hle_stub_default("_ZN2nn5audio17GetSampleByteSizeENS0_12SampleFormatE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 426); }
+static uint64_t hle_s427(void) { return hle_stub_default("_ZN2nn5audio19OpenDefaultAudioOutEPNS0_8AudioOutERKNS0_17AudioOutParameterE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 427); }
+static uint64_t hle_s428(void) { return hle_stub_default("_ZN2nn5audio20AppendAudioOutBufferEPNS0_8AudioOutEPNS0_14AudioOutBufferE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 428); }
+static uint64_t hle_s429(void) { return hle_stub_default("_ZN2nn5audio21GetAudioOutSampleRateEPKNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 429); }
+static uint64_t hle_s430(void) { return hle_stub_default("_ZN2nn5audio21SetAudioOutBufferInfoEPNS0_14AudioOutBufferEPvmm", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 430); }
+static uint64_t hle_s431(void) { return hle_stub_default("_ZN2nn5audio23GetAudioOutChannelCountEPKNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 431); }
+static uint64_t hle_s432(void) { return hle_stub_default("_ZN2nn5audio23GetAudioOutSampleFormatEPKNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 432); }
+static uint64_t hle_s433(void) { return hle_stub_default("_ZN2nn5audio25GetAudioOutBufferDataSizeEPKNS0_14AudioOutBufferE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 433); }
+static uint64_t hle_s434(void) { return hle_stub_default("_ZN2nn5audio25GetReleasedAudioOutBufferEPNS0_8AudioOutE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 434); }
+static uint64_t hle_s435(void) { return hle_stub_default("_ZN2nn5audio27InitializeAudioOutParameterEPNS0_17AudioOutParameterE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 435); }
+static uint64_t hle_s436(void) { return hle_stub_default("_ZN2nn5audio28GetAudioOutBufferDataPointerEPKNS0_14AudioOutBufferE", "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用", 436); }
+static uint64_t hle_s437(void) { return hle_stub_default("_ZNKSt11logic_error4whatEv", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 437); }
+static uint64_t hle_s438(void) { return hle_stub_default("_ZNSt11logic_errorC2EPKc", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 438); }
+static uint64_t hle_s439(void) { return hle_stub_default("_ZTVSt12length_error", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 439); }
+static uint64_t hle_s440(void) { return hle_stub_default("_ZdaPv", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 440); }
+static uint64_t hle_s441(void) { return hle_stub_default("_ZdlPv", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 441); }
+static uint64_t hle_s442(void) { return hle_stub_default("_Znam", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 442); }
+static uint64_t hle_s443(void) { return hle_stub_default("_ZnamRKSt9nothrow_t", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 443); }
+static uint64_t hle_s444(void) { return hle_stub_default("_Znwm", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 444); }
+static uint64_t hle_s445(void) { return hle_stub_default("_ZnwmRKSt9nothrow_t", "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用", 445); }
+static uint64_t hle_s446(void) { return hle_stub_default("_ZN2nn4init5StartEmmPFvvES2_", "模块内(服务客户端，仍需接管)；家族 nn::init；rtld 引用", 446); }
 
 const hle_force_ent g_hle_force[] = {
     {"_ZN2nn2fs10CreateFileEPKcl", (void *)(uintptr_t)hle_s0, "模块内(服务客户端，仍需接管)；家族 nn::fs；main 引用"},
@@ -1299,61 +1301,62 @@ const hle_force_ent g_hle_force[] = {
     {"nnsslContextGetContextId", (void *)(uintptr_t)hle_s387, "网络(宿主:离线桩)；家族 nn::ssl；main 引用"},
     {"nnsslFinalize", (void *)(uintptr_t)hle_s388, "网络(宿主:离线桩)；家族 nn::ssl；main 引用"},
     {"nnsslInitialize", (void *)(uintptr_t)hle_s389, "网络(宿主:离线桩)；家族 nn::ssl；main 引用"},
-    {"_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm", (void *)(uintptr_t)hle_s390, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc", (void *)(uintptr_t)hle_s391, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc21GetMessageBufferOnTlsEv", (void *)(uintptr_t)hle_s392, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE", (void *)(uintptr_t)hle_s393, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv", (void *)(uintptr_t)hle_s394, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv", (void *)(uintptr_t)hle_s395, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor11SetupHeaderEPvmRKNS2_21HipcMessageHeaderInfoE", (void *)(uintptr_t)hle_s396, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor6SetTagEt", (void *)(uintptr_t)hle_s397, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server24HipcServerSessionManager14ProcessMessageEPNS2_21HipcServerSessionBaseEPKNS1_6detail25HipcMessageBufferAccessorEPKNS6_21HipcMessageHeaderInfoEPvm", (void *)(uintptr_t)hle_s398, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server24HipcServerSessionManager15ProcessMessage2EPNS2_21HipcServerSessionBaseEPvmS6_m", (void *)(uintptr_t)hle_s399, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server28HipcServerSessionManagerBase10AcceptBaseEPNS2_21HipcServerSessionBaseENS_3svc6HandleE", (void *)(uintptr_t)hle_s400, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server34HipcServerSessionManagerWithDomain20ProcessManagerInvokeEPNS2_17HipcServerSessionEPKNS1_6detail25HipcMessageBufferAccessorEPKNS6_21HipcMessageHeaderInfoEPvm", (void *)(uintptr_t)hle_s401, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server34HipcServerSessionManagerWithDomain21Process2ManagerInvokeEPNS2_17HipcServerSessionEPvmS6_m", (void *)(uintptr_t)hle_s402, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase14InitializePortEiiPKc", (void *)(uintptr_t)hle_s403, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase27RegisterServerSessionToWaitEPNS2_17HipcServerSessionE", (void *)(uintptr_t)hle_s404, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase5StartEv", (void *)(uintptr_t)hle_s405, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase8LoopAutoEv", (void *)(uintptr_t)hle_s406, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBaseC2EPNSt3__115aligned_storageILm48ELm8EE4typeEi", (void *)(uintptr_t)hle_s407, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBaseD2Ev", (void *)(uintptr_t)hle_s408, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4impl6detail22ServiceObjectImplBase211ReleaseImplEv", (void *)(uintptr_t)hle_s409, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf4impl6detail22ServiceObjectImplBase216AddReferenceImplEv", (void *)(uintptr_t)hle_s410, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf6detail19DefaultAllocateImplEmmm", (void *)(uintptr_t)hle_s411, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn2sf6detail21DefaultDeallocateImplEPvmmm", (void *)(uintptr_t)hle_s412, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
-    {"_ZN2nn3fgm7Request10InitializeENS0_6ModuleEjNS_2os14EventClearModeE", (void *)(uintptr_t)hle_s413, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
-    {"_ZN2nn3fgm7Request10SetAndWaitEjj", (void *)(uintptr_t)hle_s414, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
-    {"_ZN2nn3fgm7Request3GetEPj", (void *)(uintptr_t)hle_s415, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
-    {"_ZN2nn3fgm7Request8FinalizeEv", (void *)(uintptr_t)hle_s416, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
-    {"_ZN2nn3fgm7RequestC1Ev", (void *)(uintptr_t)hle_s417, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
-    {"_ZN2nn3fgm7RequestD1Ev", (void *)(uintptr_t)hle_s418, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
-    {"_ZN2nn4lmem13CreateExpHeapEPvmi", (void *)(uintptr_t)hle_s419, "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用"},
-    {"_ZN2nn4lmem13FreeToExpHeapEPNS0_6detail8HeapHeadEPv", (void *)(uintptr_t)hle_s420, "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用"},
-    {"_ZN2nn4lmem19AllocateFromExpHeapEPNS0_6detail8HeapHeadEm", (void *)(uintptr_t)hle_s421, "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用"},
-    {"_ZN2nn5audio12StopAudioOutEPNS0_8AudioOutE", (void *)(uintptr_t)hle_s422, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio13CloseAudioOutEPNS0_8AudioOutE", (void *)(uintptr_t)hle_s423, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio13StartAudioOutEPNS0_8AudioOutE", (void *)(uintptr_t)hle_s424, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio17GetSampleByteSizeENS0_12SampleFormatE", (void *)(uintptr_t)hle_s425, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio19OpenDefaultAudioOutEPNS0_8AudioOutERKNS0_17AudioOutParameterE", (void *)(uintptr_t)hle_s426, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio20AppendAudioOutBufferEPNS0_8AudioOutEPNS0_14AudioOutBufferE", (void *)(uintptr_t)hle_s427, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio21GetAudioOutSampleRateEPKNS0_8AudioOutE", (void *)(uintptr_t)hle_s428, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio21SetAudioOutBufferInfoEPNS0_14AudioOutBufferEPvmm", (void *)(uintptr_t)hle_s429, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio23GetAudioOutChannelCountEPKNS0_8AudioOutE", (void *)(uintptr_t)hle_s430, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio23GetAudioOutSampleFormatEPKNS0_8AudioOutE", (void *)(uintptr_t)hle_s431, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio25GetAudioOutBufferDataSizeEPKNS0_14AudioOutBufferE", (void *)(uintptr_t)hle_s432, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio25GetReleasedAudioOutBufferEPNS0_8AudioOutE", (void *)(uintptr_t)hle_s433, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio27InitializeAudioOutParameterEPNS0_17AudioOutParameterE", (void *)(uintptr_t)hle_s434, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZN2nn5audio28GetAudioOutBufferDataPointerEPKNS0_14AudioOutBufferE", (void *)(uintptr_t)hle_s435, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
-    {"_ZNKSt11logic_error4whatEv", (void *)(uintptr_t)hle_s436, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
-    {"_ZNSt11logic_errorC2EPKc", (void *)(uintptr_t)hle_s437, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
-    {"_ZTVSt12length_error", (void *)(uintptr_t)hle_s438, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
-    {"_ZdaPv", (void *)(uintptr_t)hle_s439, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
-    {"_ZdlPv", (void *)(uintptr_t)hle_s440, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
-    {"_Znam", (void *)(uintptr_t)hle_s441, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
-    {"_ZnamRKSt9nothrow_t", (void *)(uintptr_t)hle_s442, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
-    {"_Znwm", (void *)(uintptr_t)hle_s443, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
-    {"_ZnwmRKSt9nothrow_t", (void *)(uintptr_t)hle_s444, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
-    {"_ZN2nn4init5StartEmmPFvvES2_", (void *)(uintptr_t)hle_s445, "模块内(服务客户端，仍需接管)；家族 nn::init；rtld 引用"},
+    {"nvnBootstrapLoader", (void *)(uintptr_t)hle_s390, "C 库/运行时(模块内或宿主 libc)；家族 nn::-；main 引用"},
+    {"_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm", (void *)(uintptr_t)hle_s391, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc", (void *)(uintptr_t)hle_s392, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc21GetMessageBufferOnTlsEv", (void *)(uintptr_t)hle_s393, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE", (void *)(uintptr_t)hle_s394, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv", (void *)(uintptr_t)hle_s395, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv", (void *)(uintptr_t)hle_s396, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor11SetupHeaderEPvmRKNS2_21HipcMessageHeaderInfoE", (void *)(uintptr_t)hle_s397, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor6SetTagEt", (void *)(uintptr_t)hle_s398, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server24HipcServerSessionManager14ProcessMessageEPNS2_21HipcServerSessionBaseEPKNS1_6detail25HipcMessageBufferAccessorEPKNS6_21HipcMessageHeaderInfoEPvm", (void *)(uintptr_t)hle_s399, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server24HipcServerSessionManager15ProcessMessage2EPNS2_21HipcServerSessionBaseEPvmS6_m", (void *)(uintptr_t)hle_s400, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server28HipcServerSessionManagerBase10AcceptBaseEPNS2_21HipcServerSessionBaseENS_3svc6HandleE", (void *)(uintptr_t)hle_s401, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server34HipcServerSessionManagerWithDomain20ProcessManagerInvokeEPNS2_17HipcServerSessionEPKNS1_6detail25HipcMessageBufferAccessorEPKNS6_21HipcMessageHeaderInfoEPvm", (void *)(uintptr_t)hle_s402, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server34HipcServerSessionManagerWithDomain21Process2ManagerInvokeEPNS2_17HipcServerSessionEPvmS6_m", (void *)(uintptr_t)hle_s403, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase14InitializePortEiiPKc", (void *)(uintptr_t)hle_s404, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase27RegisterServerSessionToWaitEPNS2_17HipcServerSessionE", (void *)(uintptr_t)hle_s405, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase5StartEv", (void *)(uintptr_t)hle_s406, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBase8LoopAutoEv", (void *)(uintptr_t)hle_s407, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBaseC2EPNSt3__115aligned_storageILm48ELm8EE4typeEi", (void *)(uintptr_t)hle_s408, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4hipc6server6detail29HipcAllInOneServerManagerBaseD2Ev", (void *)(uintptr_t)hle_s409, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4impl6detail22ServiceObjectImplBase211ReleaseImplEv", (void *)(uintptr_t)hle_s410, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf4impl6detail22ServiceObjectImplBase216AddReferenceImplEv", (void *)(uintptr_t)hle_s411, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf6detail19DefaultAllocateImplEmmm", (void *)(uintptr_t)hle_s412, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn2sf6detail21DefaultDeallocateImplEPvmmm", (void *)(uintptr_t)hle_s413, "模块内(服务客户端，仍需接管)；家族 nn::sf；subsdk0 引用"},
+    {"_ZN2nn3fgm7Request10InitializeENS0_6ModuleEjNS_2os14EventClearModeE", (void *)(uintptr_t)hle_s414, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
+    {"_ZN2nn3fgm7Request10SetAndWaitEjj", (void *)(uintptr_t)hle_s415, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
+    {"_ZN2nn3fgm7Request3GetEPj", (void *)(uintptr_t)hle_s416, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
+    {"_ZN2nn3fgm7Request8FinalizeEv", (void *)(uintptr_t)hle_s417, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
+    {"_ZN2nn3fgm7RequestC1Ev", (void *)(uintptr_t)hle_s418, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
+    {"_ZN2nn3fgm7RequestD1Ev", (void *)(uintptr_t)hle_s419, "模块内(服务客户端，仍需接管)；家族 nn::fgm；subsdk0 引用"},
+    {"_ZN2nn4lmem13CreateExpHeapEPvmi", (void *)(uintptr_t)hle_s420, "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用"},
+    {"_ZN2nn4lmem13FreeToExpHeapEPNS0_6detail8HeapHeadEPv", (void *)(uintptr_t)hle_s421, "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用"},
+    {"_ZN2nn4lmem19AllocateFromExpHeapEPNS0_6detail8HeapHeadEm", (void *)(uintptr_t)hle_s422, "模块内(服务客户端，仍需接管)；家族 nn::lmem；subsdk0 引用"},
+    {"_ZN2nn5audio12StopAudioOutEPNS0_8AudioOutE", (void *)(uintptr_t)hle_s423, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio13CloseAudioOutEPNS0_8AudioOutE", (void *)(uintptr_t)hle_s424, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio13StartAudioOutEPNS0_8AudioOutE", (void *)(uintptr_t)hle_s425, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio17GetSampleByteSizeENS0_12SampleFormatE", (void *)(uintptr_t)hle_s426, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio19OpenDefaultAudioOutEPNS0_8AudioOutERKNS0_17AudioOutParameterE", (void *)(uintptr_t)hle_s427, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio20AppendAudioOutBufferEPNS0_8AudioOutEPNS0_14AudioOutBufferE", (void *)(uintptr_t)hle_s428, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio21GetAudioOutSampleRateEPKNS0_8AudioOutE", (void *)(uintptr_t)hle_s429, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio21SetAudioOutBufferInfoEPNS0_14AudioOutBufferEPvmm", (void *)(uintptr_t)hle_s430, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio23GetAudioOutChannelCountEPKNS0_8AudioOutE", (void *)(uintptr_t)hle_s431, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio23GetAudioOutSampleFormatEPKNS0_8AudioOutE", (void *)(uintptr_t)hle_s432, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio25GetAudioOutBufferDataSizeEPKNS0_14AudioOutBufferE", (void *)(uintptr_t)hle_s433, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio25GetReleasedAudioOutBufferEPNS0_8AudioOutE", (void *)(uintptr_t)hle_s434, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio27InitializeAudioOutParameterEPNS0_17AudioOutParameterE", (void *)(uintptr_t)hle_s435, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZN2nn5audio28GetAudioOutBufferDataPointerEPKNS0_14AudioOutBufferE", (void *)(uintptr_t)hle_s436, "模块内(服务客户端，仍需接管)；家族 nn::audio；subsdk0 引用"},
+    {"_ZNKSt11logic_error4whatEv", (void *)(uintptr_t)hle_s437, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
+    {"_ZNSt11logic_errorC2EPKc", (void *)(uintptr_t)hle_s438, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
+    {"_ZTVSt12length_error", (void *)(uintptr_t)hle_s439, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
+    {"_ZdaPv", (void *)(uintptr_t)hle_s440, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
+    {"_ZdlPv", (void *)(uintptr_t)hle_s441, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
+    {"_Znam", (void *)(uintptr_t)hle_s442, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
+    {"_ZnamRKSt9nothrow_t", (void *)(uintptr_t)hle_s443, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
+    {"_Znwm", (void *)(uintptr_t)hle_s444, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
+    {"_ZnwmRKSt9nothrow_t", (void *)(uintptr_t)hle_s445, "模块内(服务客户端，仍需接管)；家族 nn::-；subsdk0 引用"},
+    {"_ZN2nn4init5StartEmmPFvvES2_", (void *)(uintptr_t)hle_s446, "模块内(服务客户端，仍需接管)；家族 nn::init；rtld 引用"},
 };
-const unsigned g_hle_force_n = 446;
+const unsigned g_hle_force_n = 447;

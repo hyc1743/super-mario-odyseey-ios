@@ -22,6 +22,23 @@ FAMILIES = ["nvnDevice", "nvnMemoryPool", "nvnBuffer", "nvnSync", "nvnWindow",
 # 已经在 hle_nvn.c 里手写了状态实现的名字（逐步往这里加）
 SKIP = {
     "nvnBootstrapLoader",            # 本体（不是表项）
+    # 以下在 nvn_core.c 里手写了状态实现（见该文件）；每次新增实现都要往这里加，
+    # 否则生成的记录桩会和真实现重复定义（链接期报 duplicate symbol）。
+    "nvnDeviceBuilderSetDefaults", "nvnDeviceBuilderSetFlags",
+    "nvnDeviceInitialize", "nvnDeviceFinalize", "nvnDeviceGetInteger", "nvnDeviceGetProcAddress",
+    "nvnMemoryPoolBuilderSetDefaults", "nvnMemoryPoolBuilderSetDevice",
+    "nvnMemoryPoolBuilderSetStorage", "nvnMemoryPoolBuilderSetFlags",
+    "nvnMemoryPoolInitialize", "nvnMemoryPoolFinalize", "nvnMemoryPoolMap",
+    "nvnMemoryPoolGetFlags", "nvnMemoryPoolFlushMappedRange", "nvnMemoryPoolInvalidateMappedRange",
+    "nvnBufferBuilderSetDefaults", "nvnBufferBuilderSetDevice", "nvnBufferBuilderSetStorage",
+    "nvnBufferInitialize", "nvnBufferFinalize", "nvnBufferGetAddress",
+    "nvnSyncInitialize", "nvnSyncFinalize", "nvnSyncWait",
+    "nvnSamplerBuilderSetDefaults", "nvnSamplerBuilderSetDevice",
+    "nvnSamplerBuilderSetMinMagFilter", "nvnSamplerBuilderSetWrapMode",
+    "nvnSamplerBuilderSetLodBias", "nvnSamplerBuilderSetMaxAnisotropy",
+    "nvnSamplerBuilderSetCompare", "nvnSamplerBuilderSetReductionFilter",
+    "nvnSamplerInitialize", "nvnSamplerFinalize",
+    "nvnProgramInitialize", "nvnProgramFinalize", "nvnProgramSetShaders",
 }
 
 HEAD = """// 【自动生成，不要手改】由 smo/tools/gen_nvn_records.py 从 names.txt 生成。
