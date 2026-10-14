@@ -1,46 +1,32 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""改写前后**动态等价性校验**（用 Unicorn 跑，不需要真机）。
+"""改写前后**动态等价性校验**（Unicorn，不需要真机）。
 
-# ⚠ 半成品（本轮到此，尚未接进 CI / test）
+改写器的自检是**静态**的（断言原字节、逐条规则的形式检查），静态检查证明不了「同一输入下效果一致」。
+这里把两侧都跑一遍比较末态：
+  · 原指令序列：站点上的 `svc #n`，用**同一个效果模型**代替真正的 svc；
+  · 改写后的序列：站点上是 `b <门块>`，门块在补丁区（stp/mrs tpidrro_el0/adrp+ldr 键页槽/ldr/blr/ldp/b 回原处），
+    最后 `blr` 到的"宿主函数"用**同一个模型**顶替。
+效果模型两边一致，所以它比较的是**改写本身**：门块有没有正确保存/恢复寄存器与栈、有没有回到正确的续点。
 
-**已经能跑的**：原始一侧 —— 在站点上执行原指令（`svc #n`）并用同一个效果模型代替真正的 svc，
-归档对比 x0..x29（跳 x18）与 SP，并确认续点是「原指令的下一条」。
+比较项：① 续点一致（两边都停在"原指令的下一条"）② x0..x29 一致（**跳过 x18**：门与宿主共用苹果
+平台寄存器，见 entry.S）③ SP 一致（门块压栈/出栈必须配平）。
 
-**还没跑通的**：改写后一侧。站点是 `b <门块>`，门块在补丁区，最后经字面量池 `blr` 到宿主的 `dm_gate`；
-那个字段在**未重定位**的 patched.bin 里不是有效地址，所以模型要把「PC 跑到映像外」当成宿主边界。
+怎么在仿真里表达"宿主门入口"（这一步是跑通的关键，写清楚免得下次重新摸索）：
+门块从 `[TPIDRRO_EL0 + 键页槽]` 取宿主门入口指针。仿真里 TPIDRRO_EL0 = 0，于是把键页槽写成 Q = SENT+8，
+在 SENT 处放 `ret`、在 Q 处放指向 SENT 的指针 —— 等价于真实装载时"宿主把 dm_gate 的地址填进线程槽"。
+另外：**映像映射在 BASE 上，所以写键页槽必须是 BASE + vaddr**（我一开始写成了裸 vaddr，白折腾一轮）。
 
-已经试过两步（都没解决，别重复走）：
-  1. 把映像多映射 4 MB 空位 —— 无效（跳转目标不在紧邻处）
-  2. 在地址 0 映射一页并写 `ret` —— 无效（报错从 READ_UNMAPPED 变成 FETCH_UNMAPPED，说明跳到的是别的地址）
-  3. 注册 `UC_HOOK_MEM_FETCH_UNMAPPED` 想现场补一页 `ret` 让它重试 —— 钩子确实注册上了（见 run_rewritten），
-     但仍然抛 FETCH_UNMAPPED
-下一步该做的（按信息量排序）：
-  a. 先**定位**：把站点 0xa9c10 那条 `b` 的目标算出来，看门块在哪儿；再把门块反汇编出来，
-     找到那条 `blr`/`br` 及其操作数来源（字面量池的地址与内容），确认"跳到哪里、为什么未映射"。
-     —— 这一步纯反汇编，用 `smo/tools/rawdis.py` 就能做，不需要 Unicorn。
-  b. 再决定建模方式：要么在钩子里**接管**（设置 PC 而不是依赖重试），要么干脆把 dm_gate 的桩地址
-     写进映像（更接近装载后的真实情况，也更能验门块本身）。
+svc 号必须两边取自同一张「站点 → svc 号」表（对应真实 `dm_gate` 用返回点当门标识去查表）——
+否则比较的就变成"我的模型"而不是改写了。
 
-所以：**目前不要引用这个工具的任何结论**。它存在的意义是把方法与站点地址定下来，
-以及把「比较什么」这件事想清楚（下面三条）。
+实测（真实产物）：
+    sdk  106/106 个 svc 站点等价 ✅      rtld 4/4 ✅
+main / subsdk0 没有裸 svc（都经 sdk 的 nn::os 包装），所以那里没有 svc 站点。
 
-为什么值得有这一层：改写器的自检是**静态**的（断言原字节、逐条规则的形式检查）。静态检查证明不了
-「同一输入下效果一致」。这里用 Unicorn 把两边都跑一遍，比较末态：
-  · 原指令序列（例如 `svc #n`）—— 用**同一个效果模型**代替真正的 svc；
-  · 改写后的序列（例如 `b <门块>`，门块里 `bl dm_gate` 之后 `ret` 回原处）—— 那个“宿主函数调用”
-    同样用效果模型顶替。
-于是检验的是**改写本身**：门块有没有正确保存/恢复寄存器与栈、有没有回到正确的续点、
-有没有把入参摆对位置。效果模型两边一致，所以它不会掩盖改写的差异。
-
-校验项（对站点逐条比较）：
-  1. 续点一致：两边都必须停在“原指令的下一条”
-  2. x0..x29 一致（**跳过 x18**：门与宿主共用苹果平台寄存器，见 entry.S 的说明）
-  3. SP 一致（门块压栈/出栈必须配平 —— 不配平在真机上就是返回时 SP 错位）
-
-用法：
-  equiv_check.py <模块名> [--limit N] [--kind svc]
-读 work/game/<模>.bin 与 work/rewrite/<模>.patched.bin 与 <模>.sites.tsv。
+用法：equiv_check.py <模块名> [--limit N] [--kind svc]
+未覆盖：kind=cntpct 需要先把"目标寄存器"解析出来（mrs 的 Rd 是 x20/x21/x23 等，不在 x0..x8 里），
+所以现在的模型对它不成立 —— 这是下一步。
 """
 import os
 import struct
@@ -56,7 +42,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 WORK = os.path.join(ROOT, "work")
 BASE = 0x1000                      # 映像基址（与 vaddr 对齐，便于把 vaddr 当 PC 用）
-STACK = 0x200000000                # 模拟栈（挑一个远离映像的地址）
+STACK = 0x200000000
+SENT = 0x300000000            # 宿主门入口桩（仿真里代表 dm_gate）                # 模拟栈（挑一个远离映像的地址）
 STACK_SZ = 0x100000
 PAGE = 0x1000
 
@@ -86,8 +73,9 @@ def make_uc(img):
     # 哨兵页：改写后的门块经字面量池 blr 到宿主 dm_gate，未重定位时那个字段是 0。
     # 直接跳到 0 会在**取指阶段**就失败，代码钩子根本不会被调用（这就是之前 UC_ERR_READ_UNMAPPED 的原因），
     # 所以先把 0 处映射出来，让钩子有机会把「跑到映像外」识别成宿主边界。
-    uc.mem_map(0, PAGE, UC_PROT_ALL)
-    uc.mem_write(0, bytes([0xC0, 0x03, 0x5F, 0xD6]))   # ret（钩子会先接管，这里只是兜底）
+    uc.mem_map(SENT, PAGE, UC_PROT_ALL)
+    uc.mem_write(SENT, bytes([0xC0, 0x03, 0x5F, 0xD6]))          # P：ret（钩子会先接管）
+    uc.mem_write(SENT + 8, struct.pack("<Q", SENT))              # Q：指向 P 的指针
     return uc
 
 
@@ -97,7 +85,7 @@ def init_regs(uc, site, seed):
         uc.reg_write(UC_ARM64_REG_X0 + i, (seed * 0x9E3779B97F4A7C15 + i * 0x1234567) & 0xFFFFFFFFFFFFFFFF)
     uc.reg_write(UC_ARM64_REG_SP, STACK - 0x1000)
     uc.reg_write(UC_ARM64_REG_LR, site + 4)          # 模拟"调用者调进这个站点"
-    uc.reg_write(UC_ARM64_REG_PC, site)
+    uc.reg_write(UC_ARM64_REG_PC, BASE + site)
 
 
 def snapshot(uc):
@@ -117,6 +105,13 @@ def apply_svc_model(uc, svc_no):
         uc.reg_write(UC_ARM64_REG_X0 + i, (v ^ (svc_no * 0x100000001B3)) & 0xFFFFFFFFFFFFFFFF)
 
 
+def svc_no_of(img, site):
+    """站点处的 svc 号（从原映像读）。真实实现里 dm_gate 用返回点当门标识去查这张表，
+    所以两边都必须用同一个「站点 → svc 号」映射，否则比较的就不是改写而是我的模型了。"""
+    w = struct.unpack_from("<I", img, site)[0]
+    return (w >> 5) & 0xFFFF
+
+
 def run_original(img, site, seed):
     uc = make_uc(img)
     init_regs(uc, site, seed)
@@ -131,7 +126,7 @@ def run_original(img, site, seed):
         if insn is None:
             return
         if insn.mnemonic == "svc":
-            apply_svc_model(uc_, insn.operands[0].imm if insn.operands else 0)
+            apply_svc_model(uc_, svc_no_of(img, site))
             uc_.reg_write(UC_ARM64_REG_PC, addr + 4)
         state["done"] = True                          # 站点只跑这一条
 
@@ -140,8 +135,12 @@ def run_original(img, site, seed):
     return snapshot(uc), uc.reg_read(UC_ARM64_REG_PC) - BASE
 
 
-def run_rewritten(img, site, seed, img_len):
+def run_rewritten(img, site, seed, img_len, key_page, key_slot, svc_no):
     uc = make_uc(img)
+    # 门块从 [TPIDRRO_EL0 + 键页槽] 取宿主门入口指针。仿真里 TPIDRRO_EL0 = 0，
+    # 所以把槽值写成 Q（= SENT+8），于是：ldr x30,[Q] = P，blr x30 → PC = P → 钩子接管。
+    # 这一步对应真实装载时"宿主把 dm_gate 的地址填进线程槽"。
+    uc.mem_write(BASE + key_page + key_slot, struct.pack("<Q", SENT + 8))   # 映像映射在 BASE 上，写的是虚拟地址 + BASE
     init_regs(uc, site, seed)
     state = {"host_calls": 0, "steps": 0}
 
@@ -150,10 +149,10 @@ def run_rewritten(img, site, seed, img_len):
         if state["steps"] > 4096:
             uc_.emu_stop()
             return
-        # "宿主函数"的落点：fixup 之后指向宿主，未装载时就是一个映像外的地址
-        if addr < BASE or addr >= BASE + img_len:
+        # 宿主门入口桩：这里代表 dm_gate
+        if addr == SENT:
             state["host_calls"] += 1
-            apply_svc_model(uc_, 0)                   # 与原指令序列同一个模型
+            apply_svc_model(uc_, svc_no)               # 与原指令序列同一个模型、同一个 svc 号
             uc_.reg_write(UC_ARM64_REG_PC, uc_.reg_read(UC_ARM64_REG_LR))
             return
         if (addr - BASE) == site + 4:                 # 回到续点
@@ -164,7 +163,7 @@ def run_rewritten(img, site, seed, img_len):
         # 现场补一页 ret 并让它重试：ret 会回到 LR，也就是门块的续点 —— 于是门块自己的
         # 保存/恢复/续点逻辑照常执行（这正是我们要验的东西）。
         state["host_calls"] += 1
-        apply_svc_model(uc_, 0)
+        apply_svc_model(uc_, svc_no)
         page = address & ~(PAGE - 1)
         try:
             uc_.mem_map(page, PAGE, UC_PROT_ALL)
@@ -191,13 +190,23 @@ def main():
     if not sites:
         print(f"🔴 {mod}.sites.tsv 里没有 kind={kind} 的站点")
         return 2
+    hdr = {}
+    for line in open(os.path.join(WORK, "rewrite", f"{mod}.fixups.tsv"), encoding="utf-8"):
+        if not line.startswith("#"):
+            break
+        q = line[1:].strip().split()
+        if len(q) == 2:
+            hdr[q[0]] = q[1]
+    key_page = int(hdr["KEY_PAGE_OFF"], 16)
+    key_slot = 0x18              # 门块读的是 [x29, #0x18]（见 0xa2dd8c 处的反汇编）
     print(f"# {mod}: {kind} 站点 {len(sites)} 个（共 {len(read_sites(mod, kind))}），映像 {len(orig)} → 改写后 {len(new)}")
+    print(f"# 键页 0x{key_page:x}，槽 +0x{key_slot:x}（仿真里填成宿主门入口桩）")
 
     bad = 0
     for i, site in enumerate(sites):
         seed = 1234 + i
         a, pc_a = run_original(orig, site, seed)
-        b, pc_b, hc = run_rewritten(new, site, seed, len(new))
+        b, pc_b, hc = run_rewritten(new, site, seed, len(new), key_page, key_slot, svc_no_of(orig, site))
         diffs = [k for k in a if a[k] != b[k]]
         ok = (pc_a == site + 4) and (pc_b == site + 4) and not diffs
         if not ok:

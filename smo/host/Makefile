@@ -61,10 +61,15 @@ test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nv
 	./shader_selftest
 	./replay_selftest
 
+# 改写前后动态等价性校验（Unicorn；需要 work/rewrite 里有真实产物，所以不进 CI）
+equiv: ../gfx/nvn/nvn_state.c
+	$(SMO_PY) ../../smo/tools/equiv_check.py sdk --limit 200
+	$(SMO_PY) ../../smo/tools/equiv_check.py rtld --limit 10
+
 run: smo_host
 	./smo_host work/rewrite rtld sdk subsdk0 main --list
 
 clean:
 	rm -f smo_host loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest
 
-.PHONY: test run clean
+.PHONY: test run equiv clean
