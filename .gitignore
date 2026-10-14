@@ -1,0 +1,45 @@
+# ---- 游戏内容：一律不进仓（本仓只放兼容层自己的代码）----
+# 参考项目 docs/DERIVED.md 的口径：程序、美术、音频、文本、数据表、着色器本体、存档，全部不进仓。
+*.nsp
+*.xci
+*.nsz
+*.xcz
+prod.keys
+title.keys
+keys.txt
+ProdKeys.NET-*/
+*.tik
+*.nca
+*.cert
+*.cnmt*
+work/
+Gen/
+out/
+*.patched.bin
+*.sharc
+*.sharcb
+*.bfsha
+*.szs
+
+# ---- 构建产物 / 缓存 ----
+build/
+dist/
+DerivedData/
+*.ipa
+*.app
+*.xcarchive
+*.xcuserdatad/
+__pycache__/
+*.pyc
+*.pkl
+*.log
+.cache/
+venv/
+.venv/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

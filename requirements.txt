@@ -1,0 +1,5 @@
+# 工具链依赖（离线工具与 CI 自检用）。宿主与图形层是 C/ObjC，不进这里。
+lz4>=4.3            # patch_nso.py：解 NSO 的 LZ4 压缩段
+capstone>=5.0       # patch_nso.py / xref.py：aarch64 反汇编
+pycryptodome>=3.20  # nsp_extract.py：AES-XTS / AES-CTR / AES-ECB
+numpy>=1.26         # xref.py：整段指令扫描

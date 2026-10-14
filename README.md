@@ -1,0 +1,165 @@
+# Super Mario Odyssey Mobile
+
+**把你在 Switch 上买的《超级马里奥 奥德赛》搬到 iPhone 上的开源兼容层。** 游戏自己的 aarch64 程序
+直接在手机上执行，不模拟 CPU；只把「在苹果内核上不能原样执行的少量指令」改写掉，再自己实现它依赖的
+Switch 系统服务与图形接口。**自带游戏文件（bring your own game files）** —— 本仓库不含任何游戏内容。
+
+技术路径完全照搬 [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)（MIT）。
+协议：MIT · 主语言：中文 · English: [README.en.md](README.en.md)
+
+> ## ⚠️ 现在的状态：早期基础设施阶段，**还不能玩**
+>
+> 这是一个正在进行中的移植项目，不是可玩版本。已经做完并验证的是「读懂这个游戏 + 把程序改写成
+> 能在苹果系统上执行的形式」这一半；**宿主（系统服务 HLE）、图形层（NVN→Metal）、触屏输入都还没开始动**。
+>
+> 想看每一步做到哪、依据是什么：**[STATUS.md](STATUS.md)**（带实测输出与复现命令）。
+> 想自己出包：见下面「构建」。**别指望现在装上去能进游戏** —— 现在装上去只会看到一个状态页。
+
+---
+
+## 它是什么，不是什么
+
+**是：**
+
+- 游戏**自己的 aarch64 程序在设备上直接执行**，没有模拟 CPU。iPhone 与 Switch 是同一类处理器；
+  只有少数在苹果内核下不能原样跑的指令被改写（`x18` 与 `tpidr_el0` 的读写、`svc` 系统调用、
+  `cntpct_el0` 计时器），程序其余每一个字节保持原样。
+- 它依赖的平台服务 —— 系统调用、文件系统、图形接口、音频、输入 —— 由一套为苹果平台写的
+  **宿主**提供。图形接口整个重实现在 Apple 的 Metal 上，中间没有模拟层；着色器离线翻译。
+- 一个把这件事做到底的项目：目标是完整的触屏方案、iPhone 全面屏显示、手柄支持、中英文。
+
+**不是：**
+
+- **不是模拟器**，不是云游戏，不是串流。
+- **不是游戏内容的来源。本仓库不含、也不分发任何游戏内容**：没有游戏程序、美术、音频、文本、
+  数据表或着色器本体。这些都在你自己的机器上、用你自己的游戏文件生成（见 [docs/GAME_FILES.md](docs/GAME_FILES.md)）。
+  仓库里带的是「为了让移植成立而记录的**关于游戏的事实**」—— 改写规则、模块结构、导入清单、
+  着色器标识等，逐项列在 [docs/DERIVED.md](docs/DERIVED.md)。
+- **不是能联机的**：没有多人，游戏全程离线，不需要在线账号。
+
+## 现在的进度
+
+| 阶段 | 状态 | 依据 |
+|---|---|---|
+| 游戏文件解包（NSP → ExeFS / RomFS） | ✅ 完成并验证 | `smo/tools/nsp_extract.py`（算法逐条对照 hactool 源码） |
+| 模块侦察（构建号 / 导入 / 图形入口 / 着色器位置） | ✅ 完成 | `nso_info.py`、`import_graph.py`、`xref.py` |
+| 程序改写（4 个 NSO 全部通过） | ✅ 完成，结构自检通过 | `patch_nso.py`、`rewrite_check.py` |
+| 着色器解包（Yaz0 → SARC → `*.sharc`） | ✅ 完成 27/27 | `nintendo_archives.py` |
+| 着色器翻译（Maxwell → SPIR-V → MSL） | 🚧 进行中 | 需要解析 `sharc` 里的着色器程序 |
+| 宿主加载器 + 系统服务 HLE | ❌ 未开始 | 工作量最大的一块 |
+| NVN → Metal 图形层 | ❌ 未开始 | |
+| 触屏 / 手柄输入 | ❌ 未开始 | |
+| iOS App 壳 + IPA 出包（GitHub Actions） | 🚧 壳可出包，宿主未接入 | `.github/workflows/build-shell-ipa.yml` |
+
+**能不能玩：现在不能。**
+
+## 关于这个游戏，实测出来的事实
+
+这些都是从你自己的游戏文件里量出来的，不是从别处抄的（详细输出见 [STATUS.md](STATUS.md)）：
+
+| 项目 | 实测 |
+|---|---|
+| 标题 / 版本 | `0100000000010000`，US，v0（初版） |
+| Program NCA | 1.24 GB 逻辑内容（容器里 5.54 GB，含 5.5 GB RomFS） |
+| ExeFS 模块 | `main` 15,388,240 B · `sdk` 4,179,745 B · `subsdk0` 3,175,954 B · `rtld` 7,099 B |
+| RomFS | 4636 个文件 / 5.50 GB |
+| `main` 的导入 | 700 条，其中**图形接口只有一条：`nvnBootstrapLoader`** |
+| 游戏向该接口索取的名字 | 469 个不同的 `nvn*` |
+| 引擎 | `agl`（Nintendo 图形库）+ `sead`（框架） |
+| 着色器 | `RomFS/ShaderData/` 27 个 `*.szs`（Yaz0 + SARC），内含 `*.sharc`（agl ShaderArchive） |
+| `glslc`（GLSL 运行时编译器） | 8 个导入全是**死引用**，零调用点 ⇒ 着色器是预编译的 Maxwell 二进制 |
+
+**为什么是这条路**：iPhone 与 Switch 是同一类处理器，所以游戏程序不必模拟就能执行；而它与
+Switch 操作系统的全部接触面是收敛的 —— 内核系统调用、一组系统服务、以及一个图形接口入口。
+把这三样在苹果平台上重新实现，游戏就能以原样的逻辑跑起来。
+
+## 它是怎么工作的
+
+```mermaid
+flowchart LR
+    G["你的游戏文件<br/>（程序 + 资源）"] --> P["改写器<br/>只改少量指令"]
+    G --> S["着色器翻译<br/>原版 → Metal"]
+    P --> H["宿主<br/>系统服务"]
+    S --> X["图形层<br/>图形接口实现在 Metal 上"]
+    H --> A["iOS App<br/>触屏与界面"]
+    X --> A
+```
+
+| 部件 | 位置 | 做什么 |
+|---|---|---|
+| 程序改写器 | [`smo/tools/patch_nso.py`](smo/tools/patch_nso.py) | 只改写不能在苹果内核上原样执行的少量指令，程序其余部分逐字节保持原样 |
+| 宿主 | `smo/host/`（待建） | 加载改写后的程序，提供它调用的平台服务 |
+| 图形 | `smo/gfx/`（待建） | 在 Metal 上实现游戏的图形接口；着色器离线翻译 |
+| iOS App | [`smo/ios/`](smo/ios/) | App 壳、触屏与界面 |
+| 验证 | [`smo/tools/rewrite_check.py`](smo/tools/rewrite_check.py) 等 | 改写产物结构自检、等价性检查 |
+
+## 构建
+
+### 路线 A：在 GitHub 上出包（推荐，不需要 Mac）
+
+[`.github/workflows/build-shell-ipa.yml`](.github/workflows/build-shell-ipa.yml) 会在 GitHub 的
+macOS runner 上（自带 Xcode）构建 App 壳并产出**未签名 IPA**，作为 artifact 与 Release 附件。
+你只需要：
+
+1. fork 或新建仓库，把本仓库推上去；
+2. Actions 页面手动触发 `build shell ipa`，或推一个 tag（`v*`）自动出 Release；
+3. 下载 `SMOMobile-shell.ipa`，用 Sideloadly / AltStore 之类工具**用你自己的 Apple ID 签名**后装到 iPhone。
+
+免费 Apple ID 也能签：签名 7 天过期（到期重签重装即可，存档不丢），最多 3 台设备、每台 3 个 App。
+
+### 路线 B：本机构建 iOS 包
+
+需要有 Apple 芯片的 Mac 与 Xcode（`xcodebuild`）。云端路线就是这条路线的自动化版本。
+
+### 路线 C：不需要 Xcode 的出包（把内容塞进壳里）
+
+跟参考项目一样：云端只出**不含任何游戏内容的空壳**，你在自己机器上把游戏文件塞进去：
+
+```
+python3 smo/tools/smom_pack.py <壳.ipa> <你的游戏文件目录> <输出.ipa>     # （工具待建）
+```
+
+### 准备游戏文件
+
+只能从你自己买的 Switch 版导出（见 [docs/GAME_FILES.md](docs/GAME_FILES.md)）。需要：
+
+- Program NCA 里的 **ExeFS**（`main` / `sdk` / `subsdk0` / `rtld` / `main.npdm`）
+- 同一 NCA 里的 **RomFS**
+
+`prod.keys` 用于解密你自己导出的包。
+
+## 支持哪些设备
+
+| 设备 | 能不能跑 |
+|---|---|
+| iPhone 17 Pro Max（A19，本项目的主要目标） | 目标设备 |
+| iPhone 15 Pro 及以后的 A17 Pro 机型 | 预期可跑（与参考项目的验证档同级） |
+| A16 及更早（iPhone 14 系列、iPhone 15/15 Plus） | 参考项目在这一档需要额外的 ASTC 贴图包；本项目尚未处理 |
+| iPad | 本移植只针对 iPhone |
+
+## 目录
+
+```
+smo/tools/       解包与改写工具（Python）
+smo/ios/         iOS App 壳与出包脚本
+work/            解包与改写产物（不进仓：全是游戏内容）
+STATUS.md        做到哪一步、依据是什么、下一步
+docs/            游戏文件准备、衍生内容说明
+```
+
+## 关于仓库里有什么、没有什么
+
+**没有**：游戏程序、美术、音频、文本、数据表、着色器本体、存档。
+**有**：改写规则、模块结构与导入清单、着色器标识、以及为让移植成立必须记录的其它事实。
+逐项说明见 [docs/DERIVED.md](docs/DERIVED.md)。
+
+## 贡献
+
+见 [CONTRIBUTING.md](CONTRIBUTING.md)。基本原则：每一条结论都要有可复现的证据；
+改写规则必须逐条断言原字节并写清理由；任何游戏内容都不许进仓。
+
+## 许可
+
+MIT，见 [LICENSE](LICENSE)。本许可只覆盖本仓库的源码，不覆盖任何游戏内容。
+
+本项目与 Nintendo 无关，未获其授权或认可。Super Mario Odyssey 是 Nintendo 的商标。

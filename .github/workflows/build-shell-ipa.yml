@@ -1,0 +1,80 @@
+# 在 GitHub 云端出包：不需要 Mac，不需要 Xcode。
+#
+# 两个 job：
+#   selftest   Linux：跑 smo/tools/selftest.py（不需要任何游戏文件），保证工具链没被改坏
+#   shell-ipa  macOS：用 runner 自带的 Xcode 构建 App 壳，产出**未签名 IPA** 作为 artifact；
+#              打 tag 时自动挂到 Release 上
+#
+# 为什么 macOS runner 就够：参考项目是在 Apple 芯片的 Mac 上用 xcodebuild 出包的，
+# GitLab/GitHub 的 macOS runner 正好提供这台机器（含 Xcode 与 Metal 工具链），
+# 于是「没有 Mac」不再是障碍。
+#
+# 拿到 IPA 之后：用 Sideloadly / AltStore 之类工具，用你自己的 Apple ID 签名再装到 iPhone。
+# 免费 Apple ID 也能签（签名 7 天过期，到期重签重装；最多 3 台设备、每台 3 个 App）。
+name: build shell ipa
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: write          # 打 tag 时创建 Release 需要
+
+jobs:
+  selftest:
+    name: 工具链自检（不需要游戏文件）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 装依赖
+        run: pip install -r requirements.txt
+      - name: 自检（Yaz0 / SARC / NSO 头 / 改写器端到端）
+        run: python3 smo/tools/selftest.py
+
+  shell-ipa:
+    name: 构建 App 壳 → 未签名 IPA
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 工具版本
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+      - name: 装 xcodegen（生成 .xcodeproj）
+        run: brew install xcodegen
+      - name: 构建并打包
+        env:
+          SMO_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+        run: bash smo/ios/shell_build.sh
+      - name: 产物摘要
+        run: |
+          ls -la smo/ios/out
+          unzip -l smo/ios/out/SMOMobile-shell.ipa | head -20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SMOMobile-shell-ipa
+          path: smo/ios/out/SMOMobile-shell.ipa
+          if-no-files-found: error
+      - name: 打 tag 时发 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: smo/ios/out/SMOMobile-shell.ipa
+          generate_release_notes: true
+          body: |
+            App 壳（未签名）。里面**不含任何游戏内容**：不含游戏程序、着色器、美术、音频、文本或数据表。
+
+            用法：
+            1. 下载 `SMOMobile-shell.ipa`
+            2. 用 Sideloadly / AltStore 等工具，用你自己的 Apple ID 签名后装到 iPhone（免费账号即可，7 天过期）
+            3. 安装后打开会看到一个状态页：它会列出移植进度，并检查游戏文件在不在
+
+            ⚠️ 这一版**还不能玩**：宿主（系统服务 HLE）与图形层（NVN→Metal）还没接上。
+            进度与依据见仓库的 STATUS.md。
