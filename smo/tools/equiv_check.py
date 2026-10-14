@@ -112,7 +112,12 @@ def svc_no_of(img, site):
     return (w >> 5) & 0xFFFF
 
 
-def run_original(img, site, seed):
+def apply_cntpct_model(uc, reg):
+    """计时器门的效果：把一个确定性的计数值写进目标寄存器（两边同一个模型）。"""
+    uc.reg_write(UC_ARM64_REG_X0 + reg, 0x1234567890ABCDEF)
+
+
+def run_original(img, site, seed, expect_reg=None):
     uc = make_uc(img)
     init_regs(uc, site, seed)
     md = Cs(CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN)
@@ -128,6 +133,15 @@ def run_original(img, site, seed):
         if insn.mnemonic == "svc":
             apply_svc_model(uc_, svc_no_of(img, site))
             uc_.reg_write(UC_ARM64_REG_PC, addr + 4)
+        elif insn.mnemonic == "mrs":
+            # 原指令 `mrs xN, cntpct_el0`：用模型代替（否则比的是 Unicorn 的计数器，不确定）。
+            # 顺带核对 gates.tsv 记的目标寄存器与指令里的 Rd 是否一致 —— 一致才说明改写器的表是对的。
+            rd_name = insn.reg_name(insn.operands[0].reg) if insn.operands else ''
+            rd = int(rd_name[1:]) if rd_name.startswith('x') and rd_name[1:].isdigit() else -1
+            if expect_reg is not None:
+                assert rd == expect_reg, f"0x{site:x}: gates.tsv 记的是 x{expect_reg}，指令里是 x{rd}"
+            apply_cntpct_model(uc_, rd)
+            uc_.reg_write(UC_ARM64_REG_PC, addr + 4)
         state["done"] = True                          # 站点只跑这一条
 
     uc.hook_add(UC_HOOK_CODE, hook)
@@ -135,7 +149,7 @@ def run_original(img, site, seed):
     return snapshot(uc), uc.reg_read(UC_ARM64_REG_PC) - BASE
 
 
-def run_rewritten(img, site, seed, img_len, key_page, key_slot, svc_no):
+def run_rewritten(img, site, seed, img_len, key_page, key_slot, svc_no, kind, dst_reg):
     uc = make_uc(img)
     # 门块从 [TPIDRRO_EL0 + 键页槽] 取宿主门入口指针。仿真里 TPIDRRO_EL0 = 0，
     # 所以把槽值写成 Q（= SENT+8），于是：ldr x30,[Q] = P，blr x30 → PC = P → 钩子接管。
@@ -152,7 +166,10 @@ def run_rewritten(img, site, seed, img_len, key_page, key_slot, svc_no):
         # 宿主门入口桩：这里代表 dm_gate
         if addr == SENT:
             state["host_calls"] += 1
-            apply_svc_model(uc_, svc_no)               # 与原指令序列同一个模型、同一个 svc 号
+            if kind == "cntpct":
+                apply_cntpct_model(uc_, dst_reg)        # 同一个模型、同一个目标寄存器
+            else:
+                apply_svc_model(uc_, svc_no)            # 与原指令序列同一个模型、同一个 svc 号
             uc_.reg_write(UC_ARM64_REG_PC, uc_.reg_read(UC_ARM64_REG_LR))
             return
         if (addr - BASE) == site + 4:                 # 回到续点
@@ -186,7 +203,8 @@ def main():
     limit = int(sys.argv[sys.argv.index("--limit") + 1]) if "--limit" in sys.argv else 10
     orig = open(os.path.join(WORK, "game", f"{mod}.bin"), "rb").read()
     new = open(os.path.join(WORK, "rewrite", f"{mod}.patched.bin"), "rb").read()
-    sites = read_sites(mod, kind)[:limit]
+    all_sites = read_sites(mod, kind)
+    sites = all_sites[:limit]
     if not sites:
         print(f"🔴 {mod}.sites.tsv 里没有 kind={kind} 的站点")
         return 2
@@ -199,14 +217,35 @@ def main():
             hdr[q[0]] = q[1]
     key_page = int(hdr["KEY_PAGE_OFF"], 16)
     key_slot = 0x18              # 门块读的是 [x29, #0x18]（见 0xa2dd8c 处的反汇编）
-    print(f"# {mod}: {kind} 站点 {len(sites)} 个（共 {len(read_sites(mod, kind))}），映像 {len(orig)} → 改写后 {len(new)}")
+    print(f"# {mod}: {kind} 站点 {len(sites)} 个（共 {len(all_sites)}），映像 {len(orig)} → 改写后 {len(new)}")
     print(f"# 键页 0x{key_page:x}，槽 +0x{key_slot:x}（仿真里填成宿主门入口桩）")
 
     bad = 0
-    for i, site in enumerate(sites):
+    # cntpct 的目标寄存器在 gates.tsv 第 3 列、门块在第 1 列（第 4 列是站点，已核对与 sites.tsv 一致）。
+    # 用 chr(9) 而不是字面的制表符：这个文件被反复用 heredoc 编辑过，字面量容易被吃掉。
+    regs = {}
+    with open(os.path.join(WORK, "rewrite", f"{mod}.gates.tsv"), encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            q = line.rstrip().split(chr(9))
+            if len(q) >= 4:
+                regs[(int(q[3], 16), q[1])] = (int(q[2]), int(q[0], 16))
+
+    for i, sv in enumerate(sites):
+        # read_sites 有的版本返回 int（只有站点）、有的返回 (站点, 目标寄存器, 门块)
+        site, dst_reg, gate = sv if isinstance(sv, tuple) else (sv, None, None)
+        if dst_reg is None:
+            r = regs.get((site, kind))
+            if r:
+                dst_reg, gate = r
+        if kind == "cntpct" and dst_reg is None:
+            print(f"🔴 需要 gates.tsv 提供目标寄存器但没拿到（站点 0x{site:x}）—— cntpct 先跳过")
+            return 2
         seed = 1234 + i
-        a, pc_a = run_original(orig, site, seed)
-        b, pc_b, hc = run_rewritten(new, site, seed, len(new), key_page, key_slot, svc_no_of(orig, site))
+        a, pc_a = run_original(orig, site, seed, dst_reg)
+        b, pc_b, hc = run_rewritten(new, site, seed, len(new), key_page, key_slot,
+                                    svc_no_of(orig, site) if kind == "svc" else 0, kind, dst_reg)
         diffs = [k for k in a if a[k] != b[k]]
         ok = (pc_a == site + 4) and (pc_b == site + 4) and not diffs
         if not ok:
