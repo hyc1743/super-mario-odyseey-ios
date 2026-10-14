@@ -58,6 +58,10 @@ jobs:
         run: |
           gcc -O2 -Wall -Wextra -Werror -Ismo/host -o /tmp/fs_selftest               smo/host/hle_fs.c smo/host/hle.c smo/host/hle_force_gen.c smo/host/tests/fs_selftest.c
           /tmp/fs_selftest
+      - name: oe + hid 服务单测（环境查询与输入布局）
+        run: |
+          gcc -O2 -Wall -Wextra -Werror -Ismo/host -o /tmp/oehid_selftest               smo/host/hle_oe.c smo/host/hle_hid.c smo/host/hle.c smo/host/hle_force_gen.c               smo/host/tests/oehid_selftest.c
+          /tmp/oehid_selftest
       - name: 检查自动生成的接管表与 import 清单一致
         run: python3 smo/tools/gen_hle_force.py --check
 

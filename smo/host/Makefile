@@ -8,7 +8,7 @@
 CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
-SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_force_gen.c main.c entry.S
+SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_oe.c hle_hid.c hle_force_gen.c main.c entry.S
 
 smo_host: $(SRC) dm.h hle.h
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS)
@@ -29,16 +29,21 @@ thread_selftest: hle_thread.c tests/thread_selftest.c dm.h hle_thread.h
 fs_selftest: hle_fs.c hle.c hle_force_gen.c tests/fs_selftest.c dm.h hle.h
 	$(CC) $(CFLAGS) -I. -o $@ hle_fs.c hle.c hle_force_gen.c tests/fs_selftest.c
 
-test: loader_selftest svc_selftest thread_selftest fs_selftest
+# oe + hid 单测：环境查询与 Npad/触屏布局
+oehid_selftest: hle_oe.c hle_hid.c hle.c hle_force_gen.c tests/oehid_selftest.c dm.h hle.h dm_input.h dm_oe.h
+	$(CC) $(CFLAGS) -I. -o $@ hle_oe.c hle_hid.c hle.c hle_force_gen.c tests/oehid_selftest.c
+
+test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest
 	./loader_selftest work/synthetic sdk main
 	./svc_selftest
 	./thread_selftest
 	./fs_selftest
+	./oehid_selftest
 
 run: smo_host
 	./smo_host work/rewrite rtld sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host loader_selftest svc_selftest thread_selftest fs_selftest
+	rm -f smo_host loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest
 
 .PHONY: test run clean
