@@ -38,10 +38,16 @@ jobs:
         run: python3 smo/tools/selftest.py
       - name: 造合成改写产物（装载器自检用；真产物是游戏内容，不能进 CI）
         run: python3 smo/tools/make_synthetic_artifacts.py work/synthetic
+      - name: 编宿主里平台无关的那部分（含自动生成的接管表）
+        run: |
+          gcc -O2 -Wall -Wextra -Werror -c -o /tmp/hle.o smo/host/hle.c -Ismo/host
+          gcc -O2 -Wall -Wextra -Werror -c -o /tmp/hf.o smo/host/hle_force_gen.c -Ismo/host
       - name: 编译并跑装载器自检
         run: |
           gcc -O2 -Wall -Wextra -Werror -o /tmp/loader_selftest               smo/host/loader_core.c smo/host/tests/loader_selftest.c
           /tmp/loader_selftest work/synthetic sdk main
+      - name: 检查自动生成的接管表与 import 清单一致
+        run: python3 smo/tools/gen_hle_force.py --check
 
   shell-ipa:
     name: 构建 App 壳 → 未签名 IPA
@@ -53,6 +59,8 @@ jobs:
           sw_vers
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
+      - name: 编译宿主（macOS：entry.S / thread.c / loader_apple.c / main.c 的真实检查）
+        run: make -C smo/host smo_host
       - name: 装 xcodegen（生成 .xcodeproj）
         run: brew install xcodegen
       - name: 构建并打包

@@ -266,3 +266,16 @@ void load_modules(const char *dir, const char *const *names, int n) {
         g_nmod, g_gates, g_symchk_n, g_symchk_bad);
     if (g_symchk_bad) die("符号哈希表与线性扫描不一致（实现有 bug）");
 }
+
+// 扮演 Horizon rtld 的 InitModules：按装载顺序调各模块的 DT_INIT。
+// 时机由 SDK 的启动流程决定（nn::init::Start 之后、nnMain 之前）——参考项目如此，
+// 本项目目前的 bootstrap 是「装载完就调」，等接上 SDK 初始化顺序后再对齐。
+void run_module_inits(void) {
+    for (int i = 0; i < g_nmod; i++) {
+        module_t *m = &g_mod[i];
+        if (!m->init) continue;
+        LOG("%s: DT_INIT +%#llx（init_array %llu 项）", m->name,
+            (unsigned long long)m->init, (unsigned long long)(m->init_arraysz / 8));
+        ((void (*)(void))(m->base + m->init))();
+    }
+}

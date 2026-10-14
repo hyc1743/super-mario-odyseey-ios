@@ -656,3 +656,89 @@ gcc -O2 -Wall -Wextra -Werror -o /tmp/loader_selftest smo/host/loader_core.c smo
 ```
 
 真实产物四个模块的强断言（门 139、交宿主 20–60 个名字）只在跑真实集合时才生效。
+
+---
+
+# 第九轮：内核层清单 + HLE 接管表 + 宿主骨架（Apple 侧）
+
+## 2.32 内核层的确切清单：106 个 svc 号
+
+从改写产物 `work/rewrite/*.gates.tsv` 里直接读出 SMO 用到的 svc 号（这是**权威**的，不是估的）：
+
+```
+sdk：106 个不同的 svc 号，覆盖 #0x01–#0x7f，每个恰好 1 个调用点
+     （即 SDK 给每个裸系统调用包了一个包装函数）
+rtld：4 个（#0x06 / #0x26 / #0x27 / #0x28）—— 装载器自己用的
+cntpct：29 处，目标寄存器 x0 ×12、x8 ×6、x20 ×8、x21 ×2、x23 ×1
+     （⇒ 门必须回读任意通用寄存器，entry.S 里 x0..x29 全回读不是保守，是必需）
+```
+
+**注意**：106 个 svc **都被改写**（改写器不看可达性），但不都被**执行**。所以宿主的做法与参考项目一致：
+核心的几个（内存、线程、同步、计时、调试输出）认真实现，其余接到**会响的桩**上，
+真机日志里出现哪一行就是下一批要补的。这比"照单全写 106 个"现实得多。
+
+## 2.33 服务进程清单（游戏自己声明的）
+
+`main.npdm`（magic `META`，类型 `Application`）里列着 SMO 请求的服务名，共 33 个：
+
+```
+acc:u0  aoc:u  appletOE  audin:u  audout:u  audren:u  banana  bcat:u  bsd:u  bsdcfg
+caps:su  csrng  friend:u  fsp-srv  htc:tenv  htcs  hwopus  ldn:u  ldr:ro  mii:u  mm:u
+nfc:mf:u  nfc:user  nfp:user  nifm:u  nsd:u  nvdrv  pctl  pl:u  prepo:u  sfdnsres
+time:u  vi:u
+```
+
+几个值得记下来的：
+- **`nvdrv`**：游戏直接要 NVIDIA 驱动服务 —— 与 §2.25 里 `NvRmChannel*/NvRmStream*` 被 main 直接引入相互印证
+- **`audren:u`**：音频渲染器（对应 nn::audio 那 106 个 import）
+- **`hwopus`**：Opus 解码（过场/语音）
+- **`fsp-srv` / `vi:u` / `acc:u0` / `friend:u` / `nfp:user` / `bsd:u`**：文件系统、显示、账号、好友、amiibo、socket
+- **`banana`**：Nintendo 内部服务名（保留观察）
+
+入口符号：**`nnMain`@0x536f90**（`_init`@0x24 是模块初始化，与参考项目的 DT_INIT 处理一致）。
+
+## 2.34 HLE 强制接管表：446 条（自动生成）
+
+`smo/tools/gen_hle_force.py` 从 `smo/data/hle_imports.tsv` 生成 `smo/host/hle_force_gen.c`：
+
+| 家族 | 条数 | | 家族 | 条数 |
+|---|---|---|---|---|
+| nn::audio | 212 | | nn::sf | 46 |
+| nn::hid | 106 | | nn::fs | 42 |
+| nn::socket | 94 | | nn::oe | 40 |
+| nn::fontll | 48 | | nn::account | 38 |
+| nn::ssl | 46 | | nn::nfp | 26 |
+
+**为什么这 446 条必须"强制"接管**（即使 sdk 模块里有定义）：SDK 的客户端实现要走 IPC
+（cmif/hipc）到真实的服务进程，而宿主里没有那些进程。这就是 §2.29 那个数字差的来源：
+装载器报"交宿主 import"只有 25 个，而这 446 个是被 sdk 导出的、走跨模块解析的那一批。
+
+生成器踩的两个坑（都已写进注释）：
+1. 头部模板里 `LOG("…%s…")` 的 `%s` 被 Python 的 `%` 格式化吃了 ⇒ 改用字符串替换；
+2. 筛选口径写错（只筛了「宿主接管」前缀）⇒ 只生成出 3 条（nv::*），漏掉了 443 条
+   「模块内(服务客户端，仍需接管)」。现在按「含"服务客户端" or 宿主接管/网络前缀 or 家族是 nv」筛。
+
+## 2.35 宿主骨架（Apple 侧）
+
+| 文件 | 内容 | 验证状态 |
+|---|---|---|
+| `loader_core.c` | 装载核心（上一轮） | ✅ 真实产物上通过 |
+| `hle.c` + `hle_force_gen.c` | 接管表查询 + 记名桩（`UNIMPL <名字>`） | ✅ 本机 `-Werror` 编过 |
+| `entry.S` | 门公共入口（存 x0..x29/q0..q31/NZCV/FPSR/FPCR → `gate_dispatch` → 全回读，x18 不回读）+ 4096 个静态记名桩 + 客体线程起点 | ⏳ CI 编（macOS） |
+| `thread.c` | 四个线程槽（K18/KTLS/KTLR/KGATE）+ **TSD 布局自证**（`tpidrro_el0 + 8×键号`，不符就中止） | ⏳ CI 编 |
+| `loader_apple.c` | 映像分配与段权限。macOS 走 `mmap(MAP_JIT)` + `mprotect(RX)`；**iOS 那条（三段内嵌签名段 + `mach_vm_remap`）只留了接口与命名约定** | ⏳ CI 编 |
+| `main.c` | bootstrap：建线程键 → 装载 → 跑各模块 DT_INIT → 跳 `nnMain`（或 `--entry` 指定符号、`--list` 只装载） | ⏳ CI 编 |
+
+`Makefile` 提供 `make -C smo/host`（编宿主）、`test`（合成产物跑装载器自检）、`run`（真实产物只装载）。
+
+**明确没说到的**（下一步）：SDK 运行时的初始化顺序、iOS 的三段内嵌出包脚本、446 条服务的真实实现、
+NVN → Metal 图形层、前端。现在这些位置都是会响的桩，真机日志会告诉我们先卡在哪。
+
+## 2.36 CI 新增三项
+
+```
+① 编宿主里平台无关的那部分（hle.c / hle_force_gen.c），-Werror
+② 装载器自检（合成产物）——上一轮已加
+③ macOS 上 `make -C smo/host smo_host` —— 对 entry.S / thread.c / loader_apple.c / main.c 的真实检查
+④ gen_hle_force.py --check —— 生成的接管表必须与 import 清单一致（改了清单忘了重跑就红）
+```

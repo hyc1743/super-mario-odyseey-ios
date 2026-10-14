@@ -70,3 +70,7 @@ void parse_dynamic(module_t *m);
 void read_layout(module_t *m, const char *dir);
 void register_gates(module_t *m, const char *dir);
 unsigned dm_gate_count(void);
+void run_module_inits(void);
+void host_thread_keys_create(void);
+void guest_thread_init(void);
+void unimpl_report(void);
