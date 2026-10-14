@@ -54,25 +54,33 @@ jobs:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
           # MARKETING_VERSION（CFBundleShortVersionString 只允许数字与点，脚本里会归化）
           SMO_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.1.0' }}
-        run: bash smo/ios/shell_build.sh
-      - name: 失败时把构建日志传上来
+          SMO_DEBUG: 1            # 构建脚本 set -x：日志里能看出卡在哪一条命令
+        # 整段输出同时写文件：GitHub 的运行日志要管理员权限才能下载，
+        # 而 check-run 的 annotations 是公开可读的，所以失败时把日志尾部发成注解（见下一步）
+        run: |
+          set -o pipefail
+          bash smo/ios/shell_build.sh 2>&1 | tee smo/ios/out_step.log
+      - name: 失败时把报错发成注解
+        # 注释：这是维护者/协作方在拿不到仓库管理员权限时，唯一能直接看到真实报错的通道
+        if: failure()
+        run: |
+          for f in smo/ios/out_step.log smo/ios/out/xcodebuild.log; do
+            [ -f "$f" ] || { echo "::error::缺少 $f"; continue; }
+            echo "===== $f 尾部 ====="
+            tail -30 "$f"
+            echo "===== error 行 ====="
+            grep -nE "error:|error |Error:|No such file|command not found|Traceback|✗|✘|Specification|invalid" "$f" | head -12 | while IFS= read -r l; do echo "::error::$l"; done
+            tail -12 "$f" | while IFS= read -r l; do echo "::error::[尾] $l"; done
+          done
+      - name: 失败时把日志传上来
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: xcodebuild-log
-          path: smo/ios/out/xcodebuild.log
+          name: 构建日志
+          path: |
+            smo/ios/out_step.log
+            smo/ios/out/xcodebuild.log
           if-no-files-found: warn
-      - name: 失败时把报错发成注解
-        # 注释：GitHub 的「运行日志」要仓库管理员才能下载，而 check-run 的
-        # annotations 是公开可读的 —— 把报错行发成注解，维护者/协作方就能直接看到真实原因
-        if: failure()
-        run: |
-          LOG=smo/ios/out/xcodebuild.log
-          [ -f "$LOG" ] || { echo "::error::没有 $LOG（构建脚本还没跑到 xcodebuild）"; exit 0; }
-          echo "===== xcodebuild 日志尾部 ====="
-          tail -25 "$LOG"
-          echo "===== error 行 ====="
-          grep -nE "error:|error " "$LOG" | head -10 | while IFS= read -r l; do echo "::error::$l"; done
       - name: 产物摘要
         if: success()
         run: |
