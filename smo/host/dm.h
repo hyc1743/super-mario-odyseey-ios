@@ -71,6 +71,19 @@ void read_layout(module_t *m, const char *dir);
 void register_gates(module_t *m, const char *dir);
 unsigned dm_gate_count(void);
 void run_module_inits(void);
+// ---- 平台层的页操作（loader_apple.c：mmap/mprotect；自检里用朴素实现）----
+void *dm_as_reserve(size_t size);            // 预留一段不可访问的客体地址空间
+void dm_as_protect(void *p, size_t n, int rw);   // rw=1 放开读写，0 收回
+void *dm_host_stack_top(void);               // 宿主线程栈（QueryMemory 回报栈用）
+size_t dm_host_stack_size(void);
+// ---- svc 层 ----
+void mem_init(void);
+int svc_dispatch(unsigned num, uint64_t *regs);   // 返回 0 = 处理了，-1 = 不是这一族
+uint64_t dm_app_pool(void);
+// 内存族的可观测读出口（诊断/自检用）
+uint64_t dm_guest_heap_base(void);
+uint64_t dm_guest_heap_cur(void);
+int dm_guest_heap_rejects(void);
 void host_thread_keys_create(void);
 void guest_thread_init(void);
 void unimpl_report(void);

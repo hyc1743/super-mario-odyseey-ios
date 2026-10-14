@@ -46,6 +46,10 @@ jobs:
         run: |
           gcc -O2 -Wall -Wextra -Werror -o /tmp/loader_selftest               smo/host/loader_core.c smo/host/tests/loader_selftest.c
           /tmp/loader_selftest work/synthetic sdk main
+      - name: 内核内存族单测（不需要游戏文件）
+        run: |
+          gcc -O2 -Wall -Wextra -Werror -Ismo/host -o /tmp/svc_selftest               smo/host/hle_svc.c smo/host/tests/svc_selftest.c
+          /tmp/svc_selftest
       - name: 检查自动生成的接管表与 import 清单一致
         run: python3 smo/tools/gen_hle_force.py --check
 

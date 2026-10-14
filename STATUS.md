@@ -742,3 +742,64 @@ NVN → Metal 图形层、前端。现在这些位置都是会响的桩，真机
 ③ macOS 上 `make -C smo/host smo_host` —— 对 entry.S / thread.c / loader_apple.c / main.c 的真实检查
 ④ gen_hle_force.py --check —— 生成的接管表必须与 import 清单一致（改了清单忘了重跑就红）
 ```
+
+---
+
+# 第十轮：内核内存族 svc（实现 + 单测 20 条断言）
+
+## 2.37 内存族做了什么（对应参考项目 `hle_svc.c`）
+
+`smo/host/hle_svc.c` 实现 Horizo n 内存族的 6 个系统调用，做法与参考项目一致：
+
+| svc | 名字 | 宿主做法 |
+|---|---|---|
+| 0x01 | SetHeapSize | 在预留块里按游戏要的大小放开/收回堆区读写；返回 `x1` = 堆基址 |
+| 0x02/0x03 | SetMemoryPermission / SetMemoryAttribute | 直接成功 |
+| 0x04 | MapMemory | **内容拷贝**模拟地址别名（SDK 建线程时把堆上的栈搬进栈区） |
+| 0x05 | UnmapMemory | 内容搬回源区 + 消登记 |
+| 0x06 | QueryMemory | 按分区/登记表回报区间（基址、大小、状态、权限） |
+
+地址空间模型：预留**一整块**（5 GB，只占地址不占内存）→ alias 512 MB / stack 256 MB /
+heap 从 +1 GB 处起 4 GB。状态码沿用参考项目的实测值：堆 = 5、栈/映射 = 0xB、空闲 = 0、代码 = 3。
+
+**两条从参考项目抄来的实测经验**（都写进注释了）：
+
+1. **应用内存池要报大一点**：游戏会把宿主报的总量**整块**设成自己的堆，再交给自己的分配器。
+   参考项目报 3 GB 时主堆只剩约 18 MB，出现「128 KB 请求返回空而原版代码不检查空指针就写」的崩；
+   他们改成 3285 MB + 512 MB。**SMO 的这个数还没在真机上量过** —— 代码里先沿用同一个数，
+   并用 `dm_app_pool()` 单独放一处，等真机日志再定。
+2. **QueryMemory 对宿主栈要回报整段栈**，不能回报「它所在的一页」：SDK 初始化主线程记录时拿
+   当时的 sp 查这里，之后 `nn::os::GetCurrentStackInfo` 会断言 sp 仍在那个区间内，不在就中止。
+   参考项目踩过（原因是宿主栈顶位置随环境变量长度移动），本项目照改。
+
+## 2.38 单测：20 条断言全过（本机 + CI，不需要游戏文件）
+
+`smo/host/tests/svc_selftest.c`，把平台页操作换成朴素实现（calloc + 空保护 + 假栈），
+于是同一份 `hle_svc.c` 能在 Windows/Linux 上跑：
+
+| 组 | 断言 |
+|---|---|
+| 分区 | 堆基址非 0、正好在预留块 +1 GB 处 |
+| SetHeapSize | 成功返回 0 且账本跟着走 |
+| **超池重试** | 超池返回 `0x10801`，**按 2 MB 递减重试后成功**（游戏启动就是这么重试的） |
+| MapMemory/Unmap | 内容往返一致、登记表进出正确、重复解除映射被拒（`0xD401`） |
+| 目标非法 | 不在 stack 区 → `0xDC01` |
+| QueryMemory | 堆=5、映射=0xB、空闲=0、**宿主栈回报整段**（大小 = 整段栈，不是一页） |
+
+```
+$ ./svc_selftest
+== 1. 地址空间分区 ==    ✅ ✅
+== 2. SetHeapSize ==     ✅ ✅
+== 3. 超出应用内存池… ==  ✅ ✅ ✅
+== 4. MapMemory/Unmap == ✅ ✅ ✅ ✅ ✅
+== 5. 目标非法 ==        ✅
+== 6. QueryMemory ==     ✅ ✅ ✅ ✅ ✅ ✅
+全部通过
+```
+
+## 2.39 还没做的（线程族与后面）
+
+- **线程族 svc**（`hle_thread.c` 的对应物）：`CreateThread`/`StartThread`/`WaitSynchronization`/
+  `ArbitrateLock`/事件与 `ProcessWideKey`… —— 参考项目那份 671 行，是下一块。
+  这一轮已经给它留好接口（`svc_thread()`，内存族不认识就转给它）。
+- SDK 初始化顺序、iOS 三段内嵌出包、446 条服务实现、NVN → Metal。

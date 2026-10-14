@@ -119,38 +119,8 @@ static uint64_t tick_192(void) {                       // 19.2 MHz
     return (host_ns() - g_t0_ns) * 192 / 10;           // ns → 19.2 MHz 计数
 }
 
-// ---- svc 层：先实现启动路径上真正要的这几个，其余接到会响的桩 ----
-static unsigned g_svc_seen[256];
-
-int svc_dispatch(unsigned num, uint64_t *regs) {
-    switch (num) {
-    case 0x1E:                                         // GetSystemTick
-        regs[0] = tick_192();
-        return 0;
-    case 0x27:                                         // OutputDebugString（游戏自己的日志，很有用）
-        LOG("客体日志: %s", (const char *)regs[0]);
-        return 0;
-    case 0x0B: {                                       // SleepThread（纳秒；负数/0 表示让出）
-        int64_t ns = (int64_t)regs[0];
-        if (ns > 0) {
-            struct timespec ts = { ns / 1000000000ll, ns % 1000000000ll };
-            nanosleep(&ts, NULL);
-        }
-        return 0;
-    }
-    case 0x01: case 0x02: case 0x03: case 0x04: case 0x05: case 0x06:
-        // SetHeapSize / SetMemoryPermission / SetMemoryAttribute / MapMemory / UnmapMemory / QueryMemory
-        // 这一族要等宿主的「客体地址空间预留 + 切块」做完（参考项目的 hle_svc.c，见 STATUS.md TODO）
-        if (!g_svc_seen[num]++) LOG("【待实现】svc #%#x 内存族（第 %u 号）第一次被调用", num, num);
-        regs[0] = 0x2A2;                               // 通用失败（与参考项目对没实现的调用一致）
-        return 0;
-    default:
-        if (num < 256 && !g_svc_seen[num]++)
-            LOG("【待实现】svc #%#x 第一次被调用（共 %u 个门已登记）", num, g_gate_n);
-        regs[0] = 0x2A2;
-        return 0;
-    }
-}
+// svc 实现在 hle_svc.c（内存族）与 hle_thread.c（线程族）；这里只做门分派
+int svc_dispatch(unsigned num, uint64_t *regs);
 
 // 门入口（entry.S 的 dm_gate 调进来）：ret = 门块的返回点，regs = 保存下来的 x0..x30
 uint64_t gate_dispatch(uint64_t ret, uint64_t *regs) {

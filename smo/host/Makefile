@@ -8,7 +8,7 @@
 CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
-SRC = loader_core.c loader_apple.c thread.c hle.c hle_force_gen.c main.c entry.S
+SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_force_gen.c main.c entry.S
 
 smo_host: $(SRC) dm.h hle.h
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS)
@@ -17,13 +17,18 @@ smo_host: $(SRC) dm.h hle.h
 loader_selftest: loader_core.c tests/loader_selftest.c dm.h
 	$(CC) $(CFLAGS) -o $@ loader_core.c tests/loader_selftest.c
 
-test: loader_selftest
+# 内核内存族的单测：不需要游戏文件，也不需要 Apple 平台
+svc_selftest: hle_svc.c tests/svc_selftest.c dm.h hle.h
+	$(CC) $(CFLAGS) -I. -o $@ hle_svc.c tests/svc_selftest.c
+
+test: loader_selftest svc_selftest
 	./loader_selftest work/synthetic sdk main
+	./svc_selftest
 
 run: smo_host
 	./smo_host work/rewrite rtld sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host loader_selftest
+	rm -f smo_host loader_selftest svc_selftest
 
 .PHONY: test run clean

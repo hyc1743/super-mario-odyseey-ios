@@ -17,6 +17,7 @@
 #include "dm.h"
 #include <sys/mman.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define PAGE 0x4000                      // Apple Silicon 16 KB 页
 
@@ -43,3 +44,18 @@ void dm_ro_protect(void *p, size_t n) {
     if (!a) return;
     if (mprotect(p, a, PROT_READ)) die("键页设只读失败");
 }
+
+// ---- 客体地址空间与宿主栈（内存族 svc 用）----
+
+void *dm_as_reserve(size_t size) {                    // 只占地址不占内存
+    void *p = mmap(NULL, size, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+}
+
+void dm_as_protect(void *p, size_t n, int rw) {
+    if (!n) return;
+    if (mprotect(p, n, rw ? (PROT_READ | PROT_WRITE) : PROT_NONE)) die("dm_as_protect(%p, %#zx, %d) 失败", p, n, rw);
+}
+
+void *dm_host_stack_top(void) { return pthread_get_stackaddr_np(pthread_self()); }
+size_t dm_host_stack_size(void) { return pthread_get_stacksize_np(pthread_self()); }
