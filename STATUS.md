@@ -25,6 +25,7 @@
 | NVN 接口层 469 个名字 | ✅ | `nvnLoadCProcs` → 461 个名字的机制已挖清（第十四轮） |
 | NVN 核心状态层 38 个实现 | ✅ 38 断言 | `nvn_core.c` / `nvn_state.c`（不写客体对象内存） |
 | 重放记账 + 管线键 | ✅ 16 断言 | `nvn_replay.c`（不含 Metal，用空后端测） |
+| 纹理块线性布局（尺寸 + 解交错） | ✅ 36 断言 + **真实贴图 123/123 对上** | `nvn_tex.c`（尺寸移植自 deko3d）；`tex_layout_check.py` 对 BNTX 记录逐张核对（第十九轮） |
 | 验证层 `smo/verify/` | ✅ 通过 12 · 跳过 2 | `regress.sh` 一条命令；NVN 不透明性 1012/1706 调用点 0 反例（第十八轮） |
 | **Metal 重放（真调 Metal）** | ❌ | 需 macOS / 真机 |
 | iOS 三段内嵌出包 | 🚧 | 生成 + 拼回校验已做（本机可验）；装载分支与 `-segprot` 待做 |
@@ -1482,3 +1483,108 @@ ld.exe: final link failed: file truncated
 | 2 | 收第三方：**deko3d**（zlib，纹理块线性布局尺寸算法）、**bcdec**（MIT，苹果 GPU 不支持 BC，必需不是优化） | Metal 纹理上传的前置 |
 | 3 | Metal 重放 | 剩下最大的一块 |
 | 4 | x18 跳转表那一类的动态等价 | 比较方式不同（比"是否到达同一目标地址"而非比寄存器） |
+
+---
+
+# 第十九轮：纹理块线性布局（Metal 的硬前置，本机就能验到底）
+
+## 2.83 先量清楚：游戏到底用了哪些贴图格式
+
+纹理层要做多少工作，取决于游戏**实际**用了什么。NVN 声明了 158 个 `NVNformat`，
+一个游戏只会用其中一小撮 —— 不能靠猜。
+
+贴图在哪（实测挖出来的链路）：
+
+```
+RomFS/**/*.szs → Yaz0 → SARC → *.bfres（magic FRES，v8）→ 内嵌 BNTX → BRTI（每张贴图）
+```
+
+并非每个 `.bfres` 都有 BNTX（只带模型/骨骼的就没有）。`smo/gfx/tools/bntx_survey.py`
+抽样 200 个 `.szs`（87 个带 BNTX，967 张贴图）：
+
+```
+BC4/UNORM   343  35.5%        block height（log2，GOB 为单位）
+BC1/SRGB    289  29.9%          2^0= 1 GOB:  20
+BC5/SNORM   245  25.3%          2^1= 2 GOB:  28
+BC3/SRGB     39   4.0%          2^2= 4 GOB: 143
+BC3/UNORM    24   2.5%          2^3= 8 GOB: 293
+ASTC_4x4     19   2.0%          2^4=16 GOB: 483
+RGBA8/SRGB    6   0.6%
+BC5/UNORM     2   0.2%        tile mode: 全部 0（块线性）；维度：全部 2D
+```
+
+**两条结论直接决定了工作量**：
+
+1. **BC 占 97.4%**。苹果 GPU 不支持 BC（它用 ASTC），所以 **bcdec 是必需项，不是优化** ——
+   这一条以前只是从参考项目抄来的说法，现在有了自己的实测数字。
+2. **block height 五档全都出现**（1/2/4/8/16 GOB）。所以尺寸算法里 `adjustTileSize`
+   那套「mip 变小时档位跟着降」的逻辑必须照搬，不能简化成固定档位。
+
+## 2.84 `nvn_tex.c`：尺寸算法移植自 deko3d，GOB 公式另有出处
+
+尺寸部分逐函数对位 deko3d 的 `source/dk_image.cpp`（zlib，只移植算法、不收录源码，
+出处与 zlib 义务写在文件头与 `smo/third_party/README.md`）：
+
+| deko3d | 本仓 |
+|---|---|
+| `pickTileSize` / `adjustTileSize` | `tex_pick_tile_size` / `tex_adjust_tile_size` |
+| `adjustMipSize` / `adjustBlockSize` | `tex_mip_size` / `tex_div_ceil` |
+| `alignLayerSize` | `tex_align_layer_size` |
+| `DkImageLayout::calcLevelOffset` | `nvn_tex_level_offset` |
+
+**deko3d 里没有的那一块**：GOB 内部 512 字节的重排公式。deko3d 不需要它 ——
+它把解交错交给 GPU（走 2D 引擎的 `dkCmdBufCopyImage`）。我们要在 CPU 侧解
+（Metal 只认行优先），所以公式取自 BNTX-Extractor 的 `swizzle.py`。
+
+GOB 的几何：**64 字节宽 × 8 行 = 512 字节**，内部位域是
+
+```
++256 ← x 的 bit5    +64×(0..3) ← y 的 bit1..2    +32 ← x 的 bit4
++16  ← y 的 bit0    +0..15     ← x 的 bit0..3
+```
+
+## 2.85 单测：不拿实现验自己
+
+36 条断言（`smo/gfx/nvn/tests/tex_selftest.c`，纯算术、不需要游戏文件与 Metal）。
+判据刻意选的是**独立性质**，而不是「和实现一致」那种同义反复：
+
+1. **GOB 内偏移必须是 0..511 的双射** —— 512 个 `(x,y)` 一一映射到 512 个字节，不重不漏。
+   这一条能抓住任何位域写错：漏一位必然碰撞，多一位必然越界。再配几个手算定点
+   （`(32,0)→256`、`(63,7)→511`）防住"整体平移"这种能保持双射的错误。
+2. **块线性地址与独立实现逐点一致** —— 测试里**另写一遍** `getAddrBlockLinear`
+   作对照（不复用被测函数），10560 个坐标全对。
+3. **解交错可逆** —— 按公式填入、再解出来，必须等于行优先原图；带 stride 的也测。
+4. **边界：宁可不解，也不越界读客体内存** —— 源不够/目标不够/空指针一律返回 0，不写半张。
+
+抓到一个真 bug：`tex_mip_size(128, 99)` 返回 16 而不是 1。C 里对 u32 右移 >= 32 位是
+**未定义行为**（x86 实际按 `level % 32` 移）。deko3d 不会遇到是因为它的 mip 数受
+`DkImageMaker` 校验，而我们的 mip 数来自客体 —— 一个坏值不该变成未定义行为。加了护栏。
+
+## 2.86 最硬的判据：拿游戏自己的贴图核对
+
+单测只能证明算法**自洽**，证明不了「算出来的大小和 Nintendo 工具链算的一样」。
+后者需要真实数据，而 BNTX 正好记着答案：每个 BRTI 块里有这张贴图**实际占用的字节数**
+（打包工具按真实布局算出来写进去的）。
+
+`smo/gfx/tools/tex_layout_check.py` 把 `nvn_tex.c` 编成动态库、用 ctypes 直接调
+（测的就是会进包的那份 C 代码，不是在 Python 里重写一遍），逐张比。抽样 40 个归档：
+
+```
+对上 123/123（100.0%），不一致 0
+```
+
+**找对字段的过程值得记**：一开始取 `+0x20`，结果所有样本都"差 +177120"这种离谱的量 ——
+这种全体偏差反而是好信号，说明不是算法错而是**取错字段**（真算法错会散落在特定形状上）。
+逐字段 dump 一遍，`+0x50` 处是 `0x3400` = 13312，正是我们算的 128×128 BC1/mips=8 的大小。
+改过来之后 123/123 全中。
+
+这是本机能做到的最强验证：**不需要 Metal、不需要真机**，却证明了尺寸算法与真机一致。
+已接进 `regress.sh`（抽样 150 个归档；`--all` 可跑全量）。
+
+## 2.87 下一步（纹理层）
+
+| # | 任务 | 依赖 |
+|---|---|---|
+| 1 | 收 bcdec，把 BC 块解成 RGBA | 本机可做可测（有 BC 测试向量） |
+| 2 | `nvnTexture*` / `nvnTextureBuilder*` 家族从记录桩换成真实现 | 本轮的布局算法 |
+| 3 | Metal 上传（零拷贝 MTLBuffer / 块线性解交错后上传） | 需要 macOS |

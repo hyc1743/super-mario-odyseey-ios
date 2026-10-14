@@ -54,6 +54,7 @@ The technical path is taken wholesale from [jhaizhou-ops/d2r-mobile](https://git
 | NVN interface layer (469 names) | ✅ unit-tested, mechanism fully mapped | `hle_nvn.c`, `nvn_table.c` (the `nvnLoadCProcs` → 461 names mechanism) |
 | NVN core state layer (38 implementations) | ✅ 38 assertions | `nvn_core.c`, `nvn_state.c` |
 | Replay bookkeeping + pipeline keys (no Metal) | ✅ 16 assertions | `nvn_replay.c` |
+| Texture block-linear layout (sizing + detiling, no Metal) | ✅ 36 assertions + **123/123 real textures match** | `nvn_tex.c` (sizing ported from deko3d); `tex_layout_check.py` checks each against the game's own BNTX records |
 | Verification layer (regression entry + design-premise check) | ✅ 12 pass · 2 skip | `smo/verify/regress.sh`; NVN opacity: **0 counterexamples** over 1012/1706 call sites |
 | **Metal replay (the half that actually calls Metal)** | ❌ not started (needs macOS / a device) | |
 | iOS three-segment embedding | 🚧 generator + verifier done (locally verifiable); loader branch and link flags pending | `gen_embed.py`, `check_embed.py` |

@@ -52,6 +52,7 @@ Switch 系统服务与图形接口。**自带游戏文件（bring your own game 
 | NVN 接口层（469 个名字） | ✅ 单测 + 机制挖清 | `hle_nvn.c`、`nvn_table.c`（`nvnLoadCProcs` → 461 个名字的机制） |
 | NVN 核心状态层（38 个实现） | ✅ 38 条断言 | `nvn_core.c`、`nvn_state.c` |
 | 重放记账 + 管线键（不含 Metal） | ✅ 16 条断言 | `nvn_replay.c` |
+| 纹理块线性布局（尺寸 + 解交错，不含 Metal） | ✅ 36 条断言 + **真实贴图 123/123 对上** | `nvn_tex.c`（尺寸算法移植自 deko3d）；`tex_layout_check.py` 对游戏自己的 BNTX 记录逐张核对 |
 | 验证层（回归总入口 + 设计前提核验） | ✅ 通过 12 · 跳过 2 | `smo/verify/regress.sh`；NVN 不透明性 1012/1706 调用点 **0 反例** |
 | **Metal 重放（真正调 Metal 的那一半）** | ❌ 未开始（需 macOS / 真机） | |
 | iOS 三段内嵌出包 | 🚧 生成 + 校验已做（本机可验）；装载分支与链接参数待做 | `gen_embed.py`、`check_embed.py` |
@@ -172,12 +173,14 @@ docs/            游戏文件准备、衍生内容说明
 - **hactool**（SciresM，MIT）：NSP/PFS0 解包的算法来源 —— `smo/tools/nsp_extract.py` 是逐行对照其实现写的（`docs/DERIVED.md` 有这条记录）。
 - **LLVM**（Apache-2.0 with LLVM exceptions）：反汇编。`smo/tools/rawdis.py` 把摊平映像包成最小 ELF 后交给 `llvm-objdump`，第十四轮能挖清 NVN 的真实机制靠的就是它。
 - **Capstone**（BSD-3）：指令解码（改写器的跳转表识别；`smo/tools/check_x18.py` 用它的读写集合区分 `x18` 与 `s18/d18`）。
+- **deko3d**（devkitPro，zlib）：纹理块线性布局的**尺寸算法**来源。我们没有收录它的源码，只把 `source/dk_image.cpp` 的那几个函数按 C 重写进 `smo/gfx/nvn/nvn_tex.c`（函数一一对位，文件头与 `smo/third_party/README.md` 标明出处与「这是移植」）。实测：按它算出的大小与游戏自己的 BNTX 记录逐张一致。
+- **BNTX-Extractor**（aboood40091）：GOB 内部 512 字节的重排公式（`swizzle.py` 的 `getAddrBlockLinear`）。deko3d 没有这个公式 —— 它把解交错交给 GPU，而我们要在 CPU 侧解。
 - **XcodeGen**（MIT）、**.NET**（MIT）：生成 Xcode 工程、跑 `dmsh_xlate`。
 - Python 侧：numpy、Pillow、zlib 等（见 `requirements.txt`）。
 
 **改写规则的来源（透明起见）**：`port_rewriter.py` 里那批「让游戏离线可跑」的改写规则，参考项目注明了来自社区的 **LFS Mod Offline Fix** 补丁，且他们也没有可靠的原始出处记录。我们沿用同一口径：**这一批规则的原始出处同样不可考**，我们只沿用它们并保留这个说明。
 
-**还计划用到的**（尚未收录，已记在 STATUS.md）：**deko3d**（devkitPro，zlib）的纹理布局尺寸算法（参考项目的 `nvn_tex.c` 即移植自它）、**bcdec**（iOrange，MIT/Unlicense）在 iOS 上把 BC 贴图解成非 BC 格式（苹果 GPU 不支持 BC），以及参考项目提到的用 **Unicorn** 做「改写前后等价性校验」的做法 —— 最后这条对我们的「每个结论都要有可复现证据」很有价值，打算纳入。
+**还计划用到的**（尚未收录，已记在 STATUS.md）：**bcdec**（iOrange，MIT/Unlicense）在 iOS 上把 BC 贴图解成非 BC 格式 —— 苹果 GPU 不支持 BC，而实测全部 4335 个 `.szs`（18290 张贴图）里 **96.6% 是 BC**（`smo/gfx/tools/bntx_survey.py --all`），所以这是必需项而不是优化，接 Metal 上传那一步就要收录。
 
 ## 贡献
 
