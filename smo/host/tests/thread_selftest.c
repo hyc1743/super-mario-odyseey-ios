@@ -37,7 +37,8 @@ void gate_register(uint64_t a, const char *k, int arg, uint64_t o) { (void)a; (v
 int svc_dispatch(unsigned num, uint64_t *regs) { (void)num; (void)regs; return -1; }
 
 static int fails;
-#define CHK(cond, msg) do { printf("  %s %s\n", (cond) ? "✅" : "【红】", msg); if (!(cond)) fails++; } while (0)
+// 注意：条件**只能求值一次**（见 fs_selftest.c 里的说明：求值两次会让带副作用的断言跑两遍）
+#define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); if (!_ok) fails++; } while (0)
 
 // 按 ABI 调一个 svc：regs[0..3] 进、regs[0..1] 出
 static uint64_t svc(unsigned num, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t *out1) {

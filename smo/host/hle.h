@@ -25,11 +25,14 @@ void unimpl_c(unsigned idx, const uint64_t *regs);
 unsigned unimpl_register(const char *name);
 void unimpl_report(void);
 
-// 宿主实现登记（当前阶段：只有生成的桩；真实现按家族逐个补进来）
-// 写法与参考项目一致：HLE(mangled, ret, cname, args...) 定义一个按名接管的函数
-#define HLE(mangled, ret, cname, ...)                          \
-    static ret cname(__VA_ARGS__);                             \
-    __attribute__((used)) static const hle_force_ent hle_reg_##cname = {mangled, (void *)cname, "HLE"}; \
-    static ret cname(__VA_ARGS__)
+// 宿主真实现登记：**优先于 hle_force_gen.c 里生成的桩**。
+// 各服务文件自己定义一张表并在 constructor 里登记（真实现按家族逐个补进来）：
+//   static const hle_impl_ent g_fs_impl[] = { {"<改编名>", (void*)h_fs_OpenFile, "fsp-srv → open(2)"}, ... };
+//   static void __attribute__((constructor)) fs_reg(void) { hle_impl_register(g_fs_impl, SMO_ARRAY_LEN(g_fs_impl)); }
+// hle.c 装载时会校验：每条真实现都必须在 hle_imports.tsv 生成的接管清单里（清单漏了就报红）。
+typedef struct { const char *name; void *fn; const char *why; } hle_impl_ent;
+void hle_impl_register(const hle_impl_ent *ents, unsigned n);
+unsigned hle_impl_count(void);
+#define SMO_ARRAY_LEN(a) ((unsigned)(sizeof(a) / sizeof((a)[0])))
 
 uint64_t dm_hle_force_lookup(const char *name);

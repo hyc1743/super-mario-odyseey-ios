@@ -32,7 +32,8 @@ void dm_ro_protect(void *p, size_t n) { (void)p; (void)n; }
 
 // 该文件里只用到内存族：把 hle_svc.c 之外的符号都挡掉
 static int fails;
-#define CHK(cond, msg) do { printf("  %s %s\n", (cond) ? "✅" : "【红】", msg); if (!(cond)) fails++; } while (0)
+// 注意：条件**只能求值一次**（见 fs_selftest.c 里的说明：求值两次会让带副作用的断言跑两遍）
+#define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); if (!_ok) fails++; } while (0)
 
 // QueryMemory 的输出缓冲：MemoryInfo(0x28) + PageInfo(0x18)
 static uint8_t mi[0x28];

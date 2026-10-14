@@ -8,7 +8,7 @@
 CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
-SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_force_gen.c main.c entry.S
+SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_force_gen.c main.c entry.S
 
 smo_host: $(SRC) dm.h hle.h
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS)
@@ -25,15 +25,20 @@ svc_selftest: hle_svc.c tests/svc_selftest.c dm.h hle.h
 thread_selftest: hle_thread.c tests/thread_selftest.c dm.h hle_thread.h
 	$(CC) $(CFLAGS) -I. -o $@ hle_thread.c tests/thread_selftest.c
 
-test: loader_selftest svc_selftest thread_selftest
+# fs 服务单测：自己造一棵 romfs 与一个存档目录，不需要游戏文件
+fs_selftest: hle_fs.c hle.c hle_force_gen.c tests/fs_selftest.c dm.h hle.h
+	$(CC) $(CFLAGS) -I. -o $@ hle_fs.c hle.c hle_force_gen.c tests/fs_selftest.c
+
+test: loader_selftest svc_selftest thread_selftest fs_selftest
 	./loader_selftest work/synthetic sdk main
 	./svc_selftest
 	./thread_selftest
+	./fs_selftest
 
 run: smo_host
 	./smo_host work/rewrite rtld sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host loader_selftest svc_selftest thread_selftest
+	rm -f smo_host loader_selftest svc_selftest thread_selftest fs_selftest
 
 .PHONY: test run clean

@@ -857,3 +857,43 @@ loader_selftest   装载器：真实产物上的强断言（本机）+ 合成产
 svc_selftest      内核内存族：20 条
 thread_selftest   内核线程族：15 条（真并发）
 ```
+
+---
+
+# 第十二轮：fs 服务（26 个函数，单测 30 条断言）
+
+## 2.43 做了什么
+
+`smo/host/hle_fs.c`：真机上这些走 `fsp-srv` 服务进程，宿主直接接宿主文件系统。
+
+| 组 | 函数 |
+|---|---|
+| 挂载 | QueryMountRomCacheSize · MountRom · MountTemporaryStorage · EnsureSaveData · MountSaveData · Commit/CommitSaveData · Unmount |
+| 文件 | OpenFile · ReadFile（两种签名）· WriteFile · GetFileSize · SetFileSize · FlushFile · CloseFile · GetFileOpenMode |
+| 目录 | OpenDirectory · ReadDirectory · CloseDirectory · GetEntryType |
+| 改动 | CreateFile · DeleteFile · CreateDirectory · DeleteDirectoryRecursively · RenameFile |
+
+挂载名 → 宿主目录：`rom` → `$SMO_ROMFS`（只读）、`save` → `$SMO_SAVE`（事务式）、`temp` → `$SMO_TEMP`。
+路径形如 `rom:/System/Version.txt`；`DirectoryEntry` 布局按 Horizon ABI 逐字段对齐（0x310 字节，
+`_Static_assert` 钉住）；错误码按模块语义（`0x202` = PathNotFound、`0x402` = PathExists）。
+
+**存档做成事务式**（抄参考项目的设计）：挂载时把已提交版整树拷成工作目录，游戏的读写都落在工作目录；
+`Commit` 时把工作目录换成已提交版（Apple 上 `clonefile` + `renamex_np(RENAME_SWAP)` 原子换名；
+其它平台退化为「挪开旧版再换上新版」，代码里写明这是有窗口的退化）。
+
+## 2.44 单测 30 条断言（不需要游戏文件：自己造 romfs 与存档目录）
+
+除了常规读写，专门钉住了几件容易错的事：
+- **只读挂载上写入必须被拒**（拿写方式打开、建文件两条路径）
+- 不存在的文件返回 **0x202**（不是通用失败 —— 游戏会按它分支）
+- **DirectoryEntry 布局**：type 在 0x304、size 在 0x308，逐项校验
+- 存档事务：**提交之前已提交目录里看不到新文件**、提交之后能看到且内容一致
+
+## 2.45 一个把测试坑到自己的 bug：断言宏求值两次
+
+我的 `CHK(cond, msg)` 第一版写成 `printf(...(cond)...); if (!(cond)) ...` —— 条件**求值两次**，
+于是每个带副作用的断言都跑了两遍：日志成对出现、`ReadDirectory` 第二遍时游标已到底、
+`cnt` 被写成 0（我一度以为是目录读取实现坏了）。四个测试文件的宏都改成单次求值，
+并在注释里写明这个坑。
+
+**另外**：这个环境的 bash heredoc 会吃掉反斜杠（`\n` 变成真换行），写含 `\n` 的代码要用 edit 工具而不是 heredoc。

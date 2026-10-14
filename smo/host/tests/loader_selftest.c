@@ -59,7 +59,8 @@ int main(int argc, char **argv) {
     printf("  交宿主解析的 import：调用 %u 次，不同名字 %u 个\n", g_imports, g_import_uniq);
     printf("\n== 断言 ==\n");
     int bad = 0;
-#define CHK(cond, msg) do { printf("  %s %s\n", (cond) ? "✅" : "【红】", msg); if (!(cond)) bad = 1; } while (0)
+// 注意：条件**只能求值一次**（见 fs_selftest.c 里的说明：求值两次会让带副作用的断言跑两遍）
+#define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); if (!_ok) bad = 1; } while (0)
     CHK(g_nmod == nmods, "命令行给的模块都装载成功");
     CHK(g_gates_seen == dm_gate_count(), "门登记次数与门表一致");
     CHK(dm_gate_count() > 0, "至少登记了一个宿主门");

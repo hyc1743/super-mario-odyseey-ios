@@ -44,7 +44,36 @@ static void *g_fn[FORCE_CAP];
 static const char *g_nm[FORCE_CAP];
 static int g_force_ready;
 
+// ---- 真实现表：与生成的桩分开，查询时**优先** ----
+#define IMPL_CAP 2048
+static void *g_ifn[IMPL_CAP];
+static const char *g_inm[IMPL_CAP];
+static unsigned g_impl_n;
+
+static unsigned hash_slot(const char *name, unsigned cap) {
+    uint32_t h = 2166136261u;
+    for (const char *p = name; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+    return h & (cap - 1);
+}
+
+void hle_impl_register(const hle_impl_ent *ents, unsigned n) {
+    for (unsigned i = 0; i < n; i++) {
+        unsigned j = hash_slot(ents[i].name, IMPL_CAP);
+        while (g_inm[j]) {
+            if (!strcmp(g_inm[j], ents[i].name)) die("真实现重复登记：%s", ents[i].name);
+            j = (j + 1) & (IMPL_CAP - 1);
+        }
+        g_inm[j] = ents[i].name;
+        g_ifn[j] = ents[i].fn;
+        g_impl_n++;
+    }
+}
+unsigned hle_impl_count(void) { return g_impl_n; }
+
 uint64_t dm_hle_force_lookup(const char *name) {
+    // ① 真实现优先
+    for (unsigned j = hash_slot(name, IMPL_CAP); g_inm[j]; j = (j + 1) & (IMPL_CAP - 1))
+        if (!strcmp(g_inm[j], name)) return (uint64_t)(uintptr_t)g_ifn[j];
     if (!g_force_ready) {
         // 一遍装表：同名重复直接报错（清单写错要响亮，与参考项目一致）
         for (unsigned i = 0; i < g_hle_force_n; i++) {
@@ -59,7 +88,12 @@ uint64_t dm_hle_force_lookup(const char *name) {
             g_fn[j] = g_hle_force[i].fn;
         }
         g_force_ready = 1;
-        LOG("强制接管表：%u 条", g_hle_force_n);
+        // 真实现必须是强制接管清单的子集：不是的话说明清单漏了它（清单写错要响亮）
+        unsigned missing = 0;
+        for (unsigned j = 0; j < IMPL_CAP; j++)
+            if (g_inm[j] && !dm_hle_force_lookup(g_inm[j])) { LOG("【红】真实现不在接管清单里：%s", g_inm[j]); missing++; }
+        if (missing) die("有 %u 条真实现没登记在 hle_imports.tsv 生成的清单里", missing);
+        LOG("强制接管表：%u 条（其中真实现 %u 条）", g_hle_force_n, g_impl_n);
     }
     uint32_t h = 2166136261u;
     for (const char *p = name; *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
