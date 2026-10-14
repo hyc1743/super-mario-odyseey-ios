@@ -37,3 +37,9 @@ void nvn_host_sleep_us(unsigned us);
 
 // 名字 → 实现（hle_nvn.c 里的表；查不到返回 0，这是 NVN 的真实行为）
 nvn_fn nvn_lookup(const char *name);
+
+// 命令记录（Metal 重放的接缝）：记录桩与自检都用它
+uint64_t nvn_record_call(const char *name, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
+                         uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
+unsigned nvn_record_count(void);
+void     nvn_record_reset(void);

@@ -30,16 +30,16 @@ int main(void) {
     CHK(nvn_BootstrapLoader("") == 0, "空名字返回 0");
 
     printf("== 命令记录（Metal 重放的接缝）==\n");
+    // 直接测记录函数本身：早先这里拿 nvnDeviceBuilderSetDefaults 当「记录桩」的例子，
+    // 结果它后来被写成了真实现，测试就红了 —— 这种耦合要避免（实现清单会一直变）。
     nvn_record_reset();
-    nvn_fn fn = (nvn_fn)(uintptr_t)nvn_BootstrapLoader("nvnDeviceBuilderSetDefaults");
-    CHK(fn != (nvn_fn)0, "取到 nvnDeviceBuilderSetDefaults");
-    if (fn) {
-        fn(0x1234, 5, 6, 7, 0, 0, 0, 0);
-        fn(0x1234, 1, 2, 3, 0, 0, 0, 0);
-        CHK(nvn_record_count() == 2, "两次调用都进了记录");
-    }
+    nvn_record_call("nvnTestOne", 0x1234, 5, 6, 7, 0, 0, 0, 0);
+    nvn_record_call("nvnTestOne", 0x1234, 1, 2, 3, 0, 0, 0, 0);
+    CHK(nvn_record_count() == 2, "两次记录调用都进了记录");
     nvn_record_reset();
     CHK(nvn_record_count() == 0, "可以清空（每帧重放前清）");
+    nvn_fn some = (nvn_fn)(uintptr_t)nvn_BootstrapLoader("nvnDeviceSetDebugLabel");
+    CHK(some != (nvn_fn)0, "家族里还没手写的函数也能取到地址（此例 nvnDeviceSetDebugLabel）");
 
     printf("== 未实现入口 ==\n");
     unsigned long long before = nvn_unimpl_calls();
