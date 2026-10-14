@@ -29,7 +29,10 @@ case "$RAW" in
   [0-9]*.[0-9]*)      VERSION="$RAW" ;;
 esac
 echo "== shell: bash ${BASH_VERSION:-?} | RAW=[$RAW] VERSION=[$VERSION] =="
-echo "== 构建 SMOMobile 壳（版本 $VERSION，来源 '${RAW}'）=="
+# 注意：变量一律加花括号。macOS 自带的 bash 3.2 是多字节不安全的：
+# 「$VERSION，来源」里的全角逗号会被当成变量名的一部分（查 VERSION， → unbound），
+# 而本地 bash 5.x 是好的 —— 这个坑真实地把 CI 挂掉过，见 STATUS.md。
+echo "== 构建 SMOMobile 壳（版本 ${VERSION}，来源 '${RAW}'）=="
 sw_vers
 xcodebuild -version
 
@@ -74,7 +77,7 @@ xcodebuild \
 RC=$?
 set -e
 tail -40 "$LOG"
-[ $RC = 0 ] || { echo "🔴 xcodebuild 失败（完整日志在 $LOG）"; exit $RC; }
+[ $RC = 0 ] || { echo "🔴 xcodebuild 失败（完整日志在 ${LOG}）"; exit $RC; }
 
 APP=$(find Gen/dd/Build/Products -maxdepth 3 -name 'SMOMobile.app' -type d | head -1)
 [ -n "$APP" ] || { echo "没找到 SMOMobile.app"; exit 1; }
