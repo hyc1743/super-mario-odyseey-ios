@@ -368,3 +368,61 @@ Ryujinx 排法写**，再把 `word3` 的 OutputTopology 填成 `TriangleStrip`�
 - **facts（贴图类型/格式、顶点属性类型、片元输出类型、计算线程组大小）**：参考项目从 PC 版的反射
   里取，SMO 没有 PC 版 —— 这些要从 `.sharc` 的定义（`SAMPLING_TYPE` 等 `#define`、UBO 成员）
   自己推。这是这条链剩下的主要工作。
+
+---
+
+# 第四轮：着色器全量翻译通过（8281 → 8269，0 失败）
+
+## 2.13 blob 布局定下来了
+
+```
++0x00  u32 0x12345678        槽位标记
++0x04  0x2C 字节              （实测全零）
++0x30  SPH 0x50 字节          标准 Maxwell 着色器程序头
++0x80  Maxwell 机器码          到下一个标记为止
+```
+
+**SPH 原样喂给翻译器即可**（`dmsh_xlate` 要的就是「SPH + 指令」）：不需要合成 SPH，也不需要 `c1`。
+对应工具：`smo/tools/sharcb.py`。
+
+## 2.14 一次栽跟头：Ryujinx 的 ShaderStage 枚举从 0 起
+
+我按「Vertex=0」去解 SPH 的 stage 位，得到一堆非法值，白折腾了两轮。实测映射（逐个取值试出来的）：
+
+| SPH bit[10:13] | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| Ryujinx 解出 | Vertex | TessCtrl | TessEval | Geometry | Fragment |
+
+原因是 Ryujinx 的枚举是 `Compute=0, Vertex=1, TessellationControl=2, TessellationEvaluation=3,
+Geometry=4, Fragment=5`（`Compute` 在最前面）。所以 **Nintendo 的 SPH 本来就是标准格式**，
+blob0/5 的 stage=1（顶点）、其余 stage=5（片元）。
+
+## 2.15 全量结果
+
+`sharcb.py` 从 21 个 `*.sharcb` 里取出 **8281 个着色器**（181 顶点 / 8097 片元 / 3 几何），
+去重后 **8269 个唯一键**（12 个是内容完全相同的变体），全部经 `dmsh_xlate` 译成 SPIR-V：
+
+```
+8 片并行，每片 1036 个作业：全部「1036 成功，0 失败」
+```
+
+**语义逐条对上了**（拿 `.sharc` 里内嵌的 GLSL 源码当判据）：
+
+| 译出的 MSL | 对应 GLSL |
+|---|---|
+| 顶点：`out.m_21.xy = in.m_18.xy;`（vTexCoord = aTexCoord1）<br>`gl_Position.xy = aPosition.xy * 2.0` | `alHalfResBuffer.glsl` 的 `VERTEX_SHADER_QUAD_TRIANGLE__CALC_POS_TEX` 宏 |
+| 片元：`fp_t_tcb_8.sample(...)` → `out.m_26 = _36`<br>采样坐标前一串 `1/gl_FragCoord.w × (v × w)` 的透视插值 | `oColor = texture(uSrcTex, vTexCoord)`，且 SPH 的 imap X/Y = 2 = Perspective ✓ |
+| 片元：`gather(` + `[[depth]]` | `GATHER_DEPTH_MAX / MIN / AVG`（`textureGather`）✓ |
+| 片元：`[[color]]` + `[[depth]]` | `IS_OUT_LINEAR == 1` 时输出 `oLinearDepth` ✓ |
+
+`.szs` 里还有 7 个 `.bfsha`（单文件，没有 `.sharc`/`.sharcb` 对）—— 还没处理，是同类归档的另一种打包。
+
+## 2.16 还没做的两件事
+
+1. **facts（贴图维度类型 / 格式、顶点属性类型、片元输出类型、计算线程组大小）**：
+   参考项目从 **PC 版**的反射里取，SMO 没有 PC 版。现在的翻译按缺省值走（`Texture2D` +
+   `R8G8B8A8Unorm`），所以**语义对、细节待定**。取法有两条，都要做：
+   - 从 `.sharc` 定义里推：`SAMPLING_TYPE` 等 `#define`、UBO 成员类型、着色器名
+   - 真机跑一遍，把宿主实际看到的管线状态（贴图格式、属性布局）dump 出来，回头重出着色器库
+2. **metallib**：Windows 上没有 Apple 的 Metal 编译器。按参考项目的 NO_XCODE 路线：
+   MSL 源码进包，首次启动在手机上编译一次（系统会缓存）。

@@ -48,3 +48,6 @@ Thumbs.db
 bin/
 obj/
 *.nupkg
+
+# PI（本机代理）的内部配置
+.pi/
