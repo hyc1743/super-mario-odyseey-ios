@@ -12,6 +12,8 @@
 #include "../hle_thread.h"
 #include <assert.h>
 #include <sched.h>
+#include <time.h>
+#include <unistd.h>
 
 module_t g_mod[MAX_MOD];
 int g_nmod;
@@ -35,6 +37,20 @@ void dm_code_protect(void *p, size_t n) { (void)p; (void)n; }
 void dm_ro_protect(void *p, size_t n) { (void)p; (void)n; }
 void gate_register(uint64_t a, const char *k, int arg, uint64_t o) { (void)a; (void)k; (void)arg; (void)o; }
 int svc_dispatch(unsigned num, uint64_t *regs) { (void)num; (void)regs; return -1; }
+
+// 等到条件成立或超时。**不能按固定次数空转**：CI 的 runner 比本机慢得多，
+// 固定次数的 sched_yield 跑不完并发用例（第一次上 CI 就是这么红的）。
+static int wait_flag(volatile int *flag, int seconds) {
+    struct timespec t0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    while (!*flag) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (now.tv_sec - t0.tv_sec >= seconds) return 0;
+        usleep(200);
+    }
+    return 1;
+}
 
 static int fails;
 // 注意：条件**只能求值一次**（见 fs_selftest.c 里的说明：求值两次会让带副作用的断言跑两遍）
@@ -79,7 +95,9 @@ static void cond_waiter(void *arg) {
 }
 static void cond_signaler(void *arg) {
     (void)arg;
-    for (int i = 0; i < 100000 && !g_cond_woken; i++) sched_yield();
+    // 等到确实有线程在等这个条件键，再 signal（确定时序）。
+    // 不能写「等 g_cond_woken」—— 那是等自己被唤醒，直接死锁（我把这里改错过一次）。
+    for (int waited = 0; waited < 50000 && dm_thread_waiting(2) == 0; waited++) usleep(200);
     svc(0x1D, (uint64_t)(uintptr_t)&g_cond_key, 1, 0, 0, NULL);             // SignalProcessWideKey
     exit_thread();
 }
@@ -140,21 +158,21 @@ int main(void) {
     g_ev_w = (uint32_t)hw; g_ev_r = (uint32_t)hr;
     { uint64_t r[6] = {0}; r[1] = (uint64_t)(uintptr_t)ev_waiter; r[2] = 0; r[3] = (uint64_t)(uintptr_t)(g_fake_stack + sizeof g_fake_stack); r[4] = 16;
       svc_thread(0x08, r); svc(0x09, r[1], 0, 0, 0, NULL); }
-    for (int i = 0; i < 10000000 && !g_entered; i++) sched_yield();
+    wait_flag((volatile int *)&g_entered, 20);
     CHK(g_entered > 0, "客体线程跑起来了（CreateThread+StartThread）");
     svc(0x11, hw, 0, 0, 0, NULL);                                 // SignalEvent
-    for (int i = 0; i < 1000000 && !g_ev_woken; i++) sched_yield();
+    wait_flag((volatile int *)&g_ev_woken, 20);
     CHK(g_ev_woken, "WaitSynchronization 被 SignalEvent 唤醒，返回下标 0");
 
     printf("== 2. 地址仲裁 ==\n");
     g_addr_word = 0;
     { uint64_t r[6] = {0}; r[1] = (uint64_t)(uintptr_t)addr_waiter; r[3] = (uint64_t)(uintptr_t)(g_fake_stack + sizeof g_fake_stack);
       svc_thread(0x08, r); svc(0x09, r[1], 0, 0, 0, NULL); }
-    for (int i = 0; i < 10000000 && dm_thread_waiting(3) == 0; i++) sched_yield();
+    for (int waited = 0; waited < 50000 && dm_thread_waiting(3) == 0; waited++) usleep(200);
     CHK(dm_thread_waiting(3) > 0, "有线程正在 WaitForAddress 上等（时序确定）");
     g_addr_word = 1;                                   // 状态先进字里（协议的一半）
     CHK(svc(0x35, (uint64_t)(uintptr_t)&g_addr_word, 0, 0, 0, NULL) == 0, "SignalToAddress 成功");
-    for (int i = 0; i < 1000000 && !g_addr_woken; i++) sched_yield();
+    wait_flag((volatile int *)&g_addr_woken, 20);
     CHK(g_addr_woken, "WaitForAddress 被唤醒");
 
     printf("== 3. 争锁互斥（两线程各 2000 次）==\n");
@@ -167,7 +185,7 @@ int main(void) {
         svc_thread(0x08, r);
         svc(0x09, r[1], 0, 0, 0, NULL);
     }
-    for (int i = 0; i < 20000000 && g_counter < 4000; i++) sched_yield();
+    for (int waited = 0; waited < 300000 && g_counter < 4000; waited++) usleep(200);
     CHK(g_counter == 4000, "两次共 4000 次自增都完成了");
     CHK(g_exclusive_violations == 0, "临界区没有重叠（锁的交接正确）");
     CHK(g_lock_word == 0, "全部解锁后锁字回到 0");
@@ -182,7 +200,7 @@ int main(void) {
         svc_thread(0x08, r);
         svc(0x09, r[1], 0, 0, 0, NULL);
     }
-    for (int i = 0; i < 10000000 && !g_cond_woken; i++) sched_yield();
+    wait_flag((volatile int *)&g_cond_woken, 20);
     CHK(g_cond_woken, "等者被 SignalProcessWideKey 唤醒");
 
     printf("== 5. 超时口径 ==\n");
@@ -191,7 +209,7 @@ int main(void) {
     svc(0x12, hr, 0, 0, 0, NULL);                           // ClearEvent 清掉
     { uint64_t r[6] = {0}; r[1] = (uint64_t)(uintptr_t)timeout_waiter; r[3] = (uint64_t)(uintptr_t)(g_fake_stack + sizeof g_fake_stack);
       svc_thread(0x08, r); svc(0x09, r[1], 0, 0, 0, NULL); }
-    for (int i = 0; i < 10000000 && !g_timeout_seen; i++) sched_yield();
+    wait_flag((volatile int *)&g_timeout_seen, 20);
     CHK(g_timeout_seen, "没人触发时 WaitSynchronization 返回超时 0xEA01");
 
     printf("== 6. CloseHandle ==\n");

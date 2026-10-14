@@ -17,9 +17,7 @@ void host_thread_keys_create(void);
 void guest_thread_init(void);
 extern void dm_jump_guest(void *arg, void *fn);
 
-// 客体线程从入口返回 = 违反 Horizon 语义（必须 ExitThread），报告出来
-void dm_thread_returned(void) { LOG("【红】客体线程从入口返回了（Horizon 要求经 ExitThread 退出）"); }
-
+// dm_thread_returned 由 hle_thread.c 提供（客体线程入口返回 = 违反 Horizon 语义）
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : "work/rewrite";
     static const char *defmods[] = {"rtld", "sdk", "subsdk0", "main"};
