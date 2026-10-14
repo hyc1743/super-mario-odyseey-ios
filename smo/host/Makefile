@@ -8,7 +8,7 @@
 CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
-SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_oe.c hle_hid.c hle_force_gen.c hle_nvn_reg.c main.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c
+SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_oe.c hle_hid.c hle_force_gen.c hle_nvn_reg.c main.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c
 INC = -I. -I../gfx/nvn
 
 smo_host: $(SRC) dm.h hle.h
@@ -21,6 +21,10 @@ nvn_iface_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_s
 # NVN 核心家族状态层单测（设备/池/缓冲/同步/采样器/程序）
 nvn_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/tests/nvn_core_selftest.c
 	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/tests/nvn_core_selftest.c
+
+# 着色器索引单测（合成自检；真实数据用命令行给索引与 blob）
+shader_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/tests/shader_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/tests/shader_selftest.c
 
 # 装载器自检只用平台无关的那部分（本机也能编，见 smo/host/tests/loader_selftest.c）
 loader_selftest: loader_core.c tests/loader_selftest.c dm.h
@@ -42,7 +46,7 @@ fs_selftest: hle_fs.c hle.c hle_force_gen.c tests/fs_selftest.c dm.h hle.h
 oehid_selftest: hle_oe.c hle_hid.c hle.c hle_force_gen.c tests/oehid_selftest.c dm.h hle.h dm_input.h dm_oe.h
 	$(CC) $(CFLAGS) -I. -o $@ hle_oe.c hle_hid.c hle.c hle_force_gen.c tests/oehid_selftest.c
 
-test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest
+test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest
 	./loader_selftest work/synthetic sdk main
 	./svc_selftest
 	./thread_selftest
@@ -50,11 +54,12 @@ test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nv
 	./oehid_selftest
 	./nvn_iface_selftest
 	./nvn_selftest
+	./shader_selftest
 
 run: smo_host
 	./smo_host work/rewrite rtld sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest
+	rm -f smo_host loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest
 
 .PHONY: test run clean

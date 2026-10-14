@@ -16,3 +16,16 @@ static const hle_impl_ent g_nvn_impl[] = {
 static void __attribute__((constructor)) nvn_reg(void) {
     hle_impl_register(g_nvn_impl, sizeof g_nvn_impl / sizeof g_nvn_impl[0]);
 }
+
+// 着色器索引：把离线译好的 18470 个着色器编成的索引载进来（nvnProgramSetShaders 要按它查）。
+// 路径优先取环境变量 SMO_SHADER_IDX（真机调试方便），否则取工作目录下的 shaders.idx。
+// 索引与 MSL 都是**从游戏着色器派生出来的**，所以不进仓库：由使用者在本机用
+// smo/gfx/shader_index.py 生成（见 docs/GAME_FILES.md）。
+#include "../gfx/nvn/nvn_shader.h"
+#include <stdlib.h>
+static void __attribute__((constructor)) nvn_shader_reg(void) {
+    const char *p = getenv("SMO_SHADER_IDX");
+    if (!p) p = "shaders.idx";
+    int n = nvn_shader_load(p);
+    if (n < 0) LOG("着色器索引没载入（%s）—— SetShaders 会全部未命中，先跑 smo/gfx/shader_index.py", p);
+}

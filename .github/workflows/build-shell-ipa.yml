@@ -70,6 +70,10 @@ jobs:
         run: |
           gcc -O2 -Wall -Wextra -Werror -Ismo/host -Ismo/gfx/nvn -o /tmp/nvn_core_selftest smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/tests/nvn_core_selftest.c 2>&1 | tee -a /tmp/selftests.log
           /tmp/nvn_core_selftest 2>&1 | tee -a /tmp/selftests.log
+      - name: 着色器索引单测（运行时算的键必须与离线一致）
+        run: |
+          gcc -O2 -Wall -Wextra -Werror -Ismo/host -Ismo/gfx/nvn -o /tmp/shader_selftest smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/nvn_shader.c smo/gfx/nvn/tests/shader_selftest.c 2>&1 | tee -a /tmp/selftests.log
+          /tmp/shader_selftest 2>&1 | tee -a /tmp/selftests.log
       - name: 图形入口必须在接管清单里（否则游戏拿不到任何 NVN 函数）
         run: |
           if ! grep -q 'nvnBootstrapLoader' smo/host/hle_force_gen.c; then
