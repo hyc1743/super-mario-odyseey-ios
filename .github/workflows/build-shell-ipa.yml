@@ -64,7 +64,7 @@ jobs:
           /tmp/oehid_selftest 2>&1 | tee -a /tmp/selftests.log
       - name: NVN 接口层单测（按名取函数与命令记录，不需要游戏文件）
         run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/gfx/nvn -o /tmp/nvn_selftest               smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/tests/nvn_selftest.c
+          gcc -O2 -Wall -Wextra -Werror -Ismo/host -Ismo/gfx/nvn -o /tmp/nvn_selftest smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/tests/nvn_selftest.c 2>&1 | tee -a /tmp/selftests.log
           /tmp/nvn_selftest 2>&1 | tee -a /tmp/selftests.log
       - name: NVN 核心家族状态层单测（设备/池/缓冲/同步/采样器/程序）
         run: |

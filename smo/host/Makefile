@@ -15,8 +15,8 @@ smo_host: $(SRC) dm.h hle.h
 	$(CC) $(CFLAGS) $(INC) -o $@ $(SRC) $(LDFLAGS)
 
 # NVN 图形层单测：接口层（按名取函数 + 命令记录）
-nvn_iface_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/tests/nvn_selftest.c
-	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/tests/nvn_selftest.c
+nvn_iface_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/tests/nvn_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/tests/nvn_selftest.c
 
 # NVN 核心家族状态层单测（设备/池/缓冲/同步/采样器/程序）
 nvn_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/tests/nvn_core_selftest.c
