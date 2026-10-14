@@ -97,6 +97,12 @@ jobs:
           sw_vers
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
+      - name: Metal 探测（runner 有没有可用 GPU —— 决定 Metal 层能不能在 CI 上验）
+        run: |
+          set -o pipefail
+          xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation \
+              -o /tmp/metal_probe smo/ios/tools/metal_probe.m
+          /tmp/metal_probe
       - name: 编译宿主（macOS：entry.S / thread.c / loader_apple.c / main.c 的真实检查）
         run: |
           set -o pipefail
