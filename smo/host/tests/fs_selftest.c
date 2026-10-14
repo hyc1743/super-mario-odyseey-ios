@@ -47,6 +47,14 @@ typedef uint32_t (*fn_create)(const char *, int64_t);
 
 #define GET(cname) ((void *)dm_hle_force_lookup(cname))
 
+// 路径拼接：gcc 的 -Wformat-truncation 对「未知长度的 %s」会警告（-Werror 下就是编译失败，
+// Linux 上第一次 CI 就是这么红的），所以拼进 helper 里显式检查。
+static void jp(char *out, size_t n, const char *a, const char *b, const char *c) {
+    int k = snprintf(out, n, "%s%s%s", a, b, c ? c : "");
+    if (k < 0 || (size_t)k >= n) { printf("路径太长
+"); exit(2); }
+}
+
 static void mkfile(const char *p, const char *data) {
     FILE *f = fopen(p, "wb");
     if (!f) { printf("  【红】建文件失败 %s\n", p); fails++; return; }
@@ -57,12 +65,12 @@ static void mkfile(const char *p, const char *data) {
 int main(void) {
     const char *tmp = getenv("TEMP") ? getenv("TEMP") : "/tmp";
     char rom[512], save[512], temp[512], p[600];
-    snprintf(rom, sizeof rom, "%s/smo_fs_test/rom", tmp);
-    snprintf(save, sizeof save, "%s/smo_fs_test/save", tmp);
-    snprintf(temp, sizeof temp, "%s/smo_fs_test/temp", tmp);
+    jp(rom, sizeof rom, tmp, "/smo_fs_test/rom", NULL);
+    jp(save, sizeof save, tmp, "/smo_fs_test/save", NULL);
+    jp(temp, sizeof temp, tmp, "/smo_fs_test/temp", NULL);
     // 先清干净：不清的话上一轮留下的文件会让 CreateFile 报 EEXIST、目录项数也多出来
     //（我第一次跑就是踩了这个：实现是对的，测试不可重入）
-    snprintf(p, sizeof p, "%s/smo_fs_test", tmp);
+    jp(p, sizeof p, tmp, "/smo_fs_test", NULL);
 #ifdef __MINGW32__
     { char cmd[700]; snprintf(cmd, sizeof cmd, "rmdir /s /q \"%s\" >NUL 2>NUL", p); system(cmd); }
 #else
@@ -73,11 +81,11 @@ int main(void) {
     SMO_MKDIR_TEST(rom);
     SMO_MKDIR_TEST(save);
     SMO_MKDIR_TEST(temp);
-    snprintf(p, sizeof p, "%s/System", rom);
+    jp(p, sizeof p, rom, "/System", NULL);
     SMO_MKDIR_TEST(p);
     char f1[2048], f2[2048];
-    snprintf(f1, sizeof f1, "%s/Version.txt", p);
-    snprintf(f2, sizeof f2, "%s/data.bin", p);
+    jp(f1, sizeof f1, p, "/Version.txt", NULL);
+    jp(f2, sizeof f2, p, "/data.bin", NULL);
     mkfile(f1, "SMO-1.0.0");
     mkfile(f2, "0123456789");
 
@@ -157,7 +165,7 @@ int main(void) {
     CHK(((fn_open)GET("_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci"))(&sh, "save:/save.dat", 2) == 0, "以写方式打开");
     CHK(((fn_write)GET("_ZN2nn2fs9WriteFileENS0_10FileHandleElPKvmRKNS0_11WriteOptionE"))(sh, 0, "SAVEDATA", 8, NULL) == 0, "写入");
     ((fn_close)GET("_ZN2nn2fs9CloseFileENS0_10FileHandleE"))(sh);
-    snprintf(p, sizeof p, "%s/save.dat", save);
+    jp(p, sizeof p, save, "/save.dat", NULL);
     FILE *chk = fopen(p, "rb");
     CHK(chk == NULL, "提交之前，已提交目录里看不到新文件（写落在工作目录）");
     if (chk) fclose(chk);

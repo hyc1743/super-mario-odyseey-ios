@@ -56,7 +56,7 @@ jobs:
           /tmp/thread_selftest 2>&1 | tee -a /tmp/selftests.log
       - name: fs 服务单测（自己造 romfs 与存档，不需要游戏文件）
         run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/host -o /tmp/fs_selftest               smo/host/hle_fs.c smo/host/hle.c smo/host/hle_force_gen.c smo/host/tests/fs_selftest.c
+          gcc -O2 -Wall -Wextra -Werror -Ismo/host -o /tmp/fs_selftest               smo/host/hle_fs.c smo/host/hle.c smo/host/hle_force_gen.c smo/host/tests/fs_selftest.c 2>&1 | tee -a /tmp/selftests.log
           /tmp/fs_selftest 2>&1 | tee -a /tmp/selftests.log
       - name: oe + hid 服务单测（环境查询与输入布局）
         run: |
