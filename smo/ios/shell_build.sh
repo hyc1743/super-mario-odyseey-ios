@@ -11,6 +11,7 @@
 #                —— 注意会做合法性归化：CFBundleShortVersionString 只允许「数字 + 点」，
 #                   传 git SHA 进来（CI 在分支推送时会这么传）也自动回落到 0.1.0
 set -euo pipefail
+[ -n "${SMO_DEBUG:-}" ] && set -x      # CI 上开：日志里能看到死在哪个命令
 cd "$(dirname "$0")"
 
 OUT=${SMO_OUT:-out}
@@ -36,8 +37,14 @@ SDK_PATH=$(xcrun --sdk iphoneos --show-sdk-path)
 SDK_VER=$(xcrun --sdk iphoneos --show-sdk-version)
 SDK_MIN=$(/usr/libexec/PlistBuddy -c "Print :MinimumDeploymentTarget" "$SDK_PATH/SDKSettings.plist" 2>/dev/null || true)
 [ -n "$SDK_MIN" ] || SDK_MIN=$SDK_VER
-PROJ_DEP=$(sed -n 's/^ *iOS: "\([0-9.]*\)".*/\1/p' project.yml | head -1)
-DEP=$(printf '%s\n%s\n' "${PROJ_DEP:-0}" "$SDK_MIN" | sort -V | tail -1)
+# 注意两个 macOS 坑（踩过）：
+#   1) BSD sort 不支持 -V（那是 GNU coreutils），用 awk 比版本号；
+#   2) 管道接 head -1 在 pipefail 下可能被 SIGPIPE 判失败，所以用 awk 「打印后立即 exit」。
+PROJ_DEP=$(awk -F'"' '/^ *iOS: "/{print $2; exit}' project.yml)
+DEP=$(awk -v a="${PROJ_DEP:-0}" -v b="$SDK_MIN" 'BEGIN{
+  na=split(a,x,"."); nb=split(b,y,".");
+  for(i=1;i<=3;i++){ xa=x[i]+0; yb=y[i]+0; if(xa>yb){print a; exit} if(yb>xa){print b; exit} }
+  print a }')
 echo "== 部署目标：工程写的 ${PROJ_DEP:-无}，SDK $SDK_VER 允许的最低 $SDK_MIN ⇒ 用 $DEP =="
 
 python3 tools/gen_icon.py
