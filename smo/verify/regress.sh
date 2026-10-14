@@ -132,6 +132,18 @@ else
   skip "NVN 对象不透明性" "缺 work/game/main.bin —— 先跑 nso_info.py --dump"
 fi
 
+# 纹理布局最硬的判据：拿游戏自己的贴图核对。BNTX 里记着工具链算出的实际字节数，
+# 我们的 nvn_tex.c 算一遍去比 —— 单测只能证明算法自洽，这一条证明它与真机一致。
+# 抽样 150 个归档（全量 4335 个要跑十几分钟，`--all` 可以跑全）。
+if [ -d work/game/RomFS ] && [ -n "$CC_FOUND" ]; then
+  run "纹理块线性布局 vs 游戏真实贴图（BNTX 记录的大小）" \
+      "$PY" smo/gfx/tools/tex_layout_check.py --sample 150
+elif [ -z "$CC_FOUND" ]; then
+  skip "纹理块线性布局 vs 真实贴图" "要编 nvn_tex.c 成动态库，本机先 source smo/env.sh"
+else
+  skip "纹理块线性布局 vs 真实贴图" "缺 work/game/RomFS —— 先跑 nsp_extract.py romfs"
+fi
+
 # ── 三、还没有的（等 Metal 重放）──────────────────────────────────────────────
 skip "逐拍对拍（宿主命令流 vs 真机）" "等 Metal 重放"
 skip "截图闸门（FLIP 图像差异）"      "等 Metal 重放"
