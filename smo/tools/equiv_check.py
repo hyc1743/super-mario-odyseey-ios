@@ -21,12 +21,13 @@ svc 号必须两边取自同一张「站点 → svc 号」表（对应真实 `dm
 否则比较的就变成"我的模型"而不是改写了。
 
 实测（真实产物）：
-    sdk  106/106 个 svc 站点等价 ✅      rtld 4/4 ✅
+    sdk  svc 106/106 ✅   cntpct 29/29 ✅      rtld svc 4/4 ✅
 main / subsdk0 没有裸 svc（都经 sdk 的 nn::os 包装），所以那里没有 svc 站点。
 
-用法：equiv_check.py <模块名> [--limit N] [--kind svc]
-未覆盖：kind=cntpct 需要先把"目标寄存器"解析出来（mrs 的 Rd 是 x20/x21/x23 等，不在 x0..x8 里），
-所以现在的模型对它不成立 —— 这是下一步。
+用法：equiv_check.py <模块名> [--limit N] [--kind svc|cntpct]
+kind=cntpct 的额外一步：`mrs xN, cntpct_el0` 的目标寄存器不固定（实测 x20/x21/x23 等，
+不在 x0..x8 里），所以模型要知道往哪个寄存器写。目标寄存器从 `gates.tsv` 第 3 列取
+（改写器写出来的，第 4 列是站点，已核对与 sites.tsv 一致）。
 """
 import os
 import struct

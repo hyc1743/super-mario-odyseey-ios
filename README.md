@@ -52,6 +52,7 @@ Switch 系统服务与图形接口。**自带游戏文件（bring your own game 
 | NVN 接口层（469 个名字） | ✅ 单测 + 机制挖清 | `hle_nvn.c`、`nvn_table.c`（`nvnLoadCProcs` → 461 个名字的机制） |
 | NVN 核心状态层（38 个实现） | ✅ 38 条断言 | `nvn_core.c`、`nvn_state.c` |
 | 重放记账 + 管线键（不含 Metal） | ✅ 16 条断言 | `nvn_replay.c` |
+| 验证层（回归总入口 + 设计前提核验） | ✅ 通过 11 · 跳过 3 | `smo/verify/regress.sh`；NVN 不透明性 1012/1706 调用点 **0 反例** |
 | **Metal 重放（真正调 Metal 的那一半）** | ❌ 未开始（需 macOS / 真机） | |
 | iOS 三段内嵌出包 | 🚧 生成 + 校验已做（本机可验）；装载分支与链接参数待做 | `gen_embed.py`、`check_embed.py` |
 | iOS App 壳 + 未签名 IPA（CI） | ✅ 双绿 | `.github/workflows/build-shell-ipa.yml` |

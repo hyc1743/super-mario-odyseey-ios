@@ -54,6 +54,7 @@ The technical path is taken wholesale from [jhaizhou-ops/d2r-mobile](https://git
 | NVN interface layer (469 names) | ✅ unit-tested, mechanism fully mapped | `hle_nvn.c`, `nvn_table.c` (the `nvnLoadCProcs` → 461 names mechanism) |
 | NVN core state layer (38 implementations) | ✅ 38 assertions | `nvn_core.c`, `nvn_state.c` |
 | Replay bookkeeping + pipeline keys (no Metal) | ✅ 16 assertions | `nvn_replay.c` |
+| Verification layer (regression entry + design-premise check) | ✅ 11 pass · 3 skip | `smo/verify/regress.sh`; NVN opacity: **0 counterexamples** over 1012/1706 call sites |
 | **Metal replay (the half that actually calls Metal)** | ❌ not started (needs macOS / a device) | |
 | iOS three-segment embedding | 🚧 generator + verifier done (locally verifiable); loader branch and link flags pending | `gen_embed.py`, `check_embed.py` |
 | iOS app shell + unsigned IPA (CI) | ✅ both jobs green | `.github/workflows/build-shell-ipa.yml` |

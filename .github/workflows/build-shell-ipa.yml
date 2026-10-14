@@ -98,6 +98,10 @@ jobs:
           python3 smo/tools/gen_nvn_records.py --check
       - name: 检查自动生成的接管表与 import 清单一致
         run: python3 smo/tools/gen_hle_force.py --check
+      - name: NVN 不透明性检查器的自检（确认它能抓到反例，不只会报「通过」）
+        # 这一项在 CI 里跑得到：它用手工编码的指令序列，不需要游戏文件。
+        # nvn_opaque_check.py 本身需要 main.bin（游戏内容），所以只能在本机跑。
+        run: python3 smo/verify/nvn_opaque_selftest.py 2>&1 | tee -a /tmp/selftests.log
       - name: 失败时把单测日志发成注解
         # ubuntu job 的输出同样要能被读到（运行日志要管理员权限，注解是公开的）
         if: failure()
