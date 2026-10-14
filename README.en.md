@@ -43,15 +43,25 @@ The technical path is taken wholesale from [jhaizhou-ops/d2r-mobile](https://git
 
 | Stage | State | Evidence |
 |---|---|---|
-| Unpacking game files (NSP → ExeFS / RomFS) | ✅ done, verified | `smo/tools/nsp_extract.py` (algorithm checked line by line against hactool's source) |
-| Reconnaissance (build IDs / imports / graphics entry / shaders) | ✅ done | `nso_info.py`, `import_graph.py`, `xref.py` |
-| Program rewrite (all 4 NSOs) | ✅ done, structural check passes | `patch_nso.py`, `rewrite_check.py` |
-| Shader unpacking (Yaz0 → SARC → `*.sharc`) | ✅ done, 27/27 | `nintendo_archives.py` |
-| Shader translation (Maxwell → SPIR-V → MSL) | 🚧 in progress | needs the `sharc` program format |
-| Host loader + system-service HLE | ❌ not started | the largest piece |
-| NVN → Metal graphics layer | ❌ not started | |
-| Touch / controller input | ❌ not started | |
-| iOS app shell + IPA (GitHub Actions) | 🚧 shell builds, host not wired in | `.github/workflows/build-shell-ipa.yml` |
+| Unpacking game files (NSP → ExeFS / RomFS, 4,636 files / 5.2 GB) | ✅ done, verified | `smo/tools/nsp_extract.py` (algorithm checked line by line against hactool's source) |
+| Reconnaissance (build IDs / 700 imports / the single graphics entry / 469 NVN names) | ✅ done | `nso_info.py`, `import_graph.py`, `xref.py` |
+| Program rewrite (all 4 NSOs) | ✅ structural check + **dynamic equivalence** | `patch_nso.py`, `rewrite_check.py`; Unicorn equivalence: **svc 106/106, cntpct 29/29, rtld 4/4** |
+| Shaders (28 archives → 18,487 → 18,470 unique → SPIR-V → MSL) | ✅ 0 failures | `sharcb.py` + `dmsh_xlate` + `glsl_facts.py` |
+| Shader bridge (runtime control section → translated shader) | ✅ 400/400 real blobs matched | `shader_index.py`, `nvn_shader.c` |
+| Host loader (multi-module mapping / cross-module relocations / import resolution) | ✅ runs on real artifacts + two independent cross-checks | `loader_core.c` (JUMP_SLOT 639 == 639 PLT stubs; host imports 12/4 == `import_graph` 12/4) |
+| Kernel SVCs (memory family / thread family) | ✅ 20 + 15 assertions | `hle_svc.c`, `hle_thread.c` |
+| System-service HLE (fs 26 functions / oe / hid) | ✅ 30 + 24 assertions; plus a 447-entry takeover list and named stubs for the rest | `hle_fs.c`, `hle_oe.c`, `hle_hid.c`, `hle_force_gen.c` |
+| NVN interface layer (469 names) | ✅ unit-tested, mechanism fully mapped | `hle_nvn.c`, `nvn_table.c` (the `nvnLoadCProcs` → 461 names mechanism) |
+| NVN core state layer (38 implementations) | ✅ 38 assertions | `nvn_core.c`, `nvn_state.c` |
+| Replay bookkeeping + pipeline keys (no Metal) | ✅ 16 assertions | `nvn_replay.c` |
+| **Metal replay (the half that actually calls Metal)** | ❌ not started (needs macOS / a device) | |
+| iOS three-segment embedding | 🚧 generator + verifier done (locally verifiable); loader branch and link flags pending | `gen_embed.py`, `check_embed.py` |
+| iOS app shell + unsigned IPA (CI) | ✅ both jobs green | `.github/workflows/build-shell-ipa.yml` |
+| Touch / controller input | 🚧 state layer and layouts verified (hid / oe), front end not wired | `hle_hid.c`, `hle_oe.c` |
+
+**Can it be played yet? No.** What is missing is the Metal half of the graphics layer and the iOS
+embedded-image loading branch — both need macOS / a real device. Round-by-round measurements live in
+[STATUS.md](STATUS.md).
 
 ## Facts measured from the game
 

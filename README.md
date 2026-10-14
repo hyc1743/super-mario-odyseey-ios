@@ -41,17 +41,24 @@ Switch 系统服务与图形接口。**自带游戏文件（bring your own game 
 
 | 阶段 | 状态 | 依据 |
 |---|---|---|
-| 游戏文件解包（NSP → ExeFS / RomFS） | ✅ 完成并验证 | `smo/tools/nsp_extract.py`（算法逐条对照 hactool 源码） |
-| 模块侦察（构建号 / 导入 / 图形入口 / 着色器位置） | ✅ 完成 | `nso_info.py`、`import_graph.py`、`xref.py` |
-| 程序改写（4 个 NSO 全部通过） | ✅ 完成，结构自检通过 | `patch_nso.py`、`rewrite_check.py` |
-| 着色器解包（Yaz0 → SARC → `*.sharc`） | ✅ 完成 27/27 | `nintendo_archives.py` |
-| 着色器翻译（Maxwell → SPIR-V → MSL） | 🚧 进行中 | 需要解析 `sharc` 里的着色器程序 |
-| 宿主加载器 + 系统服务 HLE | ❌ 未开始 | 工作量最大的一块 |
-| NVN → Metal 图形层 | ❌ 未开始 | |
-| 触屏 / 手柄输入 | ❌ 未开始 | |
-| iOS App 壳 + IPA 出包（GitHub Actions） | 🚧 壳可出包，宿主未接入 | `.github/workflows/build-shell-ipa.yml` |
+| 游戏文件解包（NSP → ExeFS / RomFS，4636 个文件 / 5.2 GB） | ✅ 完成并验证 | `smo/tools/nsp_extract.py`（算法逐条对照 hactool 源码） |
+| 模块侦察（构建号 / 700 个 import / 唯一图形入口 / 469 个 NVN 名字） | ✅ 完成 | `nso_info.py`、`import_graph.py`、`xref.py` |
+| 程序改写（4 个 NSO） | ✅ 结构自检 + **动态等价** | `patch_nso.py`、`rewrite_check.py`；Unicorn 等价：**svc 106/106、cntpct 29/29、rtld 4/4** |
+| 着色器解包与翻译（28 个归档 → 18487 → 18470 去重 → SPIR-V → MSL） | ✅ 0 失败 | `sharcb.py` + `dmsh_xlate` + `glsl_facts.py` |
+| 着色器桥（运行时控制段 → 已译着色器） | ✅ 真实数据 400/400 命中 | `shader_index.py`、`nvn_shader.c` |
+| 宿主装载器（多模块映射 / 跨模块重定位 / import 解析） | ✅ 真实产物跑通 + 两处交叉验证 | `loader_core.c`（JUMP_SLOT 639 == PLT 桩 639；宿主 import 12/4 == `import_graph` 12/4） |
+| 内核 svc（内存族 / 线程族） | ✅ 20 + 15 条断言 | `hle_svc.c`、`hle_thread.c` |
+| 系统服务 HLE（fs 26 个 / oe / hid） | ✅ 30 + 24 条断言；另有 447 条接管清单 + 未实现记名桩 | `hle_fs.c`、`hle_oe.c`、`hle_hid.c`、`hle_force_gen.c` |
+| NVN 接口层（469 个名字） | ✅ 单测 + 机制挖清 | `hle_nvn.c`、`nvn_table.c`（`nvnLoadCProcs` → 461 个名字的机制） |
+| NVN 核心状态层（38 个实现） | ✅ 38 条断言 | `nvn_core.c`、`nvn_state.c` |
+| 重放记账 + 管线键（不含 Metal） | ✅ 16 条断言 | `nvn_replay.c` |
+| **Metal 重放（真正调 Metal 的那一半）** | ❌ 未开始（需 macOS / 真机） | |
+| iOS 三段内嵌出包 | 🚧 生成 + 校验已做（本机可验）；装载分支与链接参数待做 | `gen_embed.py`、`check_embed.py` |
+| iOS App 壳 + 未签名 IPA（CI） | ✅ 双绿 | `.github/workflows/build-shell-ipa.yml` |
+| 触屏 / 手柄输入 | 🚧 状态层与布局已验证（hid / oe），前端未接 | `hle_hid.c`、`hle_oe.c` |
 
-**能不能玩：现在不能。**
+**能不能玩：现在还不能** —— 缺的是 Metal 重放那一半与 iOS 内嵌装载分支（两者都需要 macOS / 真机）。
+细节与每一轮的实测记录在 [STATUS.md](STATUS.md)。
 
 ## 关于这个游戏，实测出来的事实
 
