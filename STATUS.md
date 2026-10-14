@@ -1588,3 +1588,34 @@ GOB 的几何：**64 字节宽 × 8 行 = 512 字节**，内部位域是
 | 1 | 收 bcdec，把 BC 块解成 RGBA | 本机可做可测（有 BC 测试向量） |
 | 2 | `nvnTexture*` / `nvnTextureBuilder*` 家族从记录桩换成真实现 | 本轮的布局算法 |
 | 3 | Metal 上传（零拷贝 MTLBuffer / 块线性解交错后上传） | 需要 macOS |
+
+---
+
+# 第二十二轮：没有 Mac 怎么办 —— CI runner 上有可用 Metal（关键分岔已闭合）
+
+## 2.84 探测结果
+
+`smo/ios/tools/metal_probe.m`（装进 macOS job，编译宿主前跑）：
+
+```
+[notice] 设备可用：Apple Paravirtual device
+[notice] 回读像素 = (255,0,0,255)，期望 (255,0,0,255)
+[notice] 离屏渲染 + 回读在 CI runner 上可用 —— Metal 层可以在 CI 上验
+```
+
+三条结论：① runner 有虚拟 GPU；② 离屏渲染 + 回读真实可用（不是碰巧）；③ runner 是 arm64 macOS。
+
+**这对"只有 iPhone、没有 Mac"意味着什么**：Metal 重放层的开发验证完全可以在 CI 上做
+（编译靠 runner 的 Xcode SDK，正确性靠离屏渲染回读断言，结果走公开可读的注解通道）。
+iPhone 只负责最后的两件事：`CAMetalLayer` 呈现与触屏 —— 那是收尾，不是开发路径。
+
+## 2.85 更新后的路线（按顺序）
+
+1. BC 解码链路（bcdec 移植 + 接上 nvn_tex.c 的块线性解交错，真实贴图逐张验证）—— 本机可验
+2. Metal 层骨架：资源映射 + 上传 + 管线缓存 —— 逻辑本机验、Metal 调用 CI 验（离屏回读）
+3. 第一个 CI 离屏像素测试：拿真实游戏贴图 → 解交错 → 解 BC → 上传 MTLTexture → 画全屏四边形
+   → 回读 → 与本机 CPU 路径的 RGBA 逐像素一致 —— 这一条打通，"纹理路径正确"就有了
+   跨实现（CPU vs GPU）的独立证据
+4. iOS 内嵌装载分支（vm_allocate + mach_vm_remap）—— macOS 上可跑，CI 可验
+5. App 加「真机自检模式」（启动跑 arm64 单测、结果显示在屏幕上、可存 Files）
+6. 真机首跑 → UNIMPL 日志驱动补服务
