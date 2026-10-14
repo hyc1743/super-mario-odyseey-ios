@@ -14,21 +14,31 @@ INC = -I. -I../gfx/nvn
 smo_host: $(SRC) dm.h hle.h
 	$(CC) $(CFLAGS) $(INC) -o $@ $(SRC) $(LDFLAGS)
 
+# 图形层单测的公共依赖。
+#
+# 为什么是一个变量而不是每个目标各写一份：原先三个目标各自抄了一遍文件清单，
+# 加重放层时 hle_nvn.c 里多了一处 nvn_replay_call，只有 replay_selftest 的清单跟着改了，
+# 另外两个目标从此链不上（undefined reference to `nvn_replay_call`）。
+# CI 没发现是因为它绕过 Makefile、自己写 gcc 命令行 —— 现在 regress.sh 会跑 `make test`。
+# 结论：这一组文件是相互依赖的整体，就该只写一次。
+GFX_COMMON = ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c \
+             ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+
 # NVN 图形层单测：接口层（按名取函数 + 命令记录）
-nvn_iface_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/tests/nvn_selftest.c
-	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/tests/nvn_selftest.c
+nvn_iface_selftest: $(GFX_COMMON) ../gfx/nvn/tests/nvn_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
 
 # NVN 核心家族状态层单测（设备/池/缓冲/同步/采样器/程序）
-nvn_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/tests/nvn_core_selftest.c
-	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/tests/nvn_core_selftest.c
+nvn_selftest: $(GFX_COMMON) ../gfx/nvn/tests/nvn_core_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
 
 # 着色器索引单测（合成自检；真实数据用命令行给索引与 blob）
-shader_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/tests/shader_selftest.c
-	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/tests/shader_selftest.c
+shader_selftest: $(GFX_COMMON) ../gfx/nvn/tests/shader_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
 
 # 重放记账层单测（不需要 Metal）
-replay_selftest: ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c ../gfx/nvn/tests/replay_selftest.c
-	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c ../gfx/nvn/tests/replay_selftest.c
+replay_selftest: $(GFX_COMMON) ../gfx/nvn/tests/replay_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
 
 # 装载器自检只用平台无关的那部分（本机也能编，见 smo/host/tests/loader_selftest.c）
 loader_selftest: loader_core.c tests/loader_selftest.c dm.h
@@ -50,8 +60,16 @@ fs_selftest: hle_fs.c hle.c hle_force_gen.c tests/fs_selftest.c dm.h hle.h
 oehid_selftest: hle_oe.c hle_hid.c hle.c hle_force_gen.c tests/oehid_selftest.c dm.h hle.h dm_input.h dm_oe.h
 	$(CC) $(CFLAGS) -I. -o $@ hle_oe.c hle_hid.c hle.c hle_force_gen.c tests/oehid_selftest.c
 
-test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest
-	./loader_selftest work/synthetic sdk main
+# 合成改写产物：装载器自检用。真产物是游戏内容，不能进 CI，所以自己造一份。
+# 路径是仓库根下的 work/synthetic（make 在 smo/host 里跑，所以要 ../..）。
+PY     ?= python3
+SYNDIR  = ../../work/synthetic
+
+$(SYNDIR)/sdk.patched.bin:
+	$(PY) ../tools/make_synthetic_artifacts.py $(SYNDIR)
+
+test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest $(SYNDIR)/sdk.patched.bin
+	./loader_selftest $(SYNDIR) sdk main
 	./svc_selftest
 	./thread_selftest
 	./fs_selftest

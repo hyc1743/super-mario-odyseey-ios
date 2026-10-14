@@ -69,11 +69,36 @@ run "NVN 记录桩生成器一致性" \
 run "HLE 强制接管表生成器一致性" \
     "$PY" smo/tools/gen_hle_force.py --check
 
-# C 单测。需要 clang/gcc；Windows 本机没有 clang 时自动跳过。
-if command -v clang >/dev/null 2>&1 || command -v gcc >/dev/null 2>&1; then
-  run "宿主与图形层 C 单测" make -C smo/host test
+# C 单测。需要 make + 编译器。
+# 本机（Windows/MSYS）要先 `source smo/env.sh` 才有 /c/toolchain 里的 clang 与 mingw32-make；
+# 没有就如实 SKIP，不要假装跑过了。
+MAKE=""
+for m in make mingw32-make gmake; do
+  command -v "$m" >/dev/null 2>&1 && { MAKE="$m"; break; }
+done
+# 挑一个**真的能编**的编译器，而不是「PATH 里有这个名字」就算。
+# 本机踩到过：smo/env.sh 把 LLVM 的 bin 放在 mingw64 之前，于是 `clang` 先被找到，
+# 但那份 clang 没有 C 运行时头文件（#include <stdio.h> 直接 fatal error）。
+# 判据只能是「拿它编一个最小程序能不能过」。
+# 注意探测要写到**真实临时文件**，不能 `-o /dev/null`：mingw 的 ld 对 /dev/null
+# 会报 "final link failed: file truncated"，于是一个好编译器被误判成不可用。
+CC_FOUND=""
+CC_PROBE_DIR="$(mktemp -d)"
+trap 'rm -rf "$CC_PROBE_DIR"' EXIT
+for c in clang gcc cc; do
+  command -v "$c" >/dev/null 2>&1 || continue
+  if printf 'int main(void){return 0;}\n' \
+       | "$c" -x c - -o "$CC_PROBE_DIR/probe" 2>/dev/null; then
+    CC_FOUND="$c"; break
+  fi
+done
+if [ -n "$MAKE" ] && [ -n "$CC_FOUND" ]; then
+  run "宿主与图形层 C 单测（$MAKE + $CC_FOUND）" \
+      "$MAKE" -C smo/host test CC="$CC_FOUND" PY="$PY"
+elif [ -z "$CC_FOUND" ]; then
+  skip "宿主与图形层 C 单测" "没有能用的 clang/gcc —— 本机先 source smo/env.sh"
 else
-  skip "宿主与图形层 C 单测" "本机没有 clang/gcc"
+  skip "宿主与图形层 C 单测" "有 $CC_FOUND 但没有 make —— 本机先 source smo/env.sh"
 fi
 
 [ "$QUICK" = 1 ] && { summary; exit $FAIL; }

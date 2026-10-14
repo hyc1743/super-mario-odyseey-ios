@@ -54,3 +54,11 @@ obj/
 
 # xcodegen 生成的工程
 *.xcodeproj/
+
+# 宿主与图形层的 C 单测产物（`make -C smo/host test` 编出来的）。
+# 以前本机没编过所以没进过这里；现在 regress.sh 会在本机跑 make test。
+# 两种后缀都写：Unix 没后缀，Windows/mingw 是 .exe。
+smo/host/smo_host
+smo/host/*_selftest
+smo/host/*_selftest.exe
+smo/host/smo_host.exe

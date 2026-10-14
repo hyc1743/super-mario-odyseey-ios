@@ -25,10 +25,10 @@
 | NVN 接口层 469 个名字 | ✅ | `nvnLoadCProcs` → 461 个名字的机制已挖清（第十四轮） |
 | NVN 核心状态层 38 个实现 | ✅ 38 断言 | `nvn_core.c` / `nvn_state.c`（不写客体对象内存） |
 | 重放记账 + 管线键 | ✅ 16 断言 | `nvn_replay.c`（不含 Metal，用空后端测） |
-| 验证层 `smo/verify/` | ✅ 通过 11 · 跳过 3 | `regress.sh` 一条命令；NVN 不透明性 1012/1706 调用点 0 反例（第十八轮） |
+| 验证层 `smo/verify/` | ✅ 通过 12 · 跳过 2 | `regress.sh` 一条命令；NVN 不透明性 1012/1706 调用点 0 反例（第十八轮） |
 | **Metal 重放（真调 Metal）** | ❌ | 需 macOS / 真机 |
 | iOS 三段内嵌出包 | 🚧 | 生成 + 拼回校验已做（本机可验）；装载分支与 `-segprot` 待做 |
-| App 壳 + 未签名 IPA | ✅ CI 双绿 | ubuntu 11 项自检 + macOS 宿主编译 + IPA |
+| App 壳 + 未签名 IPA | 🚧 CI 需重新验证 | 2026-10-14 起 ubuntu job 的 2 个 C 单测链不上（第十八轮 2.80 已修，待 push 后确认） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
 **能不能玩：现在还不能。** 缺的是 Metal 重放那一半与 iOS 内嵌装载分支（两者都需要 macOS / 真机）。
@@ -1372,9 +1372,12 @@ FLIP 截图闸门 + `regress.sh` 总入口），本仓只有散落在 `smo/tools
 本机实测：
 
 ```
-通过 11 · 失败 0 · 跳过 3
-  跳过：C 单测（本机没 clang）、逐拍对拍、截图闸门（后两项等 Metal）
+通过 12 · 失败 0 · 跳过 2
+  跳过：逐拍对拍、截图闸门（两项都等 Metal）
 ```
+
+（本机要先 `source smo/env.sh`，否则找不到 `/c/toolchain` 里的 gcc 与 mingw32-make，
+C 单测会 SKIP —— 下面 2.81 记了这条探测本身踩的坑。）
 
 （顺手验证过失败路径确实会报错并返回非 0 —— 一个不会失败的回归脚本等于没有。）
 
@@ -1428,7 +1431,50 @@ NVN 对象**之前**的字段 —— 这正是「把 NVN 对象当不透明块�
 
 **终局判据是真机**：`nvn_state.c` 查不到就记一行 miss 日志，跑一遍就知道有没有漏。
 
-## 2.80 下一步
+## 2.80 回归入口立起来当场抓到的问题：CI 从 10-14 起就是红的，只是没人看
+
+把 `make -C smo/host test` 接进 `regress.sh` 之后第一次在本机跑完整 C 单测，9 个目标里
+有 2 个**链不上**：
+
+```
+hle_nvn.c: undefined reference to `nvn_replay_call'
+```
+
+原因：`nvn_iface_selftest` / `nvn_selftest` / `shader_selftest` / `replay_selftest` 四个目标
+**各抄了一份源文件清单**。第十六轮加重放层时，`hle_nvn.c` 里多了一处 `nvn_replay_call`，
+只有 `replay_selftest` 的清单跟着加了 `nvn_replay.c` —— 另外三个从那天起就坏了。
+
+**CI 为什么也没发现**：CI 没走 Makefile，它在 workflow 里**又手写了一遍** gcc 命令行，
+同样漏了 `nvn_replay.c`。所以 `.github/workflows` 和 `Makefile` 各有一份会漂移的清单,
+两份都不准 —— 而进度表上写着"CI 双绿"。（实测复现了 CI 那条命令，确实同样挂。）
+
+两处都改掉：
+
+- `Makefile` 把共同依赖收进 `GFX_COMMON`，四个目标共用，配方用 `$^` —— 清单只有一份。
+- workflow 里 9 个手写 gcc 步骤换成一条 `make -C smo/host test`，本机与 CI 跑同一条命令。
+- 顺带修了 `make test` 里 `work/synthetic` 的路径（make 在 `smo/host` 里跑，要 `../..`），
+  并加了合成产物的生成规则 —— 以前这个目标只能在 CI 的目录布局下跑。
+
+本机现在：**通过 12 · 失败 0 · 跳过 2**（C 单测 172 条断言全过）。
+
+这一条正好说明为什么要先立回归入口再写 Metal：一个没人跑的检查等于不存在，
+而"各处抄一份清单"在加新文件时必然漂移。
+
+## 2.81 一个探测写法上的坑：别用 `-o /dev/null` 判断编译器可用
+
+`regress.sh` 要决定"本机有没有能用的编译器"。第一版用 `command -v clang`，
+结果 `smo/env.sh` 把 LLVM 的 bin 放在 mingw64 之前，于是先找到的 `clang` 没有 C 运行时头
+（`#include <stdio.h>` 直接 fatal error），C 单测被判成 FAIL 而不是 SKIP。
+
+改成"真的编一个最小程序试试"。但 `-o /dev/null` 在 mingw 下会
+
+```
+ld.exe: final link failed: file truncated
+```
+
+—— 把一个好编译器误判成不可用。必须写到真实临时文件。两个坑都写进了脚本注释。
+
+## 2.82 下一步
 
 | # | 任务 | 为什么是它 |
 |---|---|---|

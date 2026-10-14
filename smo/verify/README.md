@@ -14,7 +14,7 @@
 | 检查器自己的自检 | — | `nvn_opaque_selftest.py` | ✅ 16 条断言 |
 | 逐拍对拍（宿主 vs 真机命令流） | `verify/` | — | ⬜ 要等 Metal 重放 |
 | 截图闸门（FLIP 图像差异） | `verify/regress.sh` | — | ⬜ 要等 Metal 重放 |
-| 总入口 | `verify/regress.sh` | `regress.sh` | ✅ 通过 11 · 跳过 3 |
+| 总入口 | `verify/regress.sh` | `regress.sh` | ✅ 通过 12 · 跳过 2 |
 
 ## 为什么现在就建这一层
 
@@ -105,4 +105,6 @@ smo/verify/regress.sh --quick   # 只跑不需要游戏文件的那一档
 ```
 
 失败不提前退出，一次看清所有坏掉的地方；退出码 = 失败项数。
-本机实测：**通过 11 · 失败 0 · 跳过 3**（跳过的是 C 单测——本机没 clang——与等 Metal 的两项）。
+本机实测：**通过 12 · 失败 0 · 跳过 2**（跳过的是等 Metal 的两项；C 单测 172 条断言全过）。
+
+本机要先 `source smo/env.sh` 才有 `/c/toolchain` 里的 gcc 与 mingw32-make，否则 C 单测会 SKIP。

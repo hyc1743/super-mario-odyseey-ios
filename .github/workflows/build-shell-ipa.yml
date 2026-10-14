@@ -42,42 +42,15 @@ jobs:
         run: |
           gcc -O2 -Wall -Wextra -Werror -c -o /tmp/hle.o smo/host/hle.c -Ismo/host
           gcc -O2 -Wall -Wextra -Werror -c -o /tmp/hf.o smo/host/hle_force_gen.c -Ismo/host
-      - name: 编译并跑装载器自检
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -o /tmp/loader_selftest               smo/host/loader_core.c smo/host/tests/loader_selftest.c
-          /tmp/loader_selftest work/synthetic sdk main 2>&1 | tee -a /tmp/selftests.log
-      - name: 内核内存族单测（不需要游戏文件）
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/host -o /tmp/svc_selftest               smo/host/hle_svc.c smo/host/tests/svc_selftest.c
-          /tmp/svc_selftest 2>&1 | tee -a /tmp/selftests.log
-      - name: 内核线程族单测（真并发，不需要游戏文件）
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/host -o /tmp/thread_selftest               smo/host/hle_thread.c smo/host/tests/thread_selftest.c
-          /tmp/thread_selftest 2>&1 | tee -a /tmp/selftests.log
-      - name: fs 服务单测（自己造 romfs 与存档，不需要游戏文件）
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/host -o /tmp/fs_selftest               smo/host/hle_fs.c smo/host/hle.c smo/host/hle_force_gen.c smo/host/tests/fs_selftest.c 2>&1 | tee -a /tmp/selftests.log
-          /tmp/fs_selftest 2>&1 | tee -a /tmp/selftests.log
-      - name: oe + hid 服务单测（环境查询与输入布局）
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/host -o /tmp/oehid_selftest               smo/host/hle_oe.c smo/host/hle_hid.c smo/host/hle.c smo/host/hle_force_gen.c               smo/host/tests/oehid_selftest.c
-          /tmp/oehid_selftest 2>&1 | tee -a /tmp/selftests.log
-      - name: NVN 接口层单测（按名取函数与命令记录，不需要游戏文件）
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/host -Ismo/gfx/nvn -o /tmp/nvn_selftest smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/tests/nvn_selftest.c 2>&1 | tee -a /tmp/selftests.log
-          /tmp/nvn_selftest 2>&1 | tee -a /tmp/selftests.log
-      - name: NVN 核心家族状态层单测（设备/池/缓冲/同步/采样器/程序）
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/host -Ismo/gfx/nvn -o /tmp/nvn_core_selftest smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/tests/nvn_core_selftest.c 2>&1 | tee -a /tmp/selftests.log
-          /tmp/nvn_core_selftest 2>&1 | tee -a /tmp/selftests.log
-      - name: 着色器索引单测（运行时算的键必须与离线一致）
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/host -Ismo/gfx/nvn -o /tmp/shader_selftest smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/nvn_shader.c smo/gfx/nvn/tests/shader_selftest.c 2>&1 | tee -a /tmp/selftests.log
-          /tmp/shader_selftest 2>&1 | tee -a /tmp/selftests.log
-      - name: 重放记账层单测（不需要 Metal）
-        run: |
-          gcc -O2 -Wall -Wextra -Werror -Ismo/host -Ismo/gfx/nvn -o /tmp/replay_selftest smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/nvn_shader.c smo/gfx/nvn/nvn_replay.c smo/gfx/nvn/tests/replay_selftest.c 2>&1 | tee -a /tmp/selftests.log
-          /tmp/replay_selftest 2>&1 | tee -a /tmp/selftests.log
+      # 9 个 C 单测（装载器 / svc / 线程 / fs / oe+hid / NVN 接口层 / 状态层 / 着色器索引 / 重放记账）。
+      #
+      # 走 Makefile，不再在这里手写 gcc 命令行。原因：这些步骤原先各自抄一份文件清单，
+      # 加重放层时 hle_nvn.c 多了一处 nvn_replay_call，只有 replay 那一步的清单跟着改了 ——
+      # 另外两步从 2026-10-14 起就链不上（undefined reference），而本地 `make test` 也一样挂。
+      # 两边各有一份会漂移的清单，等于没有一份是准的。现在 Makefile 是唯一来源，
+      # 共同依赖写在 GFX_COMMON 里，本机与 CI 跑的是同一条命令。
+      - name: C 单测（9 个，走 Makefile 保证与本机一致）
+        run: make -C smo/host test CC=gcc PY=python3 2>&1 | tee -a /tmp/selftests.log
       - name: 检查 nvn.h 抽出的枚举与头一致（Metal 翻译要用这些数值）
         run: python3 smo/gfx/nvn_enum.py --check 2>&1 | tee -a /tmp/selftests.log
       - name: 三段内嵌出包：生成 + 校验（拼回原映像）
