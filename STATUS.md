@@ -515,3 +515,72 @@ GitHub 的**运行日志要仓库管理员权限**才能下载（`.../actions/jo
 只有 uniform 名（`cTextureDisplacement0`、`cTextureCubeMapGem0`、`_stcol0`…）。
 它和 `.sharc`/`.sharcb` 是两个不同的东西，需要单独解析 —— 目前全量翻译覆盖的是 21 个 `.sharcb`
 （8281 → 8269 个唯一着色器），这 7 个是剩下的口子。
+
+---
+
+# 第七轮：着色器全覆盖（18470 个）+ 宿主 HLE 工作清单
+
+## 2.23 `.bfsha` 补完：着色器覆盖到 28 个归档
+
+`.bfsha`（magic `FSHA`）**不是 SARC**、也没有 GLSL，但**着色器槽位布局与 `.sharcb` 完全一样**
+（`+0x00` 标记 `0x12345678` / `+0x30` SPH 0x50 / `+0x80` 机器码），所以同一套切分就能覆盖。
+
+| | 归档数 | 着色器 | 唯一键 |
+|---|---|---|---|
+| 只有 `.sharcb` 时 | 21 | 8281 | 8269 |
+| **加上 7 个 `.bfsha`** | **28** | **18487** | **18470** |
+
+贡献最大的是 `alRenderMaterial.bfsha`（9811 个 —— 那个 Uber 材质着色器的全部排列组合）。
+全量翻译：8 片并行，每片 2311 个作业，**全部「成功、0 失败」**，产出 468 MB SPIR-V + 反射。
+
+## 2.24 宿主 HLE 工作清单（`smo/tools/hle_inventory.py`）
+
+参考项目的 `hle_inventory.py` 是从**自己的源码**里抽 HLE 条目（事后审计）；
+本工具做**反过来**的事：从事先的游戏文件里算出**必须实现什么**（事前规划）。输出
+`smo/data/hle_imports.tsv`（1341 条，逐条给出「哪个模块、家族、谁导出、宿主要做什么」）。
+
+**按处置方式统计（4 个模块的 1341 条 import）：**
+
+| 条数 | 处置 |
+|---|---|
+| **412** | **服务客户端 —— 宿主必须接管（HLE_FORCE）** |
+| 398 | C 库/运行时（模块内或宿主 libc 直通） |
+| 274 | 媒体框架（模块内，原样跑） |
+| 156 | 模块内（本地库） |
+| 60 | C++ 标准库（模块内） |
+| 19 + 19 | 网络 socket / ssl（宿主：离线桩或 BSD socket） |
+| 3 | 图形 NVN（`nv::InitializeGraphics` 等，宿主接管） |
+
+**412 条服务客户端按家族**（这就是宿主服务层的工作面）：
+
+```
+nn::audio 106   nn::hid 53   nn::socket 28   nn::fs 25   nn::fontll 24
+nn::sf 23       nn::oe 20    nn::account 19  nn::nfp 13  nn::web 10
+nn::nifm 9      nn::friends 9   nn::time 8   nn::image 7  nn::crypto 7
+nn::vi 6        nn::lmem 6   nn::fgm 6       nn::prepo 5  nn::ssl 4 …
+```
+
+**内核层**（改写器在各模块里数出来的宿主门）：`sdk` **106 处 svc + 29 处 cntpct**，
+`rtld` 4 处 svc；`main` 与 `subsdk0` 没有裸 svc（全走 sdk 的 nn::os 包装）。
+
+## 2.25 三个意外发现
+
+1. **SMO 的过场视频用的是 Android 媒体框架**：`subsdk0` 从 `sdk` 引入 174 个
+   `android::` 符号（`android::HeapObject`、`android::IInterface`…）以及 55 个
+   `NvOs*/NvRm*`（NVIDIA 驱动层）。也就是说 Nintendo 把 libstagefright/binder 一系移植进了 SDK。
+   对宿主的影响：`movie::`（11 条）与 `android::`（174 条）都是**跨模块、原样跑**；
+   真正要 HLE 的是它底下依赖的解码/输出服务。
+2. **图形初始化走的不止 `nvnBootstrapLoader`**：还有 `nv::InitializeGraphics` /
+   `nv::SetGraphicsAllocator` / `nv::SetGraphicsDevtoolsAllocator`（3 条，`main → sdk`），
+   宿主同样要接管。
+3. **`NvRmChannel*/NvRmStream*/NvRmSurface*`**（NVIDIA Resource Manager，驱动层）
+   也被 `main` 直接引入 —— 它们通常由 NVN 内部调用（而 NVN 被宿主绕过了），
+   但这条要在真机上确认，不能想当然。
+
+## 2.26 分类器踩的坑（都写进代码注释了）
+
+- 家族提取不能用 `startswith("_ZN2nn")`：常量成员函数是 `_ZNK2nn…`、虚表是 `_ZTVN2nn…`，
+  这样会漏 **774 条**（其中就有 `nv`（NVN）与 `android`（媒体框架））。
+- 不先把 **C 风格符号**（`__cxa_*`、`acos`、`__errno_location`、`__nnmusl_*`）拦下来，
+  它们会因为「被别的模块导出且不在本地库白名单里」被错归成服务客户端（实测错 **275 条**）。
+- `St` 是 Itanium ABI 里 `std::` 的替代码（`_ZNSt3__112basic_string…`），不是普通命名空间。

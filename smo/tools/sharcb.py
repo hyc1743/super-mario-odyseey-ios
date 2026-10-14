@@ -71,7 +71,10 @@ def facts_for(facts, sharcb_path):
 
 def extract(path, outdir, stage_filter=None, facts=None):
     d = open(path, "rb").read()
-    assert d[:4] == b"BAHS", f"{path}: 不是 .sharcb（magic {d[:4]!r}）"
+    # 两种容器都收：`BAHS`（.sharcb，配套 .sharc 定义）与 `FSHA`（.bfsha，单文件）
+    # 它们的**着色器槽位布局完全一样**（+0x00 标记 0x12345678 / +0x30 SPH 0x50 / +0x80 机器码），
+    # 所以同一套切分即可；差别只在 .bfsha 没有 GLSL 定义（facts 拿不到，走缺省值）。
+    assert d[:4] in (b"BAHS", b"FSHA"), f"{path}: 既不是 .sharcb 也不是 .bfsha（magic {d[:4]!r}）"
     jobs, rows = [], []
     for k, (p, e) in enumerate(blobs(d)):
         if e - p < CODE_OFF + 8:
@@ -113,7 +116,7 @@ def main():
     sf = sys.argv[sys.argv.index("--stage-filter") + 1] if "--stage-filter" in sys.argv else None
     if os.path.isdir(src):      # 递归找：<输出>/<归档名>/X.sharcb
         files = [os.path.join(dp, f) for dp, _, fs in os.walk(src) for f in sorted(fs)
-                 if f.endswith(".sharcb")]
+                 if f.endswith((".sharcb", ".bfsha"))]
     else:
         files = [src]
     facts = load_facts(sys.argv[sys.argv.index("--facts") + 1]) if "--facts" in sys.argv else {}
