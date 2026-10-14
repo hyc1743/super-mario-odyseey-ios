@@ -78,3 +78,89 @@ uint64_t resolve_import(module_t *m, const char *name) {
     LOG("import 接到桩：%s（第 %u 个，来自 %s）", name, idx, m->name);
     return (uint64_t)(uintptr_t)((const char *)unimpl_stubs + (idx - 1) * 8);   // 每桩 8 字节：movz + b
 }
+
+// ==================================================================================
+// 宿主门分派：改写器把 `svc #n` 与 `mrs xN, cntpct_el0` 换成「bl dm_gate」。
+// dm_gate（entry.S）把寄存器全存下来，用返回点当门标识调进来；这里按返回点查门表，
+// 再分派到 svc 层或计时器。
+// ==================================================================================
+
+#include <time.h>
+
+// ---- 门表：以返回点为键（改写产物的 gates.tsv 一行一条）----
+#define GATE_CAP 4096                                  // SMO 实测 139 个门，留足余量
+typedef struct { uint64_t ret; char kind[12]; int arg; uint64_t orig; } gate_ent;
+static gate_ent g_gate[GATE_CAP];
+static unsigned g_gate_n;
+
+void gate_register(uint64_t ret_addr, const char *kind, int arg, uint64_t orig) {
+    if (g_gate_n >= GATE_CAP) die("门表满了（%d）", GATE_CAP);
+    gate_ent *g = &g_gate[g_gate_n++];
+    g->ret = ret_addr;
+    snprintf(g->kind, sizeof g->kind, "%s", kind);
+    g->arg = arg;
+    g->orig = orig;
+}
+
+static const gate_ent *gate_find(uint64_t ret) {
+    for (unsigned i = 0; i < g_gate_n; i++) if (g_gate[i].ret == ret) return &g_gate[i];
+    return NULL;
+}
+
+// ---- 客体时钟：Horizon 的 cntpct 是 19.2 MHz 系统计数器（参考项目同口径）----
+static uint64_t host_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+static uint64_t g_t0_ns;
+static uint64_t tick_192(void) {                       // 19.2 MHz
+    if (!g_t0_ns) g_t0_ns = host_ns();
+    return (host_ns() - g_t0_ns) * 192 / 10;           // ns → 19.2 MHz 计数
+}
+
+// ---- svc 层：先实现启动路径上真正要的这几个，其余接到会响的桩 ----
+static unsigned g_svc_seen[256];
+
+int svc_dispatch(unsigned num, uint64_t *regs) {
+    switch (num) {
+    case 0x1E:                                         // GetSystemTick
+        regs[0] = tick_192();
+        return 0;
+    case 0x27:                                         // OutputDebugString（游戏自己的日志，很有用）
+        LOG("客体日志: %s", (const char *)regs[0]);
+        return 0;
+    case 0x0B: {                                       // SleepThread（纳秒；负数/0 表示让出）
+        int64_t ns = (int64_t)regs[0];
+        if (ns > 0) {
+            struct timespec ts = { ns / 1000000000ll, ns % 1000000000ll };
+            nanosleep(&ts, NULL);
+        }
+        return 0;
+    }
+    case 0x01: case 0x02: case 0x03: case 0x04: case 0x05: case 0x06:
+        // SetHeapSize / SetMemoryPermission / SetMemoryAttribute / MapMemory / UnmapMemory / QueryMemory
+        // 这一族要等宿主的「客体地址空间预留 + 切块」做完（参考项目的 hle_svc.c，见 STATUS.md TODO）
+        if (!g_svc_seen[num]++) LOG("【待实现】svc #%#x 内存族（第 %u 号）第一次被调用", num, num);
+        regs[0] = 0x2A2;                               // 通用失败（与参考项目对没实现的调用一致）
+        return 0;
+    default:
+        if (num < 256 && !g_svc_seen[num]++)
+            LOG("【待实现】svc #%#x 第一次被调用（共 %u 个门已登记）", num, g_gate_n);
+        regs[0] = 0x2A2;
+        return 0;
+    }
+}
+
+// 门入口（entry.S 的 dm_gate 调进来）：ret = 门块的返回点，regs = 保存下来的 x0..x30
+uint64_t gate_dispatch(uint64_t ret, uint64_t *regs) {
+    const gate_ent *g = gate_find(ret);
+    if (!g) die("门返回点 %#llx 不在门表里（产物与宿主不匹配）", (unsigned long long)ret);
+    if (!strcmp(g->kind, "svc")) return svc_dispatch((unsigned)g->arg, regs);
+    if (!strcmp(g->kind, "cntpct") || !strcmp(g->kind, "cntvct")) {
+        regs[g->arg & 31] = tick_192();                 // 目标寄存器可以是任意 xN（实测含 x20/x21/x23）
+        return 0;
+    }
+    die("未知门种类 %s", g->kind);
+    return 0;
+}

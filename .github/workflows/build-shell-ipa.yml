@@ -60,7 +60,9 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
       - name: 编译宿主（macOS：entry.S / thread.c / loader_apple.c / main.c 的真实检查）
-        run: make -C smo/host smo_host
+        run: |
+          set -o pipefail
+          make -C smo/host smo_host 2>&1 | tee smo/host/build.log
       - name: 装 xcodegen（生成 .xcodeproj）
         run: brew install xcodegen
       - name: 构建并打包
@@ -78,7 +80,7 @@ jobs:
         # 注释：这是维护者/协作方在拿不到仓库管理员权限时，唯一能直接看到真实报错的通道
         if: failure()
         run: |
-          for f in smo/ios/out_step.log smo/ios/out/xcodebuild.log; do
+          for f in smo/host/build.log smo/ios/out_step.log smo/ios/out/xcodebuild.log; do
             [ -f "$f" ] || { echo "::error::缺少 $f"; continue; }
             echo "===== $f 尾部 ====="
             tail -30 "$f"
@@ -92,6 +94,7 @@ jobs:
         with:
           name: 构建日志
           path: |
+            smo/host/build.log
             smo/ios/out_step.log
             smo/ios/out/xcodebuild.log
           if-no-files-found: warn
