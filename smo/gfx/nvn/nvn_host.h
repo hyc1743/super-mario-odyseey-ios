@@ -43,3 +43,11 @@ uint64_t nvn_record_call(const char *name, uint64_t a0, uint64_t a1, uint64_t a2
                          uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);
 unsigned nvn_record_count(void);
 void     nvn_record_reset(void);
+
+// 重放记账层（nvn_replay.c）：把记录归类成「绘制计划」。不含任何 Metal 调用，所以本机可测。
+int  nvn_replay_call(const char *name, const uint64_t *a);
+void nvn_replay_reset(void);
+unsigned nvn_replay_count(void);
+unsigned nvn_replay_draws(void);
+unsigned nvn_replay_unresolved(void);
+const char *nvn_replay_unresolved_name(void);

@@ -42,6 +42,7 @@ uint64_t nvn_record_call(const char *name, uint64_t a0, uint64_t a1, uint64_t a2
                          uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     uint64_t a[8] = { a0, a1, a2, a3, a4, a5, a6, a7 };
     nvn_record_append(name, a);
+    nvn_replay_call(name, a);            // 记账：绑定/设置/绘制/分派各自归类（见 nvn_replay.c）
     if (!seen(name)) NVN_LOG("记录 %s（首个未逐字段实现的调用）", name);
     return 0;
 }
