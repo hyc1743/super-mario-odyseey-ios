@@ -10,6 +10,30 @@
 
 ---
 
+## 进度总表（随轮次更新；逐轮的实测记录在下面）
+
+| 部件 | 状态 | 证据（可复现） |
+|---|---|---|
+| 解包 NSP → ExeFS / RomFS | ✅ | 4636 文件 / 5.2 GB；算法逐条对照 hactool |
+| 侦察（构建号 / import / 图形入口 / NVN 名字） | ✅ | 700 个 import 里图形只有 `nvnBootstrapLoader`；469 个 NVN 名字 |
+| 程序改写 4 个 NSO | ✅ 结构 + **动态等价** | Unicorn：svc 106/106、cntpct 29/29、rtld 4/4（`make -C smo/host equiv`） |
+| 着色器 18470 个（SPIR-V + MSL） | ✅ 0 失败 | `sharcb.py` + `dmsh_xlate`；`glsl_facts.py` 证明翻译缺省值正确 |
+| 着色器桥（运行时 → 已译） | ✅ | 真实 blob 400/400 命中（FNV-1a 64 键两边一致） |
+| 宿主装载器 | ✅ 真实产物跑通 | JUMP_SLOT 639 == PLT 桩 639；宿主 import 12/4 == import_graph 12/4 |
+| 内核 svc：内存族 / 线程族 | ✅ 20 + 15 断言 | `hle_svc.c` / `hle_thread.c`（真并发） |
+| 服务 HLE：fs / oe / hid | ✅ 30 + 24 断言 | `hle_fs.c` / `hle_oe.c` / `hle_hid.c`；447 条接管清单 |
+| NVN 接口层 469 个名字 | ✅ | `nvnLoadCProcs` → 461 个名字的机制已挖清（第十四轮） |
+| NVN 核心状态层 38 个实现 | ✅ 38 断言 | `nvn_core.c` / `nvn_state.c`（不写客体对象内存） |
+| 重放记账 + 管线键 | ✅ 16 断言 | `nvn_replay.c`（不含 Metal，用空后端测） |
+| **Metal 重放（真调 Metal）** | ❌ | 需 macOS / 真机 |
+| iOS 三段内嵌出包 | 🚧 | 生成 + 拼回校验已做（本机可验）；装载分支与 `-segprot` 待做 |
+| App 壳 + 未签名 IPA | ✅ CI 双绿 | ubuntu 11 项自检 + macOS 宿主编译 + IPA |
+| 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
+
+**能不能玩：现在还不能。** 缺的是 Metal 重放那一半与 iOS 内嵌装载分支（两者都需要 macOS / 真机）。
+
+---
+
 ## 一、参考项目的技术路径（先看清楚再动手）
 
 参考项目 `dm/` 的结构与分工：
