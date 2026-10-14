@@ -11,20 +11,24 @@
 #                —— 注意会做合法性归化：CFBundleShortVersionString 只允许「数字 + 点」，
 #                   传 git SHA 进来（CI 在分支推送时会这么传）也自动回落到 0.1.0
 set -euo pipefail
-[ -n "${SMO_DEBUG:-}" ] && set -x      # CI 上开：日志里能看到死在哪个命令
+# 注意用 if 而不是「[ … ] && set -x」：后者在 set -e 下，条件不成立时整条 AND-OR 列表返回非零，
+# 有的 bash（例如 macOS 自带的 3.2）会因此当场中止脚本。
+if [ -n "${SMO_DEBUG:-}" ]; then set -x; fi      # CI 上开：日志里能看到死在哪个命令
 cd "$(dirname "$0")"
 
 OUT=${SMO_OUT:-out}
 
 # 版本号归化：v1.2.3 → 1.2.3；别的（例如 40 位 SHA）→ 0.1.0
-RAW=${SMO_VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo 0.1.0)}
+# 注意：**先给 VERSION 默认值**。本脚本带 set -u，只要哪个 case 分支没命中就会当场报
+# 「VERSION: unbound variable」（CI 上已经这么挂过一次，且本地跑同样的片段是好的，
+#  所以除了修，还把 shell 版本号与实际取值打出来，让下次失败自己说明白）。
+VERSION=0.1.0
+RAW="${SMO_VERSION:-$(git describe --tags --always 2>/dev/null || true)}"
 case "$RAW" in
-  v[0-9]*)            VERSION=${RAW#v} ;;
-  [0-9]*.[0-9]*)      VERSION=$RAW ;;
-  *)                  VERSION=0.1.0 ;;
-
+  v[0-9]*.[0-9]*)     VERSION="${RAW#v}" ;;
+  [0-9]*.[0-9]*)      VERSION="$RAW" ;;
 esac
-case "$VERSION" in *[!0-9.]*) VERSION=0.1.0 ;; esac      # 还带非法字符就一律回落
+echo "== shell: bash ${BASH_VERSION:-?} | RAW=[$RAW] VERSION=[$VERSION] =="
 echo "== 构建 SMOMobile 壳（版本 $VERSION，来源 '${RAW}'）=="
 sw_vers
 xcodebuild -version
