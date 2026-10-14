@@ -426,3 +426,41 @@ blob0/5 的 stage=1（顶点）、其余 stage=5（片元）。
    - 真机跑一遍，把宿主实际看到的管线状态（贴图格式、属性布局）dump 出来，回头重出着色器库
 2. **metallib**：Windows 上没有 Apple 的 Metal 编译器。按参考项目的 NO_XCODE 路线：
    MSL 源码进包，首次启动在手机上编译一次（系统会缓存）。
+
+---
+
+# 第五轮：GitHub 云端出包打通（CI 全绿，IPA 产出）
+
+仓库：https://github.com/hyc1743/super-mario-odyseey-ios（名字里多打了一个 e，见文末）
+
+## 2.17 两个 job
+
+| job | runner | 做什么 | 状态 |
+|---|---|---|---|
+| 工具链自检（不需要游戏文件） | ubuntu | `pip install -r requirements.txt` + `selftest.py`（Yaz0 / SARC / NSO 头 / 改写器端到端） | ✅ |
+| 构建 App 壳 → 未签名 IPA | macos | `brew install xcodegen` → `shell_build.sh` → 产物 `SMOMobile-shell.ipa`（28 KB）作为 artifact | ✅ |
+
+**为什么云端 macOS runner 就够**：参考项目是在 Apple 芯片的 Mac 上用 `xcodebuild` 出包的；
+GitHub 的 macOS runner 正好提供这台机器（含 Xcode）。于是「本机没有 Mac」不再是障碍。
+
+## 2.18 打通这条链路时踩的 6 个坑（每个都真实挂过 CI）
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | `CFBundleShortVersionString` 非法 | CI 把 **40 位 git SHA** 塞进 `MARKETING_VERSION`；该键只允许「数字 + 点」 | 版本号归化：非 `v1.2.3`/`1.2.3` 形状一律回落 `0.1.0` |
+| 2 | Xcode 直接拒绝 | `project.yml` 写死 `iOS 16.0`，新版 Xcode 不支持这么低的部署目标 | 从 SDK 的 `SDKSettings.plist` 读 `MinimumDeploymentTarget`，取与工程值的较大者 |
+| 3 | 脚本静默中止 | **BSD `sort` 不支持 `-V`**（那是 GNU coreutils），而脚本带 `set -o pipefail` | 用 awk 比版本号 |
+| 4 | 同上（隐患） | `sed … \| head -1` 在 `pipefail` 下可能被 **SIGPIPE** 判失败 | 改用 awk「打印后立即 exit」 |
+| 5 | `VERSION: unbound variable`（本地怎么都复现不了） | **macOS 自带的 bash 3.2 是多字节不安全的**：`"$VERSION，来源"` 里紧跟变量的全角逗号被**吞进变量名**，于是去查 `VERSION，` 这个不存在的变量；`set -u` 当场中止。本地 bash 5.3 正确处理多字节，所以本地永远好的 | 变量**一律加花括号** `${VERSION}`；并加了扫描脚本查同类问题 |
+| 6 | `Build input file cannot be found: …/Gen/Gen/Info.plist` | `xcodegen --project Gen` 会把 `project.yml` 里所有相对路径都拼到 `Gen/` 下面 | 改为在当前目录生成工程（`--project .`） |
+
+## 2.19 一个可复用的诊断手法：check-run annotations
+
+GitHub 的**运行日志要仓库管理员权限**才能下载（`.../actions/jobs/<id>/logs` 返回 403），
+但 **check-run 的 annotations 是公开可读的**。所以 workflow 里加了：
+
+- 构建步骤整段输出落盘（`tee smo/ios/out_step.log`）
+- 失败时把日志尾部与 `error:` 行用 `::error::` 发成注解
+- 同时把日志传成 artifact（管理员可直接下载）
+
+这样在拿不到管理员权限的情况下，也能读到真实报错 —— 上面第 5、6 个坑就是这么定位的。
