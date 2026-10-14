@@ -7,10 +7,20 @@
 **已经能跑的**：原始一侧 —— 在站点上执行原指令（`svc #n`）并用同一个效果模型代替真正的 svc，
 归档对比 x0..x29（跳 x18）与 SP，并确认续点是「原指令的下一条」。
 
-**还没跑通的**：改写后一侧。站点是 `b <门块>`，门块在补丁区，最后通过一个字面量池里的地址
-`blr` 到宿主的 `dm_gate`；那个字段在**未重定位**的 patched.bin 里是 0，所以模型里要把「PC 跑到映像外」
-当成宿主边界。现在是 `UC_ERR_READ_UNMAPPED`（推测是取指/读字面量落在了没映射的地方），
-还没定位到具体是哪一条、哪个地址 —— 这是下次接着做的第一件事。
+**还没跑通的**：改写后一侧。站点是 `b <门块>`，门块在补丁区，最后经字面量池 `blr` 到宿主的 `dm_gate`；
+那个字段在**未重定位**的 patched.bin 里不是有效地址，所以模型要把「PC 跑到映像外」当成宿主边界。
+
+已经试过两步（都没解决，别重复走）：
+  1. 把映像多映射 4 MB 空位 —— 无效（跳转目标不在紧邻处）
+  2. 在地址 0 映射一页并写 `ret` —— 无效（报错从 READ_UNMAPPED 变成 FETCH_UNMAPPED，说明跳到的是别的地址）
+  3. 注册 `UC_HOOK_MEM_FETCH_UNMAPPED` 想现场补一页 `ret` 让它重试 —— 钩子确实注册上了（见 run_rewritten），
+     但仍然抛 FETCH_UNMAPPED
+下一步该做的（按信息量排序）：
+  a. 先**定位**：把站点 0xa9c10 那条 `b` 的目标算出来，看门块在哪儿；再把门块反汇编出来，
+     找到那条 `blr`/`br` 及其操作数来源（字面量池的地址与内容），确认"跳到哪里、为什么未映射"。
+     —— 这一步纯反汇编，用 `smo/tools/rawdis.py` 就能做，不需要 Unicorn。
+  b. 再决定建模方式：要么在钩子里**接管**（设置 PC 而不是依赖重试），要么干脆把 dm_gate 的桩地址
+     写进映像（更接近装载后的真实情况，也更能验门块本身）。
 
 所以：**目前不要引用这个工具的任何结论**。它存在的意义是把方法与站点地址定下来，
 以及把「比较什么」这件事想清楚（下面三条）。
@@ -37,7 +47,8 @@ import struct
 import sys
 
 from capstone import CS_ARCH_ARM64, CS_MODE_LITTLE_ENDIAN, Cs
-from unicorn import (UC_ARCH_ARM64, UC_HOOK_CODE, UC_MODE_ARM, Uc, UC_PROT_ALL)
+from unicorn import (UC_ARCH_ARM64, UC_HOOK_CODE, UC_HOOK_MEM_FETCH_UNMAPPED,
+                     UC_MODE_ARM, Uc, UC_PROT_ALL)
 from unicorn.arm64_const import (UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP,
                                  UC_ARM64_REG_X0, UC_ARM64_REG_X18)
 
@@ -72,6 +83,11 @@ def make_uc(img):
     uc.mem_map(BASE, align(len(img)) + 0x400000, UC_PROT_ALL)
     uc.mem_write(BASE, img)
     uc.mem_map(STACK - STACK_SZ, STACK_SZ, UC_PROT_ALL)
+    # 哨兵页：改写后的门块经字面量池 blr 到宿主 dm_gate，未重定位时那个字段是 0。
+    # 直接跳到 0 会在**取指阶段**就失败，代码钩子根本不会被调用（这就是之前 UC_ERR_READ_UNMAPPED 的原因），
+    # 所以先把 0 处映射出来，让钩子有机会把「跑到映像外」识别成宿主边界。
+    uc.mem_map(0, PAGE, UC_PROT_ALL)
+    uc.mem_write(0, bytes([0xC0, 0x03, 0x5F, 0xD6]))   # ret（钩子会先接管，这里只是兜底）
     return uc
 
 
@@ -143,7 +159,21 @@ def run_rewritten(img, site, seed, img_len):
         if (addr - BASE) == site + 4:                 # 回到续点
             uc_.emu_stop()
 
+    def unmapped(uc_, access, address, size, value, _):
+        # 取指跑到映像外 = 宿主的 dm_gate 入口（未重定位的 patched.bin 里那个字面量不是有效地址）。
+        # 现场补一页 ret 并让它重试：ret 会回到 LR，也就是门块的续点 —— 于是门块自己的
+        # 保存/恢复/续点逻辑照常执行（这正是我们要验的东西）。
+        state["host_calls"] += 1
+        apply_svc_model(uc_, 0)
+        page = address & ~(PAGE - 1)
+        try:
+            uc_.mem_map(page, PAGE, UC_PROT_ALL)
+        except Exception:
+            pass
+        uc_.mem_write(page, bytes([0xC0, 0x03, 0x5F, 0xD6]))    # ret
+
     uc.hook_add(UC_HOOK_CODE, hook)
+    uc.hook_add(UC_HOOK_MEM_FETCH_UNMAPPED, unmapped)
     uc.emu_start(BASE + site, 0, count=100000, timeout=2 * 1000 * 1000)
     return snapshot(uc), uc.reg_read(UC_ARM64_REG_PC) - BASE, state["host_calls"]
 
