@@ -66,6 +66,8 @@ jobs:
         run: |
           gcc -O2 -Wall -Wextra -Werror -Ismo/gfx/nvn -o /tmp/nvn_selftest               smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c smo/gfx/nvn/tests/nvn_selftest.c
           /tmp/nvn_selftest 2>&1 | tee -a /tmp/selftests.log
+      - name: x18 不变量检查（改写产物里不能有指令写通用 x18）
+        run: python3 smo/tools/check_x18.py work/synthetic
       - name: 检查生成物与名字表一致（NVN 表与记录桩）
         run: |
           python3 smo/tools/gen_nvn.py --check
