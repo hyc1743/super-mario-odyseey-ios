@@ -36,6 +36,12 @@ jobs:
         run: pip install -r requirements.txt
       - name: 自检（Yaz0 / SARC / NSO 头 / 改写器端到端）
         run: python3 smo/tools/selftest.py
+      - name: 造合成改写产物（装载器自检用；真产物是游戏内容，不能进 CI）
+        run: python3 smo/tools/make_synthetic_artifacts.py work/synthetic
+      - name: 编译并跑装载器自检
+        run: |
+          gcc -O2 -Wall -Wextra -Werror -o /tmp/loader_selftest               smo/host/loader_core.c smo/host/tests/loader_selftest.c
+          /tmp/loader_selftest work/synthetic sdk main
 
   shell-ipa:
     name: 构建 App 壳 → 未签名 IPA

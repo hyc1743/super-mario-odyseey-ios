@@ -584,3 +584,75 @@ nn::vi 6        nn::lmem 6   nn::fgm 6       nn::prepo 5  nn::ssl 4 …
 - 不先把 **C 风格符号**（`__cxa_*`、`acos`、`__errno_location`、`__nnmusl_*`）拦下来，
   它们会因为「被别的模块导出且不在本地库白名单里」被错归成服务客户端（实测错 **275 条**）。
 - `St` 是 Itanium ABI 里 `std::` 的替代码（`_ZNSt3__112basic_string…`），不是普通命名空间。
+
+---
+
+# 第八轮：宿主装载器（核心跑通，并在真实产物上验证）
+
+## 2.27 装载器做了什么（对应参考项目 `loader.c`）
+
+`smo/host/loader_core.c` 是**平台无关**的那部分，逐条对应参考项目：
+
+| 步骤 | 对应参考项目 | 本仓文件 |
+|---|---|---|
+| 读改写器表头（段边界、键页、8 个槽号） | `read_layout` | `loader_core.c` |
+| 装键页：把「**实际**键号 × 8」写进产物键页，再设只读 | `install_key_page` | 同上 |
+| 登记宿主门（`gates.tsv` 逐行） | `register_gates` | 同上 |
+| 解析 MOD0 与动态段（SYMTAB/STRTAB/INIT/INIT_ARRAY） | `parse_dynamic` | 同上 |
+| 符号名哈希表 + **线性扫描逐条对照**（参考项目 DM_SYMCHECK 的做法） | `module_sym` | 同上 |
+| 四类重定位：RELATIVE / ABS64 / GLOB_DAT / JUMP_SLOT | `relocate` | 同上 |
+| 解析顺序：**HLE_FORCE → 本模块 → 别的模块 → 宿主 import** | `resolve_sym` + `force_lookup` | `dm_hle_force()` 钩子 |
+
+平台相关的只有三件事（`dm_image_alloc` / `dm_code_protect` / `dm_ro_protect` / `dm_slot_key`），
+声明在 `dm.h` 里 —— 于是**同一份代码既能编进 iOS App，也能在本机当自检跑**（Windows/Linux 上
+用 malloc + 空保护 + 假槽号）。这是在拿不到 Mac 的情况下能对装载器做的最强验证。
+
+## 2.28 在真实产物上的实测结果
+
+```
+  rtld     映像   0x1013c  text_end   0x17a0  patch  0x10000  符号     22  键页 OK
+  sdk      映像  0xa608bc  text_end 0x3de8b8  patch 0xa20000  符号  19866  键页 OK
+  subsdk0  映像  0x7043bc  text_end 0x2f45b4  patch 0x6c0000  符号  11388  键页 OK
+  main     映像 0x25c5350  text_end 0xbf1838  patch 0x25b0000  符号  91231  键页 OK
+
+  重定位：RELATIVE 174723+8564+1751+13   ABS/GLOB 14850+14262+16416+17   JUMP_SLOT 639+6264+3527+2
+  宿主门合计 139（sdk 135 = 106 svc + 29 cntpct，rtld 4）
+  交宿主 import：调用 38 次，不同名字 25 个
+  符号查询 48127 次，哈希表与线性扫描不一致 0 次
+```
+
+**两条交叉验证（两个完全独立的工具给出同一个数）：**
+
+| 事实 | 装载器 | 独立工具 |
+|---|---|---|
+| `main` 的 JUMP_SLOT = **639** | 从重定位表逐条数 | `xref.py` 从指令里数 PLT 桩 = 639 ✓ |
+| `main` 交宿主 import = **12**、`subsdk0` = **4** | 装载器解析结果 | `import_graph.py` 独立算的 12 / 4 ✓ |
+
+## 2.29 一个重要的架构点（关系到最后的工作量估计）
+
+装载器报「交宿主 import」只有 25 个名字，**远小于**第 2.24 节列出的 412 个服务客户端。
+原因：**服务层那 412 个函数是被 `sdk` 模块导出的**，走的是跨模块解析，根本到不了
+「交宿主」这一步 —— 它们必须靠 `dm_hle_force()`（对应参考项目的 `HLE_FORCE`）**强制接管**。
+
+所以宿主的工作面是**两块相加**：
+1. **412 个服务函数** → 需要 `HLE_FORCE` 表逐条登记 + 实现
+2. **25 个无人提供的 import**（含 NVN 的 `nv::*`、`glslc*` 等）→ 需要 `resolve_import` 兜底
+
+## 2.30 移植时自己踩的两个坑
+
+1. **漏了跨模块解析**：第一版 `relocate` 里未定义符号直接交宿主，于是 `subsdk0` 报「交宿主 8482 次」
+   （真值 4）。补上 `guest_sym()` 后数字立刻与 `import_graph.py` 对上。
+2. **合成产物的 MOD0 被覆盖**：自检用的合成模块把 `MOD0` 摆在偏移 0，前 4 字节又写成了 ELF 头，
+   加载器报「找不到 MOD0」。合成器现在前 0x10 字节留给头部。
+
+## 2.31 CI 也有了装载器覆盖
+
+CI 里没有游戏文件，所以加了 `smo/tools/make_synthetic_artifacts.py`：按**同一个格式**造一份最小产物
+（MOD0 + 动态段 + 符号表 + 四类重定位 + fixups/gates），CI 上 `gcc -Werror` 编出装载器再跑它：
+
+```
+gcc -O2 -Wall -Wextra -Werror -o /tmp/loader_selftest smo/host/loader_core.c smo/host/tests/loader_selftest.c
+/tmp/loader_selftest work/synthetic sdk main
+```
+
+真实产物四个模块的强断言（门 139、交宿主 20–60 个名字）只在跑真实集合时才生效。
