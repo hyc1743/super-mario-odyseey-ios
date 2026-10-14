@@ -16,6 +16,9 @@ set -euo pipefail
 if [ -n "${SMO_DEBUG:-}" ]; then set -x; fi      # CI 上开：日志里能看到死在哪个命令
 cd "$(dirname "$0")"
 
+ROOT=$(cd ../.. && pwd)                 # 仓库根（本脚本在 smo/ios/ 下）
+PY=${SMO_PY:-python3}                   # 本机跑可用 smo/env.sh 里的 $PY；CI 上是 python3
+
 OUT=${SMO_OUT:-out}
 
 # 版本号归化：v1.2.3 → 1.2.3；别的（例如 40 位 SHA）→ 0.1.0
@@ -75,7 +78,23 @@ xcodebuild \
   -derivedDataPath Gen/dd \
   IPHONEOS_DEPLOYMENT_TARGET="$DEP" \
   MARKETING_VERSION="$VERSION" \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+  # ---- 三段内嵌（可选）：只有本机已生成改写产物时才做 ----
+# iOS 真机不许运行时生成/改代码，客体映像必须在出包时就编进可执行文件（见 loader_apple.c 开头的说明）。
+# 生成物：smo/ios/Sources/Embedded.S（三个签名段：__TEXT,__dm<模块>x0 / __DM<模块>W,__img / __TEXT,__dm<模块>x1）
+# 已做的：生成 .S + manifest，并**校验三段能拼回原映像**（check_embed.py，不需要 macOS 也能跑）。
+# 还差的一步：把打印出来的 -segprot 参数接进 Xcode 链接（xcodegen 的 settings 里加 OTHER_LDFLAGS），
+# 以及 loader_apple.c 的 iOS 分支（vm_allocate 保留 + 三段 mach_vm_remap 回同一基址）。
+EMBED_SRC="$ROOT/smo/ios/Sources/Embedded.S"
+if ls "$ROOT/work/rewrite/"*.patched.bin >/dev/null 2>&1; then
+  echo "== 三段内嵌：把改写产物编进壳 =="
+  "$PY" "$ROOT/smo/ios/tools/gen_embed.py" "$ROOT/work/rewrite" "$EMBED_SRC" rtld sdk subsdk0 main | tee "$OUT/embed_flags.txt"
+  "$PY" "$ROOT/smo/ios/tools/check_embed.py" "$EMBED_SRC"
+  echo "   链接参数（待接进 Xcode）：$(tail -1 "$OUT/embed_flags.txt")"
+else
+  echo "== 跳过三段内嵌（没有 work/rewrite/*.patched.bin；壳仍然能编，只是没有客体映像）=="
+fi
+
+CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
   build > "$LOG" 2>&1
 RC=$?
 set -e
