@@ -51,8 +51,7 @@ typedef uint32_t (*fn_create)(const char *, int64_t);
 // Linux 上第一次 CI 就是这么红的），所以拼进 helper 里显式检查。
 static void jp(char *out, size_t n, const char *a, const char *b, const char *c) {
     int k = snprintf(out, n, "%s%s%s", a, b, c ? c : "");
-    if (k < 0 || (size_t)k >= n) { printf("路径太长
-"); exit(2); }
+    if (k < 0 || (size_t)k >= n) { printf("路径太长"); exit(2); }
 }
 
 static void mkfile(const char *p, const char *data) {
