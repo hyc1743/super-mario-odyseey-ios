@@ -100,6 +100,24 @@ Needs an Apple Silicon Mac with Xcode (`xcodebuild`). The cloud route above is t
 Dump them from your own Switch (see [docs/GAME_FILES.md](docs/GAME_FILES.md)): the ExeFS
 (`main` / `sdk` / `subsdk0` / `rtld` / `main.npdm`) and the RomFS from the same Program NCA.
 
+## Acknowledgements
+
+This project stands on the open-source work below. Thank you to its authors and maintainers.
+
+- **[jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)** (MIT): the **reference project**. The technical path ("Horizon compatibility layer + native aarch64 execution") and the skeleton of the loader / host layer / rewriter / embed packer are derived from it (`smo/tools/port_rewriter.py`, `smo/host/loader_core.c`, `smo/host/entry.S`, `smo/ios/tools/gen_embed.py` — each file header states the derivation).
+- **Ryujinx** (Ryubing, MIT): `smo/third_party/ryujinx/` bundles its shader translator (Maxwell → SPIR-V) unchanged. It is the authoritative Maxwell decoder, so we use it as the criterion for verifying the structure of SMO's shader blobs (STATUS.md round 7).
+- **nvn.h** (h1k421, MIT): NVN type declarations (`smo/gfx/nvn/include/nvn.h`). We use **only its enum values** (660 of them, extracted by `smo/gfx/nvn_enum.py`), never its struct layouts — see `smo/gfx/nvn/include/README.md` for why.
+- **SPIRV-Cross** (Khronos, Apache-2.0): offline SPIR-V → Metal Shading Language translation.
+- **hactool** (SciresM, MIT): the source of the NSP/PFS0 unpacking algorithms — `smo/tools/nsp_extract.py` was written line by line against it (recorded in `docs/DERIVED.md`).
+- **LLVM** (Apache-2.0 with LLVM exceptions): disassembly. `smo/tools/rawdis.py` wraps a flat image into a minimal ELF and hands it to `llvm-objdump`; that is what made round 14 (the real NVN mechanism) possible.
+- **Capstone** (BSD-3): instruction decoding (jump-table recognition in the rewriter; `smo/tools/check_x18.py` uses its register read/write sets to tell `x18` from `s18/d18`).
+- **XcodeGen** (MIT), **.NET** (MIT): generating the Xcode project and running `dmsh_xlate`.
+- Python side: numpy, Pillow, zlib and friends (see `requirements.txt`).
+
+**Provenance of the rewrite rules (for transparency)**: the batch of rewrites in `port_rewriter.py` that lets the game run offline comes, per the reference project, from a community patch called **LFS Mod Offline Fix**, whose original publication they have no reliable record of. We keep the same statement: **the original provenance of that batch is likewise untraceable**; we merely carry it forward with this note.
+
+**Planned but not yet bundled** (recorded in STATUS.md): **deko3d** (devkitPro, zlib) for the texture layout size algorithm (the reference project's `nvn_tex.c` is ported from it), **bcdec** (iOrange, MIT/Unlicense) to decode BC textures into non-BC formats on iOS (Apple GPUs do not support BC), and the use of **Unicorn** for "equivalence checks of the rewrites" that the reference project mentions — the last one is valuable for our "every conclusion must have reproducible evidence" rule and we intend to adopt it.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). The license covers this repository's source code only, not any game content.

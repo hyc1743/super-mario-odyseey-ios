@@ -153,6 +153,24 @@ docs/            游戏文件准备、衍生内容说明
 **有**：改写规则、模块结构与导入清单、着色器标识、以及为让移植成立必须记录的其它事实。
 逐项说明见 [docs/DERIVED.md](docs/DERIVED.md)。
 
+## 致谢
+
+本项目站在下面这些开放工作上。谢谢这些作者与维护者。
+
+- **[jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)**（MIT）：**参考项目**。技术路径、「Horizon 兼容层 + 原生 aarch64 执行」这条路线、以及装载器/宿主层/改写器/内嵌出包的骨架都从它派生（`smo/tools/port_rewriter.py`、`smo/host/loader_core.c`、`smo/host/entry.S`、`smo/ios/tools/gen_embed.py` 等文件头都写明了派生关系）。
+- **Ryujinx**（Ryubing，MIT）：`smo/third_party/ryujinx/` 原样收录其着色器翻译器（Maxwell → SPIR-V）。它是权威的 Maxwell 解码实现，我们把它当作 SMO 着色器块结构的判据（见 STATUS.md 第七轮）。
+- **nvn.h**（h1k421，MIT）：NVN 类型声明（`smo/gfx/nvn/include/nvn.h`）。我们**只用其中的枚举值**（`smo/gfx/nvn_enum.py` 抽出 660 条），不用它的结构体布局 —— 理由见 `smo/gfx/nvn/include/README.md`。
+- **SPIRV-Cross**（Khronos，Apache-2.0）：SPIR-V → Metal Shading Language 的离线翻译。
+- **hactool**（SciresM，MIT）：NSP/PFS0 解包的算法来源 —— `smo/tools/nsp_extract.py` 是逐行对照其实现写的（`docs/DERIVED.md` 有这条记录）。
+- **LLVM**（Apache-2.0 with LLVM exceptions）：反汇编。`smo/tools/rawdis.py` 把摊平映像包成最小 ELF 后交给 `llvm-objdump`，第十四轮能挖清 NVN 的真实机制靠的就是它。
+- **Capstone**（BSD-3）：指令解码（改写器的跳转表识别；`smo/tools/check_x18.py` 用它的读写集合区分 `x18` 与 `s18/d18`）。
+- **XcodeGen**（MIT）、**.NET**（MIT）：生成 Xcode 工程、跑 `dmsh_xlate`。
+- Python 侧：numpy、Pillow、zlib 等（见 `requirements.txt`）。
+
+**改写规则的来源（透明起见）**：`port_rewriter.py` 里那批「让游戏离线可跑」的改写规则，参考项目注明了来自社区的 **LFS Mod Offline Fix** 补丁，且他们也没有可靠的原始出处记录。我们沿用同一口径：**这一批规则的原始出处同样不可考**，我们只沿用它们并保留这个说明。
+
+**还计划用到的**（尚未收录，已记在 STATUS.md）：**deko3d**（devkitPro，zlib）的纹理布局尺寸算法（参考项目的 `nvn_tex.c` 即移植自它）、**bcdec**（iOrange，MIT/Unlicense）在 iOS 上把 BC 贴图解成非 BC 格式（苹果 GPU 不支持 BC），以及参考项目提到的用 **Unicorn** 做「改写前后等价性校验」的做法 —— 最后这条对我们的「每个结论都要有可复现证据」很有价值，打算纳入。
+
 ## 贡献
 
 见 [CONTRIBUTING.md](CONTRIBUTING.md)。基本原则：每一条结论都要有可复现的证据；
