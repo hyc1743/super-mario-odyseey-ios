@@ -42,14 +42,15 @@ jobs:
         run: |
           gcc -O2 -Wall -Wextra -Werror -c -o /tmp/hle.o smo/host/hle.c -Ismo/host
           gcc -O2 -Wall -Wextra -Werror -c -o /tmp/hf.o smo/host/hle_force_gen.c -Ismo/host
-      # 9 个 C 单测（装载器 / svc / 线程 / fs / oe+hid / NVN 接口层 / 状态层 / 着色器索引 / 重放记账）。
+      # 10 个 C 单测（装载器 / svc / 线程 / fs / oe+hid / NVN 接口层 / 状态层 / 着色器索引 /
+      # 重放记账 / 纹理块线性布局）。
       #
       # 走 Makefile，不再在这里手写 gcc 命令行。原因：这些步骤原先各自抄一份文件清单，
       # 加重放层时 hle_nvn.c 多了一处 nvn_replay_call，只有 replay 那一步的清单跟着改了 ——
       # 另外两步从 2026-10-14 起就链不上（undefined reference），而本地 `make test` 也一样挂。
       # 两边各有一份会漂移的清单，等于没有一份是准的。现在 Makefile 是唯一来源，
       # 共同依赖写在 GFX_COMMON 里，本机与 CI 跑的是同一条命令。
-      - name: C 单测（9 个，走 Makefile 保证与本机一致）
+      - name: C 单测（10 个，走 Makefile 保证与本机一致）
         run: make -C smo/host test CC=gcc PY=python3 2>&1 | tee -a /tmp/selftests.log
       - name: 检查 nvn.h 抽出的枚举与头一致（Metal 翻译要用这些数值）
         run: python3 smo/gfx/nvn_enum.py --check 2>&1 | tee -a /tmp/selftests.log
