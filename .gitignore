@@ -51,3 +51,6 @@ obj/
 
 # PI（本机代理）的内部配置
 .pi/
+
+# xcodegen 生成的工程
+*.xcodeproj/

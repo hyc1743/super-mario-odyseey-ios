@@ -58,13 +58,16 @@ python3 tools/gen_icon.py
 
 rm -rf Gen "$OUT"
 mkdir -p Gen "$OUT"
-xcodegen generate --spec project.yml --project Gen
+# 在当前目录生成工程（**不是** Gen/）：xcodegen 把 --project 指定的目录当作相对基准，
+# 若生成到 Gen/，project.yml 里的 info.path(Sources/Resources) 都会被拼成 Gen/Gen/Info.plist、
+# Gen/Sources 之类 —— CI 上就是这么报的：Build input file cannot be found: .../Gen/Gen/Info.plist
+xcodegen generate --spec project.yml --project .
 
 # 构建日志同时落到文件：CI 在失败时把它传成 artifact，否则只有管理员能看日志
 LOG="$OUT/xcodebuild.log"
 set +e
 xcodebuild \
-  -project Gen/SMOMobile.xcodeproj \
+  -project SMOMobile.xcodeproj \
   -scheme SMOMobile \
   -configuration Release \
   -sdk iphoneos \
