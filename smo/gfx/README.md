@@ -39,3 +39,39 @@
 3. **着色器**：已经离线翻译好 18470 个（SPIR-V + MSL，见 STATUS.md 第七轮）。
    `nvnProgramSetShaders` 收到控制段后算键（sha256 前 16 位）→ 查表 → 取 metallib。
    在手机上编译 MSL 需要 Metal 编译器（Xcode / CI 的 macOS runner 上有）。
+
+## 2.5 接口层的真实机制（第十四轮实测，替代先前「按名字索取」的粗略理解）
+
+先把一条先前的错误结论更正掉：我曾说「469 个名字里只有 2 个被代码装载」——那是**工具 bug**，
+adrp 的掩码写成 `0x9F00001F`（把 Rd 也算进固定位），于是只有 `rd=x0` 的 adrp 能匹配。
+改成 `0x9F000000` 后，469 处装载全部找到（`smo/tools/rawdis.py`、`smo/gfx/tools/nvn_getproc.py` 都已修）。
+
+实际机制（每一步都有反汇编证据）：
+
+1. `main` 静态链入了 NVN 的 **C 过程蹦床库**，并**导出** `nvnLoadCProcs`（0x720414，12936 字节）。
+2. `nvnLoadCProcs(x0=device, x1=getProc)` 是一段**展开的序列**：对 **461 个名字**各做
+   `adrp/add 名字 → blr getProc → str 结果到 GOT 槽`。461 × 28 字节 ≈ 12936 字节，与符号大小吻合。
+3. 游戏（AGL）调它的地方在 0x7312a8 附近：先用 `nvnBootstrapLoader` 取 **`nvnDeviceInitialize`**
+   与 **`nvnDeviceGetProcAddress`**（就是 `.text` 里仅有的两处名字装载），再把后者当 `getProc` 传进去。
+4. 之后游戏调用 NVN 函数的形状是 `adrp x8,0x1e59000 ; ldr x8,[x8,#off] ; ldr x8,[x8] ; blr x8`。
+   实测：**461 个槽全部被代码引用**（说明名字↔槽配对正确），共 173 处直接调用点、涉及 28 个名字。
+   其余调用走 AGL 自己缓存的表（真机 `UNIMPL` 日志会把它们补全）。
+
+**这对我们的设计意味着什么（好消息）**：需要接管的入口只有两个 ——
+`nvnBootstrapLoader`（唯一 import）与 `nvnDeviceGetProcAddress`（按名字返回）——
+而这两个正好用同一张 469 项的名字表伺候。`nvnLoadCProcs` **不用接管**：它是客体代码，
+它会来调**我们**的 GetProcAddress 461 次。也就是说，第十三轮建好的接口层形状是对的。
+
+`slots.tsv` 是这次挖出来的表（名字 / 槽 / 解析点 / 调用点数 / 前几个调用点），
+`pfnc_` 前缀的名字池（0x164dc47，451 个）就是 NVN C 过程表的字段名。
+
+## 2.6 顺手验证的一条全局前提：x18
+
+宿主 C 代码要在客体代码中间运行（门 → 宿主函数 → 返回客体），前提是**客体不再写苹果的平台寄存器 x18**
+（门的出口保存了 x18 但不回读，见 entry.S）。用 capstone 的读写集合精确检查（区分 `x18` 与 `s18/d18`）：
+
+```
+smo/tools/check_x18.py     →  main / sdk / subsdk0 / rtld 四个改写产物：0 条指令写通用 x18  ✅
+```
+
+不变量成立，共用 x18 的设计站得住。
