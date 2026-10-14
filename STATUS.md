@@ -324,3 +324,47 @@ $PY smo/tools/patch_nso.py work/game/ExeFS/main work/rewrite main
 | 5 | 服务层 HLE | 按 `main` 实际调用逐族实现（含 Audren 92 项） |
 | 6 | NVN → Metal | 469 个名字的函数表 + 命令记录/重放 |
 | 7 | 触屏 | SMO 是 3D 平台跳跃，摇杆与按键映射要重新设计 |
+
+---
+
+# 第三轮：着色器翻译链打通（SMO 着色器 → Maxwell → SPIR-V → MSL）
+
+## 2.10 `.sharc` / `.sharcb` 是什么（实测）
+
+`.szs` 解开后是两个文件（名字共享后缀，SARC 允许）：
+
+| 文件 | magic | 内容 |
+|---|---|---|
+| `X.sharc` | `AAHS`（"SHAA" 反写） | **定义**：着色器名、变量名、UBO 名、`#define` 名（`SAMPLING_TYPE` / `IS_OUT_LINEAR`），以及 **GLSL 源码**（`alDefineVarying.glsl`、作者注释 "Matsuda Hirokazu (C)Nintendo"） |
+| `X.sharcb` | `BAHS`（"SHAB" 反写） | **二进制**：编译好的 Maxwell 机器码 |
+
+`.sharcb` 内部：每个着色器变体是一个槽位，以 `0x12345678` 标记开头；
+`+0x30..+0x80` 是 **SPH（着色器程序头）**，`+0x80` 起是 Maxwell 指令。
+
+## 2.11 翻译链已经在**本机**跑通
+
+| 环节 | 状态 |
+|---|---|
+| 翻译器（Ryujinx 着色器库 + `dmsh_xlate`，C#） | ✅ 本机 .NET 10 编译成功（0 警告 0 错误） |
+| SPIR-V → MSL | ✅ 本机编译的 spirv-cross 1.4.357.0 |
+| SMO 着色器 → SPIR-V | ✅ **顶点着色器已译出**：blob0/blob5 译出 `attr=2`，正好对上 `.sharc` 里的 `aPosition` + `aTexCoord1` |
+
+**怎么确认 SPH 在那里的（判据，不是猜）**：Ryujinx 的 `ShaderHeader`
+（它解的就是真实 Switch 着色器）规定 `word0` bit[10:13] 是 stage、`+0x18` 是 imap、`+0x48/+0x4C` 是 omap。
+把 `+0x30` 当 SPH 解，imap 得到 `0x0a`（X/Y 都是 Perspective 插值）、omap 得到 `0x0f`（写深度），
+位置与语义全部吻合；而按 Ryujinx 排法解 word0 得到 stage=5（非法），说明 **Nintendo 的 NVN 头里
+word0 的位排法与 GPU SPH 不同** —— 这一项还没定下来，是下一步第一件事。
+
+绕开它的办法（已验证有效）：**`+0x30..+0x80` 的 imap/omap 段原样抄，只把 word0 的 stage 位按
+Ryujinx 排法写**，再把 `word3` 的 OutputTopology 填成 `TriangleStrip`（不填会抛
+`Invalid output topology "0"` —— 这个报错也是判据的一部分）。这样做顶点侧就能译出正确的
+顶点属性数量。
+
+## 2.12 还没通的
+
+- **片元着色器**：能译完（不再抛异常、不再是空循环），但译出的反射里还没有贴图/颜色输出。
+  可能原因（按可能性排序）：片元侧还需要 `c1` 常数段（`BRX` 间接跳转的跳转表，参考项目
+  `dmsh_xlate` 的注释里写过：不给 c1，粒子着色器的控制流会错）；或者变体与 stage 的配对还不对。
+- **facts（贴图类型/格式、顶点属性类型、片元输出类型、计算线程组大小）**：参考项目从 PC 版的反射
+  里取，SMO 没有 PC 版 —— 这些要从 `.sharc` 的定义（`SAMPLING_TYPE` 等 `#define`、UBO 成员）
+  自己推。这是这条链剩下的主要工作。

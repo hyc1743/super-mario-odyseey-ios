@@ -43,3 +43,8 @@ venv/
 .DS_Store
 Thumbs.db
 *.swp
+
+# .NET / 翻译器构建产物
+bin/
+obj/
+*.nupkg

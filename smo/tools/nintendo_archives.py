@@ -73,7 +73,15 @@ def yaz0_decompress(d):
 # --------------------------------------------------------------------------- SARC
 
 class Sarc:
-    """SARC 归档：读出来就是 [(名字, 数据偏移, 大小)]，数据在文件里的绝对偏移。"""
+    """SARC 归档：读出来就是 [(名字, 数据偏移, 大小)]，数据偏移是文件里的绝对偏移。
+
+    关于名字偏移的**真实歧义**：节点里的名字字段（低 24 位）在 SMO 的这些 `*.szs` 里是
+    「字节偏移 ÷ 4」——例如 alReducedShader 里第二个名字实际在字符串表 +24 处，字段写的是 6。
+    而常见的 SARC 文档写的是字节偏移。不猜：名字表本身是连续的、4 字节对齐的 NUL 结尾字符串，
+    把它们按顺序读出来就得到真实偏移，再与字段值比对，哪个约定能对上全部条目就用哪个
+    （见 _detect_name_scale）。实测 27 个 `*.szs`：全部对上「÷4」，而且名字与内容 magic 互相印证
+    （`.sharc` → `AAHS`，`.sharcb` → `BAHS`）。
+    """
 
     def __init__(self, d):
         self.d = d
@@ -95,10 +103,28 @@ class Sarc:
         sfnt_size, _ = struct.unpack_from("<HH", d, sfnt + 4)
         assert sfnt_size == 8, f"SFNT 头长 {sfnt_size:#x}"
         strtab = sfnt + 8
+        self.name_scale = self._detect_name_scale(strtab)
         self.entries = []
         for h, name_off, start, end in self.nodes:
-            name = d[strtab + (name_off & 0xFFFFFF):d.index(b"\0", strtab + (name_off & 0xFFFFFF))].decode()
+            p = strtab + (name_off & 0xFFFFFF) * self.name_scale
+            name = d[p:d.index(b"\0", p)].decode(errors="replace")
             self.entries.append((name, self.data_offset + start, end - start))
+
+    def _detect_name_scale(self, strtab):
+        """定下名字字段的单位：1（字节偏移）还是 4（字节偏移 ÷ 4）。
+
+        判据不依赖任何猜测：把字符串表里的连续名字逐个读出来（NUL 结尾、向前对齐到 4 字节），
+        得到一串真实字节偏移，再看哪个约定能解释全部节点的字段值。
+        """
+        seq, p, n = [], strtab, len(self.d)
+        while p < n and self.d[p] != 0 and len(seq) < max(64, len(self.nodes) * 4):
+            seq.append(p - strtab)
+            p = (self.d.index(b"\0", p) + 1 + 3) & ~3
+        fields = [f & 0xFFFFFF for _, f, _, _ in self.nodes]
+        for scale in (1, 4):
+            if all(f * scale in seq for f in fields):
+                return scale
+        return 1
 
     def read(self, name):
         for n, off, size in self.entries:
