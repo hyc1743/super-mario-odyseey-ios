@@ -464,3 +464,54 @@ GitHub 的**运行日志要仓库管理员权限**才能下载（`.../actions/jo
 - 同时把日志传成 artifact（管理员可直接下载）
 
 这样在拿不到管理员权限的情况下，也能读到真实报错 —— 上面第 5、6 个坑就是这么定位的。
+
+---
+
+# 第六轮：facts 推导（并证明「缺省值本来就对」）
+
+## 2.20 facts 从哪来：游戏自己的 GLSL
+
+参考项目的 facts 来自 **PC 版**的反射；SMO 没有 PC 版，但这些事实就写在 `.sharc` 内嵌的 GLSL 里，
+而且**同源**（编译成 Maxwell 的就是它）。`smo/tools/glsl_facts.py` 把它们读出来：
+
+| facts | GLSL 出处 | 全量实测 |
+|---|---|---|
+| 贴图维度类型 | `uniform sampler2D/3D/Cube/…` | 2d ×172 · cube ×28 · 3d ×14 · 1d ×2 · 2darray ×2 |
+| 顶点属性分量类型 | `layout(location=N) in vec4/…` | **全部 float（71 处）** |
+| 片元输出分量类型 | `layout(location=N) out vec4/…` | **全部 float（41 处）** |
+| 计算线程组 / 共享内存 | `layout(local_size_…)` | 1 个程序带 local_size；无 image 声明 |
+| 变体轴 | `// @@ id="cSamplingType" choice="0,1,2,3"` | 85 种（cRenderType、cFogBlendType…） |
+
+**两个实现要点（都踩过）**：
+1. **必须先展开宏**：binding 写在宏里（`#define BINDING_SAMPLER_SRC_TEX layout(binding = 0)`），
+   不展开一个贴图都读不出来；
+2. **`#if`/`#endif` 必须按嵌套配对**：按「到第一个 #endif 为止」切会把声明切掉一半
+   （顶点属性就是这么丢的）。
+
+## 2.21 一个反直觉的结论：贴图维度不需要推
+
+把 `alCubeMapShader`（GLSL 里是两个 `samplerCube`）**带 facts 与不带 facts 各译一遍**，
+两边 MSL 里都是 7 个 `texturecube<`：
+
+| 运行 | MSL 里的贴图类型 |
+|---|---|
+| 不带 facts | `texturecube<` ×7 |
+| 带 facts | `texturecube<` ×7 |
+
+原因：**Maxwell 的 TEX 指令本身编码了贴图维度**（TEX/3D/CUBE 是不同操作码），
+所以翻译器从机器码就能知道。GLSL facts 在这里的作用是**交叉校验**，而不是提供信息。
+
+真正**代码里没有、必须从管线状态拿**的只有：顶点属性的分量类型、片元输出的分量类型
+（由顶点格式与 MRT 状态决定，不在着色器指令里）—— 而 SMO 的这两项**全是 float**，
+恰好等于翻译器的缺省值。
+
+**所以结论是**：之前「不带 facts」的那一遍（8269 个）对 SMO 的着色器本来就是对的；
+这一轮的价值在于**证明**它是对的（而不是假设）。以后接入整数属性/MRT 的游戏版本时，
+`--facts` 开关已经把这条路留好了。
+
+## 2.22 `.bfsha` 是另一种容器（还没处理）
+
+7 个 `.bfsha` 文件（magic `FSHA`）**不是 SARC**，里面也没有 GLSL（`@file`、`AGL_*_SHADER` 都搜不到），
+只有 uniform 名（`cTextureDisplacement0`、`cTextureCubeMapGem0`、`_stcol0`…）。
+它和 `.sharc`/`.sharcb` 是两个不同的东西，需要单独解析 —— 目前全量翻译覆盖的是 21 个 `.sharcb`
+（8281 → 8269 个唯一着色器），这 7 个是剩下的口子。

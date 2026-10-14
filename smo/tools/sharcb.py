@@ -46,7 +46,30 @@ def sph_stage(sph):
     return (w0 >> 10) & 0xF
 
 
-def extract(path, outdir, stage_filter=None):
+# 图像分量类型 → dmsh_xlate 要的 TextureFormat 名。**像素格式本身不参与着色器翻译**
+# （MSL 里是 texture2d<float/uint/int>，格式属于贴图对象、运行时由宿主给出），
+# 所以这里只需把分量类型选对。
+IMG_FMT = {"float": "R8G8B8A8Unorm", "uint": "R32Uint", "sint": "R32Int"}
+
+
+def load_facts(path):
+    return json.load(open(path, encoding="utf-8")) if path else {}
+
+
+def facts_for(facts, sharcb_path):
+    """按归档名（去掉扩展名）把 facts 配上：`X.sharcb` ↔ `X.sharc` / `X.bfsha`。"""
+    stem = os.path.basename(sharcb_path)
+    for ext in (".sharcb", ".sharc", ".bfsha"):
+        if stem.endswith(ext):
+            stem = stem[:-len(ext)]
+            break
+    for key in (stem + ".sharc", stem + ".bfsha", stem):
+        if key in facts:
+            return facts[key]
+    return {}
+
+
+def extract(path, outdir, stage_filter=None, facts=None):
     d = open(path, "rb").read()
     assert d[:4] == b"BAHS", f"{path}: 不是 .sharcb（magic {d[:4]!r}）"
     jobs, rows = [], []
@@ -66,8 +89,16 @@ def extract(path, outdir, stage_filter=None):
         os.makedirs(sub, exist_ok=True)
         open(os.path.join(sub, "sph.bin"), "wb").write(sph)
         open(os.path.join(sub, "code.bin"), "wb").write(code)
+        # 把从 GLSL 推出来的 facts 按 stage 配上（tex 是整段的，attr/fout/local 按 stage 取）
+        f = facts_for(facts or {}, path)
+        sf = next((q for q in f.get("programs", []) if q["stage"] == stage), {})
         jobs.append({"key": key, "stage": stage, "code": os.path.join(sub, "code_full.bin"),
-                     "debug": False, "tex": {}, "img": {}, "attr": {}, "fout": {}, "local": [1, 1, 1]})
+                     "debug": False,
+                     "tex": f.get("tex", {}),
+                     "img": {str(i): {"type": v["type"], "fmt": IMG_FMT.get(v.get("comp"), "R8G8B8A8Unorm")}
+                             for i, v in enumerate(f.get("img", []))},
+                     "attr": sf.get("attr", {}), "fout": sf.get("fout", {}),
+                     "local": sf.get("local") or [1, 1, 1]})
         open(os.path.join(sub, "code_full.bin"), "wb").write(sph + code)
         rows.append((key, os.path.basename(path), f"0x{p:x}", stage, len(code),
                      hashlib.sha256(sph).hexdigest()[:16], hashlib.sha256(code).hexdigest()[:16]))
@@ -85,9 +116,10 @@ def main():
                  if f.endswith(".sharcb")]
     else:
         files = [src]
+    facts = load_facts(sys.argv[sys.argv.index("--facts") + 1]) if "--facts" in sys.argv else {}
     all_jobs, all_rows = [], []
     for f in files:
-        j, r = extract(f, outdir, sf)
+        j, r = extract(f, outdir, sf, facts)
         all_jobs += j
         all_rows += r
     os.makedirs(outdir, exist_ok=True)
