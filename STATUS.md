@@ -1780,3 +1780,14 @@ Mach-O 弱符号不可靠（数据与函数的 weak/weak_import 都被 ld64 拒�
 
 本轮结束时 CI 全绿：ubuntu（13 项）+ macOS（Metal 第一片、embed 自检 1-6、逐个 C 单测 11 项、
 smo_host 编译链接、出未签名 IPA）。
+
+## 2.93 M2 第二片：着色器管线路径（内置 MSL → 管线状态 → draw → uniform → 回读）
+
+`nvn_mtl_offscreen_draw`：`newLibraryWithSource`（Metal 编译器）→ vs/fs 入口函数 → 管线状态 →
+全屏三角形（vertex_id 法，无需顶点缓冲）→ 片段 uniform 传色 → 回读。自检红/绿/蓝/半红逐字节 +
+参数防御。
+
+**关键结论**：CI runner（Apple Paravirtual）上**着色器编译可用** —— 这意味着 18470 个已译 MSL
+都能走「CI 离屏渲染 + 回读 + 断言」的验证循环，M2/M3 的验证方式已经打通。
+
+坑（又踩一次）：heredoc 把 `\n` 吃成真换行，MSL 字符串散架 —— 用 edit 工具重写转义序列。
