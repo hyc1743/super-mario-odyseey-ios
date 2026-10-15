@@ -16,6 +16,9 @@ settings:
     CODE_SIGN_IDENTITY: ""
     CLANG_ENABLE_OBJC_ARC: "YES"
     HEADER_SEARCH_PATHS: "$(SRCROOT)/../host $(SRCROOT)/../gfx/nvn"
+    # 文件 App 里能看到 App 自己的目录（我的 iPhone → SMOMobile）—— 不加这两个键就不会出现
+    INFOPLIST_KEY_UIFileSharingEnabled: "YES"
+    INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: "YES"
     ENABLE_USER_SCRIPT_SANDBOXING: "NO"
     ALWAYS_SEARCH_USER_PATHS: "NO"
 
