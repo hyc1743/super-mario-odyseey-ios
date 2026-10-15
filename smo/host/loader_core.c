@@ -82,9 +82,10 @@ void install_key_page(module_t *m) {
     uint64_t *page = (uint64_t *)(m->base + m->key_page_off);
     memset(page, 0, m->key_page_size);
     for (unsigned i = 0; i < KEY_N; i++) page[m->key_idx[i]] = dm_slot_key(i) * 8;
-    for (unsigned i = 0; i < KEY_N; i++)
-        if (!page[m->key_idx[i]])
-            die("%s: 键页第 %u 项为 0（宿主键没建）——游戏会读到 TSD 0 号槽", m->name, i);
+    // 判断标准是「键建没建」，不是「槽值非 0」：Darwin 的键从 0 编号，0 号槽是合法的
+    // （之前用槽值推断，第一个键就是 0，于是 macOS/iOS 上必然误报「宿主键没建」）
+    if (!dm_slot_keys_ready())
+        die("%s: 宿主线程键没建（host_thread_keys_create 没调？）", m->name);
     dm_ro_protect(m->base + m->key_page_off, m->key_page_size);
 }
 

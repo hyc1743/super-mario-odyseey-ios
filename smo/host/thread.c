@@ -25,6 +25,9 @@ static pthread_key_t g_key18, g_keytls, g_keytlr, g_keygate;
 static pthread_key_t g_keyres[2], g_keyaspect, g_keyaspectui;
 static pthread_key_t g_keyown;                      // 本线程申请的 TLS/TLR 原始指针（供析构释放）
 static pthread_once_t g_keyown_once = PTHREAD_ONCE_INIT;
+static int g_keys_ready;
+
+int dm_slot_keys_ready(void) { return g_keys_ready; }
 
 uint64_t dm_slot_key(unsigned i) {
     switch (i) {
@@ -70,6 +73,7 @@ void host_thread_keys_create(void) {
     LOG("线程键：K18=%lu KTLS=%lu KTLR=%lu KGATE=%lu（KRES0=%lu KRES1=%lu KASPECT=%lu KASPECTUI=%lu）",
         g_key18, g_keytls, g_keytlr, g_keygate, g_keyres[0], g_keyres[1], g_keyaspect, g_keyaspectui);
     pthread_once(&g_keyown_once, own_key_init);
+    g_keys_ready = 1;
     tsd_check();
 }
 

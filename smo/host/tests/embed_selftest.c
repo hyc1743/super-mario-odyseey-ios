@@ -45,6 +45,8 @@ int main(int argc, char **argv) {
            e->x0_sz, e->w_sz, e->x1_sz, e->image_size, e->n_gates);
 
     printf("== 2. 不读文件也能装载（传一个不存在的目录）==\n");
+    host_thread_keys_create();      // 与真机（main.c）一样：先建宿主线程键，再装载
+    CHK(dm_slot_keys_ready(), "宿主线程键已建");
     static const char *names[] = { "sdk" };
     load_modules("/nonexistent-dir", names, 1);   // 存在内嵌表就走内嵌，目录无关
     CHK(g_nmod == 1, "装载了 1 个模块");
