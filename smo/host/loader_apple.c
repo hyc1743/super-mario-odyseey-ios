@@ -11,9 +11,9 @@
 //        __TEXT,__dm<模块名>x0   原始代码（不含补丁区）        → RX
 //        __img,__DM<模块名>W     ro + data（可写的那部分）      → RW
 //        __TEXT,__dm<模块名>x1   补丁区                        → RX
-//      装载器用 vm_allocate 保留一段地址，再把三段**重映射**到同一个基址上（mach_vm_remap），
-//      于是补丁区的相对位置与改写器算出来的 PATCH_OFF 一致。参考项目这样做，出包脚本是
-//      dm/ios/tools/gen_embed.py；本项目的对应物还没写（见 STATUS.md 的 TODO）。
+//      装载器用带 FIXED|OVERWRITE 的 mach_vm_remap 把三段重映射到同一个基址的原相对位置上，
+//      于是运行时布局与 patched.bin 逐字节相同（PC 相对寻址、补丁区跳转、宿主「基址+原偏移」全不用改）。
+//      出包脚本是 smo/ios/tools/gen_embed.py，CI 上用合成产物验（tests/embed_selftest.c）。
 #include "dm.h"
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
@@ -58,10 +58,10 @@ void *dm_embed_map(const dm_embed_mod *e) {
         if (!parts[i].sz) continue;
         mach_vm_address_t dst = base + parts[i].off;
         mach_vm_address_t src = (mach_vm_address_t)(uintptr_t)parts[i].src;
-        vm_prot_t cur = parts[i].prot;
+        vm_prot_t cur = parts[i].prot, maxp = parts[i].prot;      // 两个都要传指针（in/out）
         kr = mach_vm_remap(mach_task_self(), &dst, parts[i].sz, 0,
                            VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(), src,
-                           parts[i].copy, &cur, parts[i].prot, VM_INHERIT_NONE);
+                           parts[i].copy, &cur, &maxp, VM_INHERIT_NONE);
         if (kr != KERN_SUCCESS) {
             LOG("%s: %s 段 mach_vm_remap 失败：%d（dst=%#llx src=%#llx sz=%zu）",
                 e->name, parts[i].what, (int)kr, (unsigned long long)dst,
