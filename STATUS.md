@@ -1819,3 +1819,14 @@ smo_host 编译链接、出未签名 IPA）。
   同 prog 复用（缓存数不增）、异 prog 新建（0=纯色 / 1=纹理采样）、prog1 输出与纹理输入逐字节一致。
   验证的是真机上「按管线键缓存」的核心性质（iPhone 上编管线很贵，复用必须可证）。
 - CI 全绿（macOS：Metal 各片 + 合龙点 + embed 1-6 + 11 个 C 单测 + 宿主 + IPA）。
+
+## 2.96 M1 App 侧完成（日志上屏 + RomFS 解析接入，与宿主同一份代码）
+
+- logbuf.c/h：LOG 走环形缓冲（512 行）+ stderr；romfs_resolve.c/h：Documents 下找 RomFS/ExeFS
+  （直接放或一层包装目录）。applogic_selftest 12 条断言（CI 双平台）。
+- main.m：进度表更新为真实状态；RecentLog 显示日志缓冲；ScanDocuments 增补宿主同款解析的路径行。
+- **接入 App 的坑（二分定位）**：两个 C 源一次加进 xcodegen 目标 + main.m 用 `../host/` 相对 include
+  → ScanDependencies 失败且无 error: 行。二分：逐个加 C 源都过 → 真凶是相对 include；
+  改用 `HEADER_SEARCH_PATHS: $(SRCROOT)/../host` + 裸头名。
+- 至此 M1 只剩「初始化路径所需服务」（settings/applet/am 等）—— 它们的真实语义要真机日志定，
+  本地写死没有依据；继续按计划进入 M2 主体。
