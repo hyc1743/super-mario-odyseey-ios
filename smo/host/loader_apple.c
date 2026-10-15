@@ -32,18 +32,21 @@
 // PC 相对寻址、补丁区的跳转、宿主「基址 + 原偏移」的引用全都不用改。
 //
 // 弱引用：只有链接了生成的表（gen_embed.py 的 .c）时才存在；macOS 开发/CI 从文件装载，这里返回 NULL。
-// Mach-O 的弱导入只对**函数**可靠（数据符号上的 weak_import 不生效，smo_host 链接失败过），
-// 所以内嵌表用一个访问器函数暴露。
-extern const dm_embed_mod *dm_embed_table(unsigned *n) __attribute__((weak_import));
+// 内嵌表只在**链接了生成表**的构建里存在（embed 自检、iOS App）。Mach-O 的弱导入对数据符号
+// 不生效、对函数也不可靠（ld64 仍报 undefined），所以干脆用显式宏开关 —— 最不折腾、必能链接。
+#ifdef SMO_EMBED
+const dm_embed_mod *dm_embed_table(unsigned *n);     // 由 gen_embed.py 生成的 .c 提供
 
 const dm_embed_mod *dm_embed_find(const char *name) {
-    if (!dm_embed_table) return NULL;          // 没链接内嵌表
     unsigned n = 0;
     const dm_embed_mod *t = dm_embed_table(&n);
     for (unsigned i = 0; i < n; i++)
         if (!strcmp(t[i].name, name)) return &t[i];
     return NULL;
 }
+#else
+const dm_embed_mod *dm_embed_find(const char *name) { (void)name; return NULL; }   // 本机/开发：从文件装载
+#endif
 
 void *dm_embed_map(const dm_embed_mod *e) {
     size_t total = (e->image_size + PAGE - 1) & ~(size_t)(PAGE - 1);
