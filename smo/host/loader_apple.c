@@ -16,7 +16,6 @@
 //      出包脚本是 smo/ios/tools/gen_embed.py，CI 上用合成产物验（tests/embed_selftest.c）。
 #include "dm.h"
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -50,9 +49,9 @@ const dm_embed_mod *dm_embed_find(const char *name) { (void)name; return NULL; }
 
 void *dm_embed_map(const dm_embed_mod *e) {
     size_t total = (e->image_size + PAGE - 1) & ~(size_t)(PAGE - 1);
-    mach_vm_address_t base = 0;
-    kern_return_t kr = mach_vm_allocate(mach_task_self(), &base, total, VM_FLAGS_ANYWHERE);
-    if (kr != KERN_SUCCESS) { LOG("%s: mach_vm_allocate(%zu) 失败：%d", e->name, total, (int)kr); return NULL; }
+    vm_address_t base = 0;
+    kern_return_t kr = vm_allocate(mach_task_self(), &base, total, VM_FLAGS_ANYWHERE);
+    if (kr != KERN_SUCCESS) { LOG("%s: vm_allocate(%zu) 失败：%d", e->name, total, (int)kr); return NULL; }
 
     struct part { const uint8_t *src; size_t sz; size_t off; vm_prot_t prot; boolean_t copy; const char *what; };
     struct part parts[3] = {
@@ -62,19 +61,21 @@ void *dm_embed_map(const dm_embed_mod *e) {
     };
     for (int i = 0; i < 3; i++) {
         if (!parts[i].sz) continue;
-        mach_vm_address_t dst = base + parts[i].off;
-        mach_vm_address_t src = (mach_vm_address_t)(uintptr_t)parts[i].src;
-        vm_prot_t cur = parts[i].prot;
+        vm_address_t dst = (vm_address_t)(base + parts[i].off);
+        vm_prot_t cur = 0, maxp = 0;
         // W 段的 max 给 RWX：TEXT_END 不页对齐时，代码尾与缝隙同页（见 gen_embed.py），
         // 那一页既要有 X（代码尾）又要有 W（缝隙里的重定位槽）。
-        vm_prot_t maxp = (i == 1) ? (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE) : parts[i].prot;
-        kr = mach_vm_remap(mach_task_self(), &dst, parts[i].sz, 0,
-                           VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(), src,
-                           parts[i].copy, &cur, &maxp, VM_INHERIT_NONE);
-        if (kr != KERN_SUCCESS) {
-            LOG("%s: %s 段 mach_vm_remap 失败：%d（dst=%#llx src=%#llx sz=%zu）",
+        maxp = (i == 1) ? (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE) : parts[i].prot;
+        // vm_remap（旧 API）：macOS 与 iOS 都有；mach_vm_* 是 macOS 专用，
+        // iPhoneOS SDK 里 mach/mach_vm.h 直接标 unsupported（CI 上真挂过）。
+        kr = vm_remap(mach_task_self(), &dst, parts[i].sz, 0,
+                      VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(),
+                      (vm_address_t)(uintptr_t)parts[i].src,
+                      parts[i].copy, &cur, &maxp, VM_INHERIT_NONE);
+        if (kr != KERN_SUCCESS || dst != (vm_address_t)(base + parts[i].off)) {
+            LOG("%s: %s 段 vm_remap 失败：%d（dst=%#llx 期望 %#llx sz=%zu）",
                 e->name, parts[i].what, (int)kr, (unsigned long long)dst,
-                (unsigned long long)src, parts[i].sz);
+                (unsigned long long)(base + parts[i].off), parts[i].sz);
             return NULL;
         }
     }
