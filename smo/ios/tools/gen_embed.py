@@ -129,8 +129,10 @@ def main():
          "#include \"../host/dm.h\"", ""]
     for n, hdr, te, po, a, end, syms, gates in mods:
         c.append(f"// ---- {n} ----")
-        for sym, kind in ((syms[0], "x0"), (syms[1], "w"), (syms[2], "x1")):
-            c.append(f"extern const uint8_t {sym}[];")
+        for sym in (syms[0], syms[1], syms[2]):
+            # C 声明去掉前导下划线：Mach-O 上 C 符号会自己加一个下划线，
+            # 写成 `_dm_main_x0` 会变成链接期符号 `__dm_main_x0` 而与汇编里的 `_dm_main_x0` 对不上
+            c.append(f"extern const uint8_t {sym[1:]}[];")
         c.append(f"static const dm_embed_gate g_gate_{n}[] = {{")
         for ret, kind, arg, orig in gates:
             c.append(f"    {{ 0x{ret:x}, DM_GK_{kind.upper()}, {arg}, 0x{orig:x} }},")
@@ -147,7 +149,7 @@ def main():
             idxs.append(int(hdr.get(key, "0"), 10))
         idx_s = ", ".join(str(i) for i in idxs)
         c.append(f'    {{ "{n}",')
-        c.append(f"      {syms[0]}, 0x{a:x}, {syms[1]}, 0x{po - a:x}, {syms[2]}, 0x{end - po:x},")
+        c.append(f"      {syms[0][1:]}, 0x{a:x}, {syms[1][1:]}, 0x{po - a:x}, {syms[2][1:]}, 0x{end - po:x},")
         c.append(f"      0x{os.path.getsize(os.path.join(out, n + '.patched.bin')):x},   // image_size")
         c.append(f"      0x{t:x}, 0x{r:x}, 0x{d:x}, 0x{po:x}, 0x{kpo:x}, 0x{kps:x},")
         c.append(f"      {{ {idx_s} }},")
