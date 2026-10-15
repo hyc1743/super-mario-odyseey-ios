@@ -22,16 +22,19 @@ static int fails;
 // CHK 里 flush：stdout 重定向到文件时是全缓冲的，崩溃会吞掉已打印的内容（本项目踩过两次）
 #define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); fflush(stdout); if (!_ok) fails++; } while (0)
 
+// 查询一段内存的权限。
+// 注意缓冲区：用**宏给出的个数**分配 integer_t 数组，而不是自己声明 vm_region_basic_info_data_64_t
+// —— 后者一旦与 count 宏的期望尺寸不一致，mach_vm_region 就会越界写栈（CI 上真崩过）。
 static int prot_of(void *p, vm_prot_t *out) {
     mach_vm_address_t addr = (mach_vm_address_t)(uintptr_t)p;
     mach_vm_size_t size = 0;
-    vm_region_basic_info_data_64_t info;
+    integer_t info[VM_REGION_BASIC_INFO_COUNT_64];
     mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64;
     mach_port_t obj = MACH_PORT_NULL;
     kern_return_t kr = mach_vm_region(mach_task_self(), &addr, &size, VM_REGION_BASIC_INFO_64,
-                                      (vm_region_info_t)&info, &cnt, &obj);
+                                      (vm_region_info_t)info, &cnt, &obj);
     if (kr != KERN_SUCCESS) return -1;
-    *out = info.protection;
+    *out = ((vm_region_basic_info_data_64_t *)info)->protection;
     return 0;
 }
 
