@@ -7,6 +7,7 @@
 struct nvn_mtl_ctx {
     id<MTLDevice> dev;
     id<MTLCommandQueue> queue;
+    NSMutableDictionary *pso_cache;      // 程序 id → 管线（缓存复用：iPhone 上编管线很贵）
 };
 
 int nvn_mtl_init(nvn_mtl_ctx **out) {
@@ -18,6 +19,7 @@ int nvn_mtl_init(nvn_mtl_ctx **out) {
         c->dev = dev;
         c->queue = [dev newCommandQueue];
         if (!c->queue) { free(c); return -1; }
+        c->pso_cache = [NSMutableDictionary new];
         *out = c;
         return 0;
     }
@@ -239,6 +241,88 @@ int nvn_mtl_offscreen_texture(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
         [enc setRenderPipelineState:pso];
         [enc setFragmentTexture:src atIndex:0];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [enc endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+        if (cb.status == MTLCommandBufferStatusError) return -1;
+        [dsttex getBytes:out bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
+        return (int)(w * h * 4);
+    }
+}
+
+// 按程序 id 取管线（缓存命中直接复用）
+static id<MTLRenderPipelineState> pso_for(nvn_mtl_ctx *c, unsigned prog, uint32_t w, uint32_t h, id<MTLTexture> *src_out) {
+    NSNumber *key = @(prog);
+    id<MTLRenderPipelineState> hit = c->pso_cache[key];
+    if (hit) return hit;
+    NSError *err = nil;
+    id<MTLLibrary> lib = [c->dev newLibraryWithSource:(prog == 0 ? kVS : kVS_tex) options:nil error:&err];
+    if (!lib) return nil;
+    id<MTLFunction> vs = [lib newFunctionWithName:(prog == 0 ? @"vs_full" : @"vs_tex")];
+    id<MTLFunction> fs = [lib newFunctionWithName:(prog == 0 ? @"fs_full" : @"fs_tex")];
+    if (!vs || !fs) return nil;
+    MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+    pd.vertexFunction = vs;
+    pd.fragmentFunction = fs;
+    pd.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA8Unorm;
+    id<MTLRenderPipelineState> pso = [c->dev newRenderPipelineStateWithDescriptor:pd error:&err];
+    if (!pso) return nil;
+    c->pso_cache[key] = pso;
+    (void)w; (void)h; (void)src_out;      // 尺寸与纹理句柄留给真实实现；本片先不用
+    return pso;
+}
+
+unsigned nvn_mtl_pipeline_count(nvn_mtl_ctx *c) {
+    return c ? (unsigned)c->pso_cache.count : 0;
+}
+
+int nvn_mtl_replay_frame_multi(nvn_mtl_ctx *c, uint32_t w, uint32_t h, uint32_t clear_rgba32,
+                               const uint64_t *keys, const unsigned *progs, unsigned n_draws,
+                               const uint8_t *tex_rgba, uint32_t tw, uint32_t th,
+                               uint8_t *out, size_t cap) {
+    if (!c || !keys || !progs || !out || cap < (size_t)w * h * 4) return -1;
+    @autoreleasepool {
+        id<MTLTexture> src = nil;
+        if (tex_rgba) {
+            MTLTextureDescriptor *sd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                         width:tw height:th mipmapped:NO];
+            sd.usage = MTLTextureUsageShaderRead;
+            src = [c->dev newTextureWithDescriptor:sd];
+            if (!src) return -1;
+            [src replaceRegion:MTLRegionMake2D(0, 0, tw, th) mipmapLevel:0 withBytes:tex_rgba bytesPerRow:tw * 4];
+        }
+        MTLTextureDescriptor *rtd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                      width:w height:h mipmapped:NO];
+        rtd.usage = MTLTextureUsageRenderTarget;
+        id<MTLTexture> dsttex = [c->dev newTextureWithDescriptor:rtd];
+        if (!dsttex) return -1;
+        id<MTLCommandBuffer> cb = [c->queue commandBuffer];
+        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = dsttex;
+        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+        rp.colorAttachments[0].clearColor = MTLClearColorMake((float)(clear_rgba32 & 0xFF) / 255.0f,
+                                                              (float)((clear_rgba32 >> 8) & 0xFF) / 255.0f,
+                                                              (float)((clear_rgba32 >> 16) & 0xFF) / 255.0f,
+                                                              (float)((clear_rgba32 >> 24) & 0xFF) / 255.0f);
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+        for (unsigned i = 0; i < n_draws; i++) {
+            id<MTLRenderPipelineState> pso = pso_for(c, progs[i], w, h, &src);
+            if (!pso) return -1;
+            [enc setRenderPipelineState:pso];
+            if (progs[i] == 0) {
+                float color[4] = {
+                    (float)((keys[i] >> 16) & 0xFF) / 255.0f,
+                    (float)((keys[i] >> 8) & 0xFF) / 255.0f,
+                    (float)(keys[i] & 0xFF) / 255.0f,
+                    1.0f,
+                };
+                [enc setFragmentBytes:color length:sizeof color atIndex:0];
+            } else {
+                [enc setFragmentTexture:src atIndex:0];
+            }
+            [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        }
         [enc endEncoding];
         [cb commit];
         [cb waitUntilCompleted];

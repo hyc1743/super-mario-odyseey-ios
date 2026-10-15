@@ -30,6 +30,15 @@ int nvn_mtl_replay_frame(nvn_mtl_ctx *c, uint32_t w, uint32_t h, uint32_t clear_
                          const uint64_t *draw_keys, unsigned n_draws,
                          uint8_t *out, size_t cap);
 
+// 管线缓存：prog 0 = 纯色（buffer(0)），prog 1 = 最近邻采样 texture(0)。
+// 每帧：清屏 + 每个绘制项按 prog 取管线、按 key 着色（prog1 时改采样纹理）。
+// 返回当前缓存里的管线数（验证「同 prog 复用、异 prog 新建」）。tex_rgba 为 NULL 时 prog1 无效。
+int nvn_mtl_replay_frame_multi(nvn_mtl_ctx *c, uint32_t w, uint32_t h, uint32_t clear_rgba32,
+                               const uint64_t *keys, const unsigned *progs, unsigned n_draws,
+                               const uint8_t *tex_rgba, uint32_t tw, uint32_t th,
+                               uint8_t *out, size_t cap);
+unsigned nvn_mtl_pipeline_count(nvn_mtl_ctx *c);
+
 // 离屏做**纹理上传往返**：把 w×h 的 RGBA8 数据上传进 MTLTexture，用最近邻采样画全屏四边形，
 // 回读。最近邻 + 1:1，回读必须与输入**逐字节相同** —— 这是「CPU 纹理链 → GPU」的交接验证。
 int nvn_mtl_offscreen_texture(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
