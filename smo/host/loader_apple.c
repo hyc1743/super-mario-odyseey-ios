@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#define PAGE 0x4000                      // Apple Silicon 16 KB 页
+
 // ---------------------------------------------------------------- 内嵌映像（iOS 真机路线）
 //
 // 真机不许运行时生成/修改代码，所以三段都由 gen_embed.py 在出包时编进签名段：
@@ -72,7 +74,7 @@ void *dm_embed_map(const dm_embed_mod *e) {
     return (void *)(uintptr_t)base;
 }
 
-#define PAGE 0x4000                      // Apple Silicon 16 KB 页
+// 页大小宏已在文件顶部定义（本块用到它，所以不在这里重复定义）
 
 void *dm_image_alloc(size_t size) {
     size_t n = (size + PAGE - 1) & ~(size_t)(PAGE - 1);
