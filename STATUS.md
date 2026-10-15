@@ -1841,3 +1841,16 @@ smo_host 编译链接、出未签名 IPA）。
   vm_allocate/vm_remap（旧 API，macOS/iOS 都有；macOS CI 继续验同一路径）
 - 第一跑的真机路径还差最后一块：**guest dylib**（参考项目的 DM_SHELL 机制 —— CI 壳不含游戏内容，
   使用者在本机用脚本把改写产物打包成只装段的 dylib 放进 App，装载器 dlopen 后 vm_remap）
+
+## 2.98 首跑最后一块：guest dylib（壳模式）+ 日志导出按钮
+
+- `smo/ios/tools/guest_dylib.py`（移植参考项目，MIT）：在本机把 work/rewrite 打包成
+  `Guest.framework/Guest`（只装三段的 arm64 动态库，纯 Python 写 Mach-O，Windows 也能跑）。
+  生成物已验证：magic 0xfeedfacf、段/节名齐全。x0 尾向下取整（与 gen_embed 同口径，rtld 缝隙不落 RX）
+- loader_apple.c：`dm_image_from_dylib`（iOS 壳模式）：dlopen Guest.framework → getsectiondata 三段 →
+  vm_remap 回连续地址（代码共享签名页 RX、W 写时复制 RW、边界页 RWX）。macOS 返回 NULL（走文件路径）
+- loader_core.c：文件路径先试 dylib（tsv 仍由用户随包提供 —— 布局与门表不在 dylib 里）
+- main.m：**导出日志按钮** —— 一键把「状态+游戏文件+宿主日志」存成 SMO-log-<时间>.txt +
+  固定名 SMO-log-latest.txt，并拉起系统分享（AirDrop/邮件/存文件）
+- 用户首跑流程（全链条）：本机跑 guest_dylib.py → 解压 IPA 放入 Frameworks/Guest.framework →
+  重打包 → Sideloadly 签名 → 文件 App 放 RomFS + 各 .tsv → 打开 App → 日志滚动 → 导出日志发回

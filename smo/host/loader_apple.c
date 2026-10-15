@@ -19,6 +19,11 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <pthread.h>
+#if TARGET_OS_IPHONE
+#include <dlfcn.h>
+#include <mach-o/dyld.h>
+#include <TargetConditionals.h>
+#endif
 
 #define PAGE 0x4000                      // Apple Silicon 16 KB 页
 
@@ -90,6 +95,64 @@ void *dm_embed_map(const dm_embed_mod *e) {
 }
 
 // 页大小宏已在文件顶部定义（本块用到它，所以不在这里重复定义）
+
+// iOS 壳模式：映像取自 Guest.framework/Guest（只装三段的动态库）。
+// macOS 上返回 NULL（开发/CI 走文件路径）。与 dm_embed_map 同一个 vm_remap 形状。
+void *dm_image_from_dylib(const char *name, size_t *size) {
+#if TARGET_OS_IPHONE
+    static const struct mach_header_64 *mh;
+    if (!mh) {
+        char exe[4096];
+        uint32_t n = sizeof exe;
+        if (_NSGetExecutablePath(exe, &n)) return NULL;
+        char *sl = strrchr(exe, '/');
+        if (!sl) return NULL;
+        strcpy(sl, "/Frameworks/Guest.framework/Guest");
+        if (!dlopen(exe, RTLD_NOW)) {
+            LOG("壳模式：安装包里没有 Guest.framework/Guest（%s）—— 先用 guest_dylib.py 生成并放进去再签名", dlerror());
+            return NULL;
+        }
+        for (uint32_t i = 0; i < _dyld_image_count(); i++)
+            if (strstr(_dyld_get_image_name(i), "/Guest.framework/Guest"))
+                mh = (const struct mach_header_64 *)_dyld_get_image_header(i);
+        if (!mh) return NULL;
+    }
+    char sx0[17], sx1[17], dm[17];
+    snprintf(sx0, sizeof sx0, "__dm%sx0", name);
+    snprintf(sx1, sizeof sx1, "__dm%sx1", name);
+    snprintf(dm, sizeof dm, "__DM%sW", name);
+    unsigned long z0, zw, z1;
+    const uint8_t *x0 = getsectiondata(mh, "__TEXT", sx0, &z0);
+    const uint8_t *w  = getsectiondata(mh, dm, "__img", &zw);
+    const uint8_t *x1 = getsectiondata(mh, "__TEXT", sx1, &z1);
+    if (!x0 || !w || !x1) { LOG("壳模式：%s 的三段节不齐（%s/%s/%s）", name, sx0, dm, sx1); return NULL; }
+    size_t total = z0 + zw + z1;
+    vm_address_t base = 0;
+    if (vm_allocate(mach_task_self(), &base, total, VM_FLAGS_ANYWHERE) != KERN_SUCCESS) return NULL;
+    struct part { const uint8_t *s; size_t z; boolean_t cp; vm_prot_t p; } parts[3] = {
+        { x0, z0, FALSE, VM_PROT_READ | VM_PROT_EXECUTE },
+        { w,  zw, TRUE,  VM_PROT_READ | VM_PROT_WRITE },          // 边界页 RWX 由 dm_code_protect 处理
+        { x1, z1, FALSE, VM_PROT_READ | VM_PROT_EXECUTE },
+    };
+    size_t off = 0;
+    for (int i = 0; i < 3; i++) {
+        vm_address_t dst = (vm_address_t)(base + off);
+        vm_prot_t cur = 0;
+        vm_prot_t maxp = (i == 1) ? (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE) : parts[i].p;
+        if (vm_remap(mach_task_self(), &dst, parts[i].z, 0, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+                     mach_task_self(), (vm_address_t)(uintptr_t)parts[i].s,
+                     parts[i].cp, &cur, &maxp, VM_INHERIT_NONE) != KERN_SUCCESS)
+            return NULL;
+        off += parts[i].z;
+    }
+    LOG("%s: 映像取自 Guest 动态库（%zu 字节）", name, total);
+    *size = total;
+    return (void *)(uintptr_t)base;
+#else
+    (void)name; (void)size;
+    return NULL;
+#endif
+}
 
 void *dm_image_alloc(size_t size) {
     size_t n = (size + PAGE - 1) & ~(size_t)(PAGE - 1);

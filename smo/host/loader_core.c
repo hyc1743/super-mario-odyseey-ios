@@ -287,17 +287,20 @@ void load_modules(const char *dir, const char *const *names, int n) {
             continue;
         }
 
-        // ② macOS 开发/CI：从文件装载（旧路）
+        // ② macOS 开发/CI 从文件装载；iOS 壳模式先试 Guest 动态库（映像不来自文件）
         char path[1024];
         snprintf(path, sizeof path, "%s/%s.patched.bin", dir, m->name);
         size_t n_bytes = 0;
-        uint8_t *raw = read_file(path, &n_bytes);
-        if (!raw) die("打不开 %s（且内嵌表里也没有）", path);
+        m->base = dm_image_from_dylib(m->name, &n_bytes);
+        if (!m->base) {
+            uint8_t *raw = read_file(path, &n_bytes);
+            if (!raw) die("打不开 %s（且内嵌表里也没有）", path);
+            m->base = dm_image_alloc(n_bytes);
+            if (!m->base) die("分配映像失败 %s", path);
+            memcpy(m->base, raw, n_bytes);
+            free(raw);
+        }
         m->size = n_bytes;
-        m->base = dm_image_alloc(n_bytes);
-        if (!m->base) die("分配映像失败 %s", path);
-        memcpy(m->base, raw, n_bytes);
-        free(raw);
         read_layout(m, dir);
         // 保护两段代码区：text 与补丁区。中间的 ro+data（含键页）保持可写，
         // 装载器还要往里面写重定位与键页。边界页由 dm_code_protect 自己处理（RWX）。

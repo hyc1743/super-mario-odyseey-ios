@@ -79,6 +79,9 @@ extern int g_nmod;
 
 // ---- 平台层：Apple 上在 loader_apple.c 里实现；本机自检用 malloc 版本（loader_selftest.c）----
 void *dm_image_alloc(size_t size);           // 为映像分配内存（Apple：按 guest 地址预留区切出）
+// iOS 壳模式：映像取自安装包里的 Guest.framework/Guest（只装三段的动态库，用户用
+// smo/ios/tools/guest_dylib.py 在本机从改写产物生成）。没有该库时返回 NULL，走文件路径。
+void *dm_image_from_dylib(const char *name, size_t *size);
 void dm_code_protect(void *p, size_t n);     // 代码区设为只读+执行（本机自检：空实现）
 void dm_ro_protect(void *p, size_t n);       // 键页设为只读
 

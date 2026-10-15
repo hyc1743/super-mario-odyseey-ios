@@ -133,11 +133,57 @@ static NSString *ScanDocuments(void) {
 
     _text.text = [self statusText];
 
+    // 导出日志按钮：一键把「状态 + 宿主日志」存成文件并拉起分享（AirDrop/邮件/存文件）
+    UIButton *exportBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [exportBtn setTitle:@"导出日志" forState:UIControlStateNormal];
+    [exportBtn setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    exportBtn.backgroundColor = [UIColor colorWithWhite:0.18 alpha:0.92];
+    exportBtn.layer.cornerRadius = 9;
+    exportBtn.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    exportBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    [exportBtn addTarget:self action:@selector(exportLog) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:exportBtn];
+    [NSLayoutConstraint activateConstraints:@[
+        [exportBtn.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
+        [exportBtn.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-16],
+        [exportBtn.widthAnchor constraintEqualToConstant:96],
+        [exportBtn.heightAnchor constraintEqualToConstant:36],
+    ]];
+
     // 每秒刷新：宿主日志是活的（后台引导 + 客体初始化都会往环形缓冲里写）
     [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
         (void)t;
         _text.text = [self statusText];
     }];
+}
+
+- (void)exportLog {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSURL *docs = [fm URLForDirectory:NSDocumentDirectory inDomain:NSUserDomainMask
+                    appropriateForURL:nil create:YES error:nil];
+    NSString *stamp = [NSDateFormatter localizedStringFromDate:NSDate.date
+                                                     dateStyle:NSDateFormatterShortStyle
+                                                     timeStyle:NSDateFormatterMediumStyle];
+    stamp = [stamp stringByReplacingOccurrencesOfString:@"/" withString:@"-"];
+    stamp = [stamp stringByReplacingOccurrencesOfString:@":" withString:@"."];
+    NSString *name = [NSString stringWithFormat:@"SMO-log-%@.txt", stamp];
+    NSURL *url = [docs URLByAppendingPathComponent:name];
+    NSString *text = [self statusText];            // 状态 + 游戏文件 + 宿主日志全在里面
+    NSError *err = nil;
+    if (![text writeToURL:url atomically:YES encoding:NSUTF8StringEncoding error:&err]) {
+        UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"导出失败"
+                                    message:err.localizedDescription ?: @"?"
+                                    preferredStyle:UIAlertControllerStyleAlert];
+        [ac addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:ac animated:YES completion:nil];
+        return;
+    }
+    // 同时留一份固定名的最新日志（方便你在「文件」App 里直接翻）
+    [text writeToURL:[docs URLByAppendingPathComponent:@"SMO-log-latest.txt"]
+          atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    UIActivityViewController *avc = [[UIActivityViewController alloc]
+        initWithActivityItems:@[url] applicationActivities:nil];
+    [self presentViewController:avc animated:YES completion:nil];
 }
 
 - (NSString *)statusText {

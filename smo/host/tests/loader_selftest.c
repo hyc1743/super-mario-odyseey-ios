@@ -24,6 +24,7 @@ int dm_slot_keys_ready(void) { return 1; }
 // 本机自检没有内嵌映像（那是 iOS 真机路线）：两个钩子都返回 NULL，装载器就走文件路径。
 // macOS 上由 loader_apple.c 提供真实现；内嵌路径另有 embed_selftest 专门验。
 const dm_embed_mod *dm_embed_find(const char *name) { (void)name; return NULL; }
+void *dm_image_from_dylib(const char *name, size_t *size) { (void)name; (void)size; return NULL; }
 void *dm_embed_map(const dm_embed_mod *e) { (void)e; return NULL; }
 
 // 宿主还没实现任何服务：强制接管表为空
