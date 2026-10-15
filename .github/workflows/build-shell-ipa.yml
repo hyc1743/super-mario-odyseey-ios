@@ -52,6 +52,8 @@ jobs:
       # 共同依赖写在 GFX_COMMON 里，本机与 CI 跑的是同一条命令。
       - name: C 单测（10 个，走 Makefile 保证与本机一致）
         run: make -C smo/host test CC=gcc PY=python3 2>&1 | tee -a /tmp/selftests.log
+      - name: 规范式 BC 参考解码器自检（内容核对的判据必须先证明自己对）
+        run: python3 smo/gfx/tools/bc_spec_ref.py --selftest 2>&1 | tee -a /tmp/selftests.log
       - name: 检查 nvn.h 抽出的枚举与头一致（Metal 翻译要用这些数值）
         run: python3 smo/gfx/nvn_enum.py --check 2>&1 | tee -a /tmp/selftests.log
       - name: 三段内嵌出包：生成 + 校验（拼回原映像）
