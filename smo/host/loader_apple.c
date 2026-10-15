@@ -32,15 +32,16 @@
 // PC 相对寻址、补丁区的跳转、宿主「基址 + 原偏移」的引用全都不用改。
 //
 // 弱引用：只有链接了生成的表（gen_embed.py 的 .c）时才存在；macOS 开发/CI 从文件装载，这里返回 NULL。
-// Mach-O 的弱符号要用 weak_import（ELF 的 weak 在 ld64 上对未定义数据符号不生效，
-// smo_host 不链接内嵌表时会直接链接失败 —— CI 上真的挂过）。
-extern const dm_embed_mod g_embed_mods[] __attribute__((weak_import));
-extern const unsigned g_embed_n __attribute__((weak_import));
+// Mach-O 的弱导入只对**函数**可靠（数据符号上的 weak_import 不生效，smo_host 链接失败过），
+// 所以内嵌表用一个访问器函数暴露。
+extern const dm_embed_mod *dm_embed_table(unsigned *n) __attribute__((weak_import));
 
 const dm_embed_mod *dm_embed_find(const char *name) {
-    if (!&g_embed_mods || !&g_embed_n) return NULL;          // 没链接内嵌表
-    for (unsigned i = 0; i < g_embed_n; i++)
-        if (!strcmp(g_embed_mods[i].name, name)) return &g_embed_mods[i];
+    if (!dm_embed_table) return NULL;          // 没链接内嵌表
+    unsigned n = 0;
+    const dm_embed_mod *t = dm_embed_table(&n);
+    for (unsigned i = 0; i < n; i++)
+        if (!strcmp(t[i].name, name)) return &t[i];
     return NULL;
 }
 

@@ -142,7 +142,7 @@ def main():
             c.append(f"    {{ 0x{ret:x}, DM_GK_{kind.upper()}, {arg}, 0x{orig:x} }},")
         c.append("};")
         c.append("")
-    c.append("const dm_embed_mod g_embed_mods[] = {")
+    c.append("static const dm_embed_mod g_embed_mods[] = {")
     for n, hdr, te, po, a, end, syms, gates in mods:
         t, r, d = (int(hdr.get("TEXT_END", "0"), 16), int(hdr.get("RO_OFF", "0"), 16),
                    int(hdr.get("DATA_OFF", "0"), 16))
@@ -159,7 +159,12 @@ def main():
         c.append(f"      {{ {idx_s} }},")
         c.append(f"      g_gate_{n}, (unsigned)(sizeof g_gate_{n} / sizeof g_gate_{n}[0]) }},")
     c.append("};")
-    c.append(f"const unsigned g_embed_n = {len(mods)};")
+    c.append(f"static const unsigned g_embed_n = {len(mods)};")
+    c.append("")
+    c.append("// 访问器（函数）：Mach-O 的弱导入只对函数可靠，对数据符号不生效（smo_host 不链内嵌表时链接失败）")
+    c.append("const dm_embed_mod *dm_embed_table(unsigned *n) {")
+    c.append("    *n = g_embed_n; return g_embed_mods;")
+    c.append("}")
     cpath = os.path.splitext(dst)[0] + ".c"
     open(cpath, "w", encoding="utf-8", newline=chr(10)).write(chr(10).join(c) + chr(10))
     print(f"已生成 {dst}（{len(names)} 个模块，{len(rows)} 段）、{man} 与 {cpath}")

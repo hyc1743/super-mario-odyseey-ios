@@ -54,8 +54,7 @@ typedef struct {
 
 const dm_embed_mod *dm_embed_find(const char *name);   // 平台：按名查内嵌表（无内嵌返回 NULL）
 void *dm_embed_map(const dm_embed_mod *e);             // 平台：三段映射成一块连续映像（失败 NULL）
-extern const dm_embed_mod g_embed_mods[];              // 由 gen_embed.py 生成的 .c 提供（弱符号）
-extern const unsigned g_embed_n;
+const dm_embed_mod *dm_embed_table(unsigned *n);         // 由 gen_embed.py 生成的 .c 提供（函数弱导入）
 
 // 一个模块的运行时状态
 typedef struct {
