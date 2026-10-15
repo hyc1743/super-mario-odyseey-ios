@@ -7,6 +7,17 @@
 static int fails;
 #define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); fflush(stdout); if (!_ok) fails++; } while (0)
 
+static int draw_and_check(nvn_mtl_ctx *c, float r, float g, float b, uint8_t er, uint8_t eg, uint8_t eb) {
+    uint8_t px[8 * 8 * 4];
+    int n = nvn_mtl_offscreen_draw(c, 8, 8, r, g, b, px, sizeof px);
+    if (n != (int)sizeof px) return 0;
+    for (int i = 0; i < 8 * 8; i++) {
+        if (px[i * 4] != er || px[i * 4 + 1] != eg || px[i * 4 + 2] != eb || px[i * 4 + 3] != 255)
+            return 0;
+    }
+    return 1;
+}
+
 static int clear_and_check(nvn_mtl_ctx *c, float r, float g, float b, uint8_t er, uint8_t eg, uint8_t eb) {
     uint8_t px[8 * 8 * 4];
     int n = nvn_mtl_offscreen_clear(c, 8, 8, r, g, b, 1.0f, px, sizeof px);
@@ -39,6 +50,8 @@ int main(void) {
     CHK(nvn_mtl_offscreen_clear(c, 8, 8, 1, 1, 1, 1, NULL, 0) == -1, "空输出缓冲 → -1");
     CHK(nvn_mtl_offscreen_clear(c, 8, 8, 1, 1, 1, 1, (uint8_t *)&r, 4) == -1, "容量不足 → -1");
     CHK(nvn_mtl_offscreen_clear(NULL, 8, 8, 1, 1, 1, 1, (uint8_t *)&r, 256) == -1, "空上下文 → -1");
+    CHK(nvn_mtl_offscreen_draw(NULL, 8, 8, 1, 1, 1, (uint8_t *)&r, 256) == -1, "绘制：空上下文 → -1");
+    CHK(nvn_mtl_offscreen_draw(c, 8, 8, 1, 1, 1, (uint8_t *)&r, 4) == -1, "绘制：容量不足 → -1");
 
     nvn_mtl_term(c);
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");

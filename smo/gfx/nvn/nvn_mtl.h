@@ -22,3 +22,10 @@ void nvn_mtl_term(nvn_mtl_ctx *c);
 int nvn_mtl_offscreen_clear(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
                             float r, float g, float b, float a,
                             uint8_t *out, size_t cap);
+
+// 离屏画一个**全屏三角形**（内置 MSL 着色器，片段颜色经 uniform 传入），回读像素。
+// 这一步验证的是着色器链：newLibraryWithSource（Metal 编译器）→ 两个入口函数 → 管线状态 →
+// drawPrimitives → 片段 uniform。之后把 NVN 的程序/管线按键接进来，就长成真正的重放层。
+int nvn_mtl_offscreen_draw(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
+                           float r, float g, float b,
+                           uint8_t *out, size_t cap);
