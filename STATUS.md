@@ -1768,3 +1768,15 @@ Mach-O 弱符号不可靠（数据与函数的 weak/weak_import 都被 ld64 拒�
 - 内嵌 .S/.c 接进 iOS App 构建 + `-segprot` 接 Xcode 链接（shell_build.sh 已留可选路径）
 - App 内日志上屏 + RomFS 从「文件」App 导入
 - 初始化路径所需服务（settings / applet / am 等）
+
+## 2.92 M2 第一片：Metal 重放层的最小闭环（CI 离屏可验）
+
+`nvn_mtl.h/.m`：`nvn_mtl_init`（默认设备+队列）、`nvn_mtl_offscreen_clear`（离屏清色 → 回读）。
+这一片把「编译（macOS SDK）→ 离屏渲染 → 回读像素 → 断言」的循环打通 —— 之后每个计划项翻译
+（绑定/绘制/呈现）都按同一形状验证。自检：红/绿/蓝/半红（0.5 → 128 量化）逐字节 + 参数防御。
+
+排障记：ARC 下写显式 `release` 会编译错（"release is unavailable in ARC mode"）—— 第一次 CI 就是它；
+编译错误也要进注解（原步骤只有运行错误进注解）。
+
+本轮结束时 CI 全绿：ubuntu（13 项）+ macOS（Metal 第一片、embed 自检 1-6、逐个 C 单测 11 项、
+smo_host 编译链接、出未签名 IPA）。
