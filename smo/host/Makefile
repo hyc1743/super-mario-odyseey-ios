@@ -89,7 +89,7 @@ $(SYNDIR)/sdk.patched.bin:
 EMBED_S = ../../work/embed_selftest.S
 EMBED_C = ../../work/embed_selftest.c
 embed_selftest: $(CORE) tests/embed_selftest.c $(EMBED_S) $(EMBED_C)
-	$(CC) $(CFLAGS) $(INC) -o $@ $(CORE) $(EMBED_S) $(EMBED_C) tests/embed_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $(CORE) $(EMBED_S) $(EMBED_C) tests/embed_selftest.c 	      -Wl,-segprot,__DMsdkW,rw,rw
 
 $(EMBED_S): $(SYNDIR)/sdk.patched.bin ../ios/tools/gen_embed.py
 	$(PY) ../ios/tools/gen_embed.py $(SYNDIR) $(EMBED_S) sdk

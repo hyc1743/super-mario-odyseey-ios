@@ -59,7 +59,8 @@ def main():
             return 2
         te, po = int(hdr["TEXT_END"], 16), int(hdr["PATCH_OFF"], 16)
         ko, ks = int(hdr["KEY_PAGE_OFF"], 16), int(hdr["KEY_PAGE_SIZE"], 16)
-        binp = os.path.abspath(os.path.join(out, f"{n}.patched.bin"))
+        # 路径统一成正斜杠：反斜杠在汇编器的字符串里是转义符（Windows 上生成的 .S 会踩）
+        binp = os.path.abspath(os.path.join(out, f"{n}.patched.bin")).replace(chr(92), "/")
         sz = os.path.getsize(binp)
         img = open(binp, "rb").read()
         a, end = r16(te), r16(sz)
@@ -78,14 +79,13 @@ def main():
                 print(f"🔴 {n}: {why}")
                 return 2
 
-        # 每段前加全局标签：装载器（loader_apple.c 的内嵌分支）要用它们拿到段地址
+        # 标签必须**在段内、紧邻 .incbin**：标签落在错误的段里会让链接期找不到符号
+        # （CI 上真实踩过：Undefined symbols: "__dm_sdk_x0"）。
         syms = {}
         secs = ((f"__TEXT,__dm{n}x0", 0, a), (f"__DM{n}W,__img", a, po), (f"__TEXT,__dm{n}x1", po, end))
         for idx, (sect, lo, hi) in enumerate(secs):
             sym = f"_dm_{n}_{'x0' if idx == 0 else ('w' if idx == 1 else 'x1')}"
             syms[idx] = sym
-            asm += [f"    .globl {sym}", f"{sym}:", "    .p2align 14"]
-        for idx, (sect, lo, hi) in enumerate(secs):
             seg, sec = sect.split(",")
             if len(seg) > 16 or len(sec) > 16:      # Mach-O 段名/节名上限 16 字节
                 print(f"🔴 {n}: 名字太长（Mach-O 上限 16 字节）：{sect}")
@@ -94,7 +94,8 @@ def main():
             if fill < 0:
                 print(f"🔴 {n}: 段 {sect} 越界")
                 return 2
-            asm += [f"    .section {sect}",
+            asm += [f"    .section {sect}", "    .p2align 14",
+                    f"    .globl {syms[idx]}", f"{syms[idx]}:",
                     f'    .incbin "{binp}", {lo:#x}, {fill:#x}']
             if hi - lo > fill:
                 asm.append(f"    .space {hi - lo - fill:#x}")
