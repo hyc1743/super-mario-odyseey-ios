@@ -110,12 +110,14 @@ jobs:
           set -o pipefail
           # -k：一次跑完所有单测，这样日志里能看到**全部**失败点（否则首个失败就停）
           if ! make -C smo/host test PY=python3 -k 2>&1 | tee smo/host/test.log; then
-            echo "---- 失败断言（含【红】的行）----"
-            grep -n "【红】" smo/host/test.log | head -30 | while IFS= read -r l; do echo "::error::[macOS 失败断言] $l"; done
+            echo "---- 真正失败的断言（排除测试里预期会打的 [nvn] 诊断）----"
+            grep -n "【红】" smo/host/test.log | grep -v "\[nvn\]" | head -20 | while IFS= read -r l; do echo "::error::[macOS 失败断言] $l"; done
             echo "---- 编译/链接错误 ----"
-            grep -n "error:\|Undefined symbols\|Assertion" smo/host/test.log | head -20 | while IFS= read -r l; do echo "::error::[macOS 编译] $l"; done
-            echo "---- 每个单测的结束行（顺序即执行顺序）----"
-            grep -n "^全部通过\|^有断言不通过\|^\." smo/host/test.log | tail -20 | while IFS= read -r l; do echo "::warning::[macOS 顺序] $l"; done
+            grep -n "error:\|Undefined symbols" smo/host/test.log | head -12 | while IFS= read -r l; do echo "::error::[macOS 编译] $l"; done
+            echo "---- 跑过哪些单测（行号即顺序）与它们的结论 ----"
+            grep -n "_selftest\|全部通过\|有断言不通过" smo/host/test.log | tail -30 | while IFS= read -r l; do echo "::warning::[macOS 顺序] $l"; done
+            echo "---- 日志最后 8 行（带行号）----"
+            grep -n "" smo/host/test.log | tail -8 | while IFS= read -r l; do echo "::error::[macOS 尾部] $l"; done
             exit 1
           fi
       - name: 编译宿主（macOS：entry.S / thread.c / loader_apple.c / main.c 的真实检查）
