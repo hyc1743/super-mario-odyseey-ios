@@ -129,7 +129,7 @@ jobs:
             else
               rc=$?
               # 退出码是关键信息：139=SIGSEGV、138=SIGBUS、134=SIGABRT、134/非 0 各不同
-              echo "::error::[macOS] $t 失败（退出码 $rc，日志 $(wc -l < $log) 行，$(wc -c < $log) 字节）"
+              echo "::error::[exit code] $t = $rc (log lines: $(wc -l < $log))"
               cat $log | while IFS= read -r l; do echo "::error::[macOS $t] $l"; done
               # 用 macOS 自带的 lldb 抓回溯（「无输出崩溃」只有这个能定位）。无条件跑：判据本身也可能崩。
               xcrun lldb -b -o "run" -o "bt 12" -- ./smo/host/$t $(args_of $t) > /tmp/lldb.log 2>&1 || true
