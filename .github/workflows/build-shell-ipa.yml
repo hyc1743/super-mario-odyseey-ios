@@ -130,7 +130,8 @@ jobs:
               echo "::error::[macOS] $t 失败"
               tail -40 $log | while IFS= read -r l; do echo "::error::[macOS $t] $l"; done
               # 用 macOS 自带的 lldb 抓回溯（「无输出崩溃」只有这个能定位）。无条件跑：判据本身也可能崩。
-              lldb -b -o "run" -o "bt 12" -- ./smo/host/$t $(args_of $t) 2>&1 | grep -v "^$" | tail -26                 | while IFS= read -r l; do echo "::error::[lldb $t] $l"; done
+              xcrun lldb -b -o "run" -o "bt 12" -- ./smo/host/$t $(args_of $t) > /tmp/lldb.log 2>&1 || true
+              tail -26 /tmp/lldb.log | while IFS= read -r l; do echo "::error::[lldb $t] $l"; done
               fail=1
             fi
           done

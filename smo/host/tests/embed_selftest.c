@@ -45,10 +45,13 @@ int main(int argc, char **argv) {
         uint8_t *raw = malloc(e->image_size);
         size_t got = fread(raw, 1, e->image_size, f);
         fclose(f);
+        LOG("3.3 读了 %zu 字节", got);
         CHK(got == e->image_size, "读到同样多的字节");
+        LOG("3.4 开始逐字节比（%zu 字节）", got);
         size_t diff = 0, first = 0;
         for (size_t i = 0; i < got; i++)
             if (raw[i] != ((uint8_t *)img)[i]) { if (!diff) first = i; diff++; }
+        LOG("3.5 比完，差异 %zu", diff);
         CHK(diff == 0, "逐字节相同（运行时布局与原映像一致）");
         if (diff) LOG("差异 %zu 字节，首个 @ 0x%zx", diff, first);
         free(raw);
