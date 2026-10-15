@@ -4,8 +4,6 @@
 // 并把宿主的**日志环形缓冲**显示在屏幕上（未接电脑也能看）。宿主启动在下一轮接入。
 
 #import <UIKit/UIKit.h>
-#include "../host/romfs_resolve.h"
-#include "../host/logbuf.h"
 
 // 各子系统状态。写在代码里，改的时候顺手改，别让它和 STATUS.md 对不上。
 static NSArray<NSArray<NSString *> *> *kSubsystems(void) {
@@ -21,12 +19,11 @@ static NSArray<NSArray<NSString *> *> *kSubsystems(void) {
     ];
 }
 
-// 最近日志（环形缓冲，logbuf.c）：屏幕下方滚动显示，未接电脑也能看
+// 最近日志：宿主（logbuf.c 的环形缓冲）接进 App 构建后显示在这里。
+// 逻辑与自检已经完成（smo/host/logbuf.c + tests/applogic_selftest.c），
+// App 构建暂时保持纯 ObjC（把 C 源加进 xcodegen 目标那次 CI 失败过，下一轮一次加一个源二分）。
 static NSString *RecentLog(void) {
-    char buf[16384];
-    size_t n = dm_log_dump(buf, sizeof buf);
-    if (!n) return @"（暂无宿主日志）";
-    return [NSString stringWithUTF8String:buf];
+    return @"（宿主日志将在宿主接入 App 构建后显示；逻辑已测：smo/host/tests/applogic_selftest）";
 }
 
 // 在 App 自己的目录里找游戏文件。装包流程与参考项目一致：资源放在 App 的目录里，

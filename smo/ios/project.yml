@@ -25,9 +25,6 @@ targets:
     sources:
       - path: Sources
       - path: Resources
-      # 宿主里平台无关的两个组件（日志环形缓冲 / RomFS 路径解析），App 直接链接同一份代码
-      - path: ../host/logbuf.c
-      - path: ../host/romfs_resolve.c
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.smomobile
