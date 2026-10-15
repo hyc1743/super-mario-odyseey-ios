@@ -4,6 +4,8 @@
 // 并把宿主的**日志环形缓冲**显示在屏幕上（未接电脑也能看）。宿主启动在下一轮接入。
 
 #import <UIKit/UIKit.h>
+#include "logbuf.h"
+#include "romfs_resolve.h"
 
 // 各子系统状态。写在代码里，改的时候顺手改，别让它和 STATUS.md 对不上。
 static NSArray<NSArray<NSString *> *> *kSubsystems(void) {
@@ -19,11 +21,12 @@ static NSArray<NSArray<NSString *> *> *kSubsystems(void) {
     ];
 }
 
-// 最近日志：宿主（logbuf.c 的环形缓冲）接进 App 构建后显示在这里。
-// 逻辑与自检已经完成（smo/host/logbuf.c + tests/applogic_selftest.c），
-// App 构建暂时保持纯 ObjC（把 C 源加进 xcodegen 目标那次 CI 失败过，下一轮一次加一个源二分）。
+// 最近日志（宿主的环形缓冲 logbuf.c；与宿主共用同一份代码，逻辑有 CI 自检）
 static NSString *RecentLog(void) {
-    return @"（宿主日志将在宿主接入 App 构建后显示；逻辑已测：smo/host/tests/applogic_selftest）";
+    char buf[16384];
+    size_t n = dm_log_dump(buf, sizeof buf);
+    if (!n) return @"（暂无宿主日志）";
+    return [NSString stringWithUTF8String:buf];
 }
 
 // 在 App 自己的目录里找游戏文件。装包流程与参考项目一致：资源放在 App 的目录里，
@@ -54,6 +57,11 @@ static NSString *ScanDocuments(void) {
     [lines addObject:[NSString stringWithFormat:@"ExeFS：%@", exefs ? @"找到" : @"没有"]];
     [lines addObject:[NSString stringWithFormat:@"RomFS：%@", romfs ? @"找到" : @"没有"]];
     [lines addObject:[NSString stringWithFormat:@"ShaderData：%@", shader ? @"找到" : @"没有"]];
+    char rp[1024], ep[1024];
+    if (dm_romfs_path(rp, sizeof rp, docs.path.UTF8String))
+        [lines addObject:[NSString stringWithFormat:@"RomFS 路径（宿主同款解析）：%s", rp]];
+    if (dm_exefs_path(ep, sizeof ep, docs.path.UTF8String))
+        [lines addObject:[NSString stringWithFormat:@"ExeFS 路径（宿主同款解析）：%s", ep]];
     if (!exefs || !romfs) {
         [lines addObject:@""];
         [lines addObject:@"把你自己游戏里的 ExeFS 与 RomFS 目录放到这里（用「文件」App 或 Finder），"];

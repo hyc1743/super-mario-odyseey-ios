@@ -15,6 +15,7 @@ settings:
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
     CLANG_ENABLE_OBJC_ARC: "YES"
+    HEADER_SEARCH_PATHS: "$(SRCROOT)/../host"      # App 直接链接宿主的 logbuf/romfs 组件
     ENABLE_USER_SCRIPT_SANDBOXING: "NO"
     ALWAYS_SEARCH_USER_PATHS: "NO"
 
