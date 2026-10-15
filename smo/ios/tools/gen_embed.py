@@ -63,7 +63,11 @@ def main():
         binp = os.path.abspath(os.path.join(out, f"{n}.patched.bin")).replace(chr(92), "/")
         sz = os.path.getsize(binp)
         img = open(binp, "rb").read()
-        a, end = r16(te), r16(sz)
+        # x0 的尾必须向下取整：代码尾与「TEXT_END 到页边界的缝隙」共享同一页，
+        # 而缝隙里可能有数据与重定位槽（实测 rtld 的 30 条重定位全在缝隙里）——
+        # 把整页给 W（边界页 RWX），写它才不 SIGBUS。
+        a = (te // PG) * PG          # 向下：x0 只到整页边界
+        end = r16(sz)
 
         # 这些断言是「三段能拼回原映像」的前提，错一条就会在真机上以难以定位的方式崩
         checks = [

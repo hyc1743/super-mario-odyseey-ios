@@ -32,8 +32,10 @@
 // PC 相对寻址、补丁区的跳转、宿主「基址 + 原偏移」的引用全都不用改。
 //
 // 弱引用：只有链接了生成的表（gen_embed.py 的 .c）时才存在；macOS 开发/CI 从文件装载，这里返回 NULL。
-extern const dm_embed_mod g_embed_mods[] __attribute__((weak));
-extern const unsigned g_embed_n __attribute__((weak));
+// Mach-O 的弱符号要用 weak_import（ELF 的 weak 在 ld64 上对未定义数据符号不生效，
+// smo_host 不链接内嵌表时会直接链接失败 —— CI 上真的挂过）。
+extern const dm_embed_mod g_embed_mods[] __attribute__((weak_import));
+extern const unsigned g_embed_n __attribute__((weak_import));
 
 const dm_embed_mod *dm_embed_find(const char *name) {
     if (!&g_embed_mods || !&g_embed_n) return NULL;          // 没链接内嵌表
@@ -58,7 +60,10 @@ void *dm_embed_map(const dm_embed_mod *e) {
         if (!parts[i].sz) continue;
         mach_vm_address_t dst = base + parts[i].off;
         mach_vm_address_t src = (mach_vm_address_t)(uintptr_t)parts[i].src;
-        vm_prot_t cur = parts[i].prot, maxp = parts[i].prot;      // 两个都要传指针（in/out）
+        vm_prot_t cur = parts[i].prot;
+        // W 段的 max 给 RWX：TEXT_END 不页对齐时，代码尾与缝隙同页（见 gen_embed.py），
+        // 那一页既要有 X（代码尾）又要有 W（缝隙里的重定位槽）。
+        vm_prot_t maxp = (i == 1) ? (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE) : parts[i].prot;
         kr = mach_vm_remap(mach_task_self(), &dst, parts[i].sz, 0,
                            VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(), src,
                            parts[i].copy, &cur, &maxp, VM_INHERIT_NONE);
@@ -68,6 +73,11 @@ void *dm_embed_map(const dm_embed_mod *e) {
                 (unsigned long long)src, parts[i].sz);
             return NULL;
         }
+    }
+    // 边界页（代码尾 + 缝隙共享的那一页）需要 RWX
+    if (e->text_end & (PAGE - 1)) {
+        if (mprotect((void *)(base + e->x0_sz), PAGE, PROT_READ | PROT_WRITE | PROT_EXEC))
+            LOG("%s: 边界页 RWX 设置失败（mprotect）", e->name);
     }
     LOG("%s: 内嵌映像已就位 基址 %p（三段映射 %zu + %zu + %zu 字节）",
         e->name, (void *)(uintptr_t)base, e->x0_sz, e->w_sz, e->x1_sz);
@@ -89,9 +99,12 @@ void *dm_image_alloc(size_t size) {
 }
 
 void dm_code_protect(void *p, size_t n) {
-    size_t a = (size_t)n & ~(size_t)(PAGE - 1);          // 只封整页，跨到可写区的半页不碰
-    if (!a) return;
-    if (mprotect(p, a, PROT_READ | PROT_EXEC)) die("代码区设 RX 失败（MAP_JIT？）");
+    size_t a = (size_t)n & ~(size_t)(PAGE - 1);          // 只封整页
+    if (a && mprotect(p, a, PROT_READ | PROT_EXEC)) die("代码区设 RX 失败（MAP_JIT？）");
+    // TEXT_END 不页对齐时，代码尾与「缝隙」（ro/data 的开头）同页：
+    // 那一页必须 RWX —— 代码尾要执行，缝隙里可能有重定位槽要写（实测 rtld 就是）。
+    if (n & (PAGE - 1))
+        if (mprotect(p, PAGE, PROT_READ | PROT_WRITE | PROT_EXEC)) die("边界页设 RWX 失败");
 }
 
 void dm_ro_protect(void *p, size_t n) {

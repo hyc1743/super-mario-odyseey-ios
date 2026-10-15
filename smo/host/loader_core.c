@@ -299,7 +299,10 @@ void load_modules(const char *dir, const char *const *names, int n) {
         memcpy(m->base, raw, n_bytes);
         free(raw);
         read_layout(m, dir);
-        dm_code_protect(m->base, m->patch_off);          // 代码区（原 text + 补丁区）一拷进来就 RX
+        // 保护两段代码区：text 与补丁区。中间的 ro+data（含键页）保持可写，
+        // 装载器还要往里面写重定位与键页。边界页由 dm_code_protect 自己处理（RWX）。
+        dm_code_protect(m->base, m->text_end);
+        dm_code_protect(m->base + m->patch_off, m->size - m->patch_off);
         parse_dynamic(m);
         install_key_page(m);
         g_nmod++;
