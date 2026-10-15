@@ -1791,3 +1791,22 @@ smo_host 编译链接、出未签名 IPA）。
 都能走「CI 离屏渲染 + 回读 + 断言」的验证循环，M2/M3 的验证方式已经打通。
 
 坑（又踩一次）：heredoc 把 `\n` 吃成真换行，MSL 字符串散架 —— 用 edit 工具重写转义序列。
+
+## 2.94 M2 合龙点：合成命令流 → 真实状态层 → 记录层 → Metal 帧 → 回读
+
+`nvn_mtl_replay_frame`（清屏 + 每个绘制项按**管线键**着色全屏三角形）+ `mtl_replay_selftest`：
+用真实状态层造设备/程序/控制段，用记录层录「BindProgram → ClearColor → Draw → SetDepthMode → Draw」，
+两个绘制项的管线键不同（状态变了）→ Metal 帧 → 回读 == 第二个键色（覆盖语义正确）→ 单绘制项帧
+回读 == 第一个键色（清屏被盖）。CI 全绿。
+
+**这条链绿了，「记录 → 计划 → Metal」的管道成立**；真实参数的翻译（ClearColor 参数解析、真实
+顶点/索引缓冲、纹理绑定）在之后逐块接入，每块都用同一条验证循环。
+
+排障/教训（本轮）：
+- `nvn_replay_item/_key` 只定义没声明 → 合龙点测试隐式声明 → clang -Werror 失败。已移进 nvn_host.h，
+  旧 replay_selftest 的镜像结构改用公共 nvn_draw_item
+- **工作流重复键**：一次替换只锚定了步骤名，旧 `run:` 块残留在后 → GitHub 拒绝整个工作流
+  （run 显示 failure 且 jobs=0，pyyaml 却静默通过 —— 这种"解析器不一致"最坑）。
+  以后工作流改动后必须跑重复键检查（python yaml 构造器钩子）
+- CI 的分段循环曾只打注解不设 fail —— job 绿了但段挂了。已修：失败计入 fail
+- `-DSMO_EMBED` 在 Makefile 链接行里丢失过一次（字符串替换没命中）→ 表查找变 NULL。已修
