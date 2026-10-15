@@ -150,13 +150,15 @@ jobs:
             esac
           }
           fail=0
-          # embed_selftest 分段跑：它在 CI 上曾以 SIGBUS 崩在中途，分段能把崩溃定位到节
+          # embed_selftest 分段跑：它在 CI 上曾以 SIGBUS 崩在中途，分段能把崩溃定位到节。
+          # 注意：失败必须计入 fail —— 曾经只打注解不设 fail，job 绿了但段其实挂了（教训）
           for step in 1 2 3 4 5 6; do
             if ./smo/host/embed_selftest $step > /tmp/embed_step$step.log 2>&1; then
               echo "::notice::[macOS] embed_selftest step=$step 通过"
             else
               echo "::error::[exit code] embed_selftest step=$step = $?"
               tail -10 /tmp/embed_step$step.log | while IFS= read -r l; do echo "::error::[embed step=$step] $l"; done
+              fail=1
             fi
           done
           for t in $TARGETS; do
