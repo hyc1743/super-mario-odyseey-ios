@@ -19,10 +19,11 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <TargetConditionals.h>
 #if TARGET_OS_IPHONE
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
-#include <TargetConditionals.h>
+#include <mach-o/getsect.h>      // getsectiondata
 #endif
 
 #define PAGE 0x4000                      // Apple Silicon 16 KB 页
