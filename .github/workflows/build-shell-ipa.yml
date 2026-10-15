@@ -122,7 +122,17 @@ jobs:
             esac
           }
           fail=0
+          # embed_selftest 分段跑：它在 CI 上曾以 SIGBUS 崩在中途，分段能把崩溃定位到节
+          for step in 1 2 3 4 5 6; do
+            if ./smo/host/embed_selftest $step > /tmp/embed_step$step.log 2>&1; then
+              echo "::notice::[macOS] embed_selftest step=$step 通过"
+            else
+              echo "::error::[exit code] embed_selftest step=$step = $?"
+              tail -10 /tmp/embed_step$step.log | while IFS= read -r l; do echo "::error::[embed step=$step] $l"; done
+            fi
+          done
           for t in $TARGETS; do
+            [ "$t" = embed_selftest ] && continue          # 上面已分段跑过
             log=/tmp/$t.log
             if ./smo/host/$t $(args_of $t) > $log 2>&1; then
               echo "::notice::[macOS] $t 通过（$(grep -c '✅' $log) 条断言）"
