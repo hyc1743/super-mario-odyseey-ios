@@ -105,21 +105,34 @@ jobs:
           xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation \
               -o /tmp/metal_probe smo/ios/tools/metal_probe.m
           /tmp/metal_probe
-      - name: macOS：全套 C 单测（含内嵌装载自检 —— 三段签名段 → 连续映像）
+      - name: macOS：逐个 C 单测（每个失败立刻进注解，不依赖日志文件）
         run: |
           set -o pipefail
-          # -k：一次跑完所有单测，这样日志里能看到**全部**失败点（否则首个失败就停）
-          if ! make -C smo/host test PY=python3 -k 2>&1 | tee smo/host/test.log; then
-            echo "---- 真正失败的断言（排除测试里预期会打的 [nvn] 诊断）----"
-            grep -n "【红】" smo/host/test.log | grep -v "\[nvn\]" | head -20 | while IFS= read -r l; do echo "::error::[macOS 失败断言] $l"; done
-            echo "---- 编译/链接错误 ----"
-            grep -n "error:\|Undefined symbols" smo/host/test.log | head -12 | while IFS= read -r l; do echo "::error::[macOS 编译] $l"; done
-            echo "---- 跑过哪些单测（行号即顺序）与它们的结论 ----"
-            grep -n "_selftest\|全部通过\|有断言不通过" smo/host/test.log | tail -30 | while IFS= read -r l; do echo "::warning::[macOS 顺序] $l"; done
-            echo "---- 日志最后 8 行（带行号）----"
-            grep -n "" smo/host/test.log | tail -8 | while IFS= read -r l; do echo "::error::[macOS 尾部] $l"; done
+          TARGETS="loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest embed_selftest"
+          if ! make -C smo/host $TARGETS PY=python3 > /tmp/build.log 2>&1; then
+            echo "::error::[macOS] 单测编译/链接失败"
+            tail -25 /tmp/build.log | while IFS= read -r l; do echo "::error::[macOS 编译] $l"; done
             exit 1
           fi
+          args_of() {
+            case "$1" in
+              loader_selftest) echo "work/synthetic sdk main";;
+              embed_selftest)  echo "work/synthetic/sdk.patched.bin";;
+              *) echo "";;
+            esac
+          }
+          fail=0
+          for t in $TARGETS; do
+            log=/tmp/$t.log
+            if ./smo/host/$t $(args_of $t) > $log 2>&1; then
+              echo "::notice::[macOS] $t 通过（$(grep -c '✅' $log) 条断言）"
+            else
+              echo "::error::[macOS] $t 失败"
+              tail -14 $log | while IFS= read -r l; do echo "::error::[macOS $t] $l"; done
+              fail=1
+            fi
+          done
+          exit $fail
       - name: 编译宿主（macOS：entry.S / thread.c / loader_apple.c / main.c 的真实检查）
         run: |
           set -o pipefail
