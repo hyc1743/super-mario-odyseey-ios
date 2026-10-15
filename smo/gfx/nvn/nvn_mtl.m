@@ -180,3 +180,70 @@ int nvn_mtl_replay_frame(nvn_mtl_ctx *c, uint32_t w, uint32_t h, uint32_t clear_
         return (int)(w * h * 4);
     }
 }
+
+// 纹理采样的着色器：VS 输出带 uv 的全屏三角形（vertex_id 法），FS 用最近邻采样 texture(0)。
+static NSString *const kVS_tex = @
+"#include <metal_stdlib>\n"
+"using namespace metal;\n"
+"struct VSOut { float4 pos [[position]]; float2 uv; };\n"
+"vertex VSOut vs_tex(uint vid [[vertex_id]]) {\n"
+"    float2 p[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };\n"
+"    VSOut o; o.pos = float4(p[vid], 0.0, 1.0); o.uv = (p[vid] + 1.0) * 0.5; return o;\n"
+"}\n"
+"fragment float4 fs_tex(VSOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {\n"
+"    constexpr sampler s(mag_filter::nearest, min_filter::nearest);\n"
+"    return tex.sample(s, in.uv);\n"
+"}\n";
+
+// 纹理上传往返：上传 → 最近邻采样画全屏 → 回读。最近邻 + 1:1 之下必须与输入逐字节相同。
+int nvn_mtl_offscreen_texture(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
+                              const uint8_t *rgba, uint8_t *out, size_t cap) {
+    if (!c || !rgba || !out || cap < (size_t)w * h * 4) return -1;
+    @autoreleasepool {
+        NSError *err = nil;
+        id<MTLLibrary> lib = [c->dev newLibraryWithSource:kVS_tex options:nil error:&err];
+        if (!lib) {
+            fprintf(stderr, "[nvn_mtl] 纹理着色器编译失败：%s\n", err ? err.localizedDescription.UTF8String : "?");
+            return -1;
+        }
+        id<MTLFunction> vs = [lib newFunctionWithName:@"vs_tex"];
+        id<MTLFunction> fs = [lib newFunctionWithName:@"fs_tex"];
+        if (!vs || !fs) return -1;
+        MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+        pd.vertexFunction = vs;
+        pd.fragmentFunction = fs;
+        pd.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA8Unorm;
+        id<MTLRenderPipelineState> pso = [c->dev newRenderPipelineStateWithDescriptor:pd error:&err];
+        if (!pso) return -1;
+
+        MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                     width:w height:h mipmapped:NO];
+        td.usage = MTLTextureUsageShaderRead;
+        id<MTLTexture> src = [c->dev newTextureWithDescriptor:td];
+        if (!src) return -1;
+        [src replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0 withBytes:rgba bytesPerRow:w * 4];
+
+        MTLTextureDescriptor *rtd = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                      width:w height:h mipmapped:NO];
+        rtd.usage = MTLTextureUsageRenderTarget;
+        id<MTLTexture> dsttex = [c->dev newTextureWithDescriptor:rtd];
+        if (!dsttex) return -1;
+
+        id<MTLCommandBuffer> cb = [c->queue commandBuffer];
+        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = dsttex;
+        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+        rp.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+        [enc setRenderPipelineState:pso];
+        [enc setFragmentTexture:src atIndex:0];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [enc endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+        if (cb.status == MTLCommandBufferStatusError) return -1;
+        [dsttex getBytes:out bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
+        return (int)(w * h * 4);
+    }
+}

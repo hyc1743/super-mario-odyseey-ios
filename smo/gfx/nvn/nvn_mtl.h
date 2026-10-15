@@ -30,6 +30,11 @@ int nvn_mtl_replay_frame(nvn_mtl_ctx *c, uint32_t w, uint32_t h, uint32_t clear_
                          const uint64_t *draw_keys, unsigned n_draws,
                          uint8_t *out, size_t cap);
 
+// 离屏做**纹理上传往返**：把 w×h 的 RGBA8 数据上传进 MTLTexture，用最近邻采样画全屏四边形，
+// 回读。最近邻 + 1:1，回读必须与输入**逐字节相同** —— 这是「CPU 纹理链 → GPU」的交接验证。
+int nvn_mtl_offscreen_texture(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
+                              const uint8_t *rgba, uint8_t *out, size_t cap);
+
 // 离屏画一个**全屏三角形**（内置 MSL 着色器，片段颜色经 uniform 传入），回读像素。
 // 这一步验证的是着色器链：newLibraryWithSource（Metal 编译器）→ 两个入口函数 → 管线状态 →
 // drawPrimitives → 片段 uniform。之后把 NVN 的程序/管线按键接进来，就长成真正的重放层。
