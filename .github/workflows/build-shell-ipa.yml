@@ -108,9 +108,14 @@ jobs:
       - name: macOS：全套 C 单测（含内嵌装载自检 —— 三段签名段 → 连续映像）
         run: |
           set -o pipefail
-          if ! make -C smo/host test PY=python3 2>&1 | tee smo/host/test.log; then
-            echo "---- macOS 单测失败，尾部 40 行进注解 ----"
-            tail -40 smo/host/test.log | while IFS= read -r l; do echo "::error::[macOS 单测] $l"; done
+          # -k：一次跑完所有单测，这样日志里能看到**全部**失败点（否则首个失败就停）
+          if ! make -C smo/host test PY=python3 -k 2>&1 | tee smo/host/test.log; then
+            echo "---- 失败断言（含【红】的行）----"
+            grep -n "【红】" smo/host/test.log | head -30 | while IFS= read -r l; do echo "::error::[macOS 失败断言] $l"; done
+            echo "---- 编译/链接错误 ----"
+            grep -n "error:\|Undefined symbols\|Assertion" smo/host/test.log | head -20 | while IFS= read -r l; do echo "::error::[macOS 编译] $l"; done
+            echo "---- 每个单测的结束行（顺序即执行顺序）----"
+            grep -n "^全部通过\|^有断言不通过\|^\." smo/host/test.log | tail -20 | while IFS= read -r l; do echo "::warning::[macOS 顺序] $l"; done
             exit 1
           fi
       - name: 编译宿主（macOS：entry.S / thread.c / loader_apple.c / main.c 的真实检查）
