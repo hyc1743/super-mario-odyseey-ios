@@ -1727,3 +1727,44 @@ BC1 30.1%、BC5 25.5%、BC3 9.8%、ASTC_4x4 1.1%、RGBA8 0.9% —— **BC2 / BC6
 先把 TRM 的 `getAddrBlockLinear` 与我们的映射**全量 4096 个 texel 逐一对**（0 不一致）
 → 说明映射没问题 → 再看判据自己 `swizzle(deswizzle(x)) != 源`（判据自身不自洽也是线索）
 → 检查调用参数 → 发现块尺寸写死。
+
+---
+
+# 第二十四轮：M1 内嵌装载分支落地（CI 可验），顺手挖出两个真机必崩的宿主 bug
+
+## 2.89 内嵌装载路径在 macOS 上全链路验证
+
+`embed_selftest`（分段执行 step 1..6，CI 逐段跑、逐段注解）：
+
+```
+step 1 内嵌表查找            ✅（按名查到、查不到返回 NULL）
+step 2 三段映射              ✅（mach_vm_remap：两段代码共享签名页 + 一段写时复制）
+step 3 映像与三段逐字节相同   ✅
+step 4 可写段真能写（COW）    ✅
+step 5 装载器不读任何文件装起来 ✅（目录故意不存在 —— 这就是 iOS 能工作的关键）
+step 6 键页 8 槽非 0          ✅
+```
+
+`loader_core` 优先查内嵌表：命中则**完全不读文件与 tsv**（布局、门、键页槽都来自生成的内嵌表）。
+
+## 2.90 过程中挖出的两个真机必崩 bug（都是这条新路径第一次真跑才暴露的）
+
+1. **tsd_check 空指针**：`host_thread_keys_create()` 在 `load_modules()` 之前调，而 tsd_check 去读
+   `g_mod[0]` 的键页 —— 那时 base 是 NULL。改成用键号本身算偏移（等价），不再依赖装载顺序。
+   这条路从来没被执行过（smo_host 只编不跑），所以一直没暴露。
+2. **可写区被误设成 RX + 边界页问题**：
+   - 老代码 `dm_code_protect(base, patch_off)` 把整个 ro+data 设成 RX —— 重定位一写就 SIGBUS；
+   - `TEXT_END` 不页对齐时，**代码尾与「TEXT_END 到页边界的缝隙」同页**，而缝隙里可能有重定位槽
+     （实测 **rtld 的 30 条重定位全在缝隙里**；sdk/main/subsdk0 都是 0）。
+     正确设计：x0 尾**向下**取整（缝隙进 W），边界页 RWX（代码尾要执行、缝隙要写）。
+     文件路径与内嵌路径都按这个改。
+
+排障方法论的产出（写进代码注释与 CI）：分段执行（一次 CI 定位到节）、退出码注解
+（138=SIGBUS 直接指向"写只读页"）、CHK 里 flush（缓冲会吞掉崩溃前的输出）、
+Mach-O 弱符号不可靠（数据与函数的 weak/weak_import 都被 ld64 拒绝 → 用显式宏开关 SMO_EMBED）。
+
+## 2.91 M1 剩余
+
+- 内嵌 .S/.c 接进 iOS App 构建 + `-segprot` 接 Xcode 链接（shell_build.sh 已留可选路径）
+- App 内日志上屏 + RomFS 从「文件」App 导入
+- 初始化路径所需服务（settings / applet / am 等）
