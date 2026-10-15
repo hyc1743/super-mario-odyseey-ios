@@ -129,10 +129,8 @@ jobs:
             else
               echo "::error::[macOS] $t 失败"
               tail -40 $log | while IFS= read -r l; do echo "::error::[macOS $t] $l"; done
-              # 崩了的话：用 macOS 自带的 lldb 抓回溯（「无输出崩溃」只有这个能定位）
-              if ! grep -qi "failure\|FATAL\|【红】" $log; then
-                lldb -b -o "run" -o "bt 10" -- ./smo/host/$t $(args_of $t) 2>&1 | tail -22                   | while IFS= read -r l; do echo "::error::[lldb $t] $l"; done
-              fi
+              # 用 macOS 自带的 lldb 抓回溯（「无输出崩溃」只有这个能定位）。无条件跑：判据本身也可能崩。
+              lldb -b -o "run" -o "bt 12" -- ./smo/host/$t $(args_of $t) 2>&1 | grep -v "^$" | tail -26                 | while IFS= read -r l; do echo "::error::[lldb $t] $l"; done
               fail=1
             fi
           done
