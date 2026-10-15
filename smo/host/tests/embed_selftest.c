@@ -20,7 +20,8 @@
 #endif
 
 static int fails;
-#define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); if (!_ok) fails++; } while (0)
+// CHK 里 flush：stdout 重定向到文件时是全缓冲的，崩溃会吞掉已打印的内容（本项目踩过两次）
+#define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); fflush(stdout); if (!_ok) fails++; } while (0)
 
 static int prot_of(void *p, vm_prot_t *out) {
     mach_vm_address_t addr = (mach_vm_address_t)(uintptr_t)p;
@@ -36,6 +37,7 @@ static int prot_of(void *p, vm_prot_t *out) {
 }
 
 int main(int argc, char **argv) {
+    setvbuf(stdout, NULL, _IONBF, 0);
     printf("== 1. 内嵌表查找 ==\n");
     const dm_embed_mod *e = dm_embed_find("sdk");
     CHK(e != NULL, "按名字查到 sdk（说明链接进来的是生成的表）");
