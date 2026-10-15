@@ -105,6 +105,17 @@ jobs:
           xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation \
               -o /tmp/metal_probe smo/ios/tools/metal_probe.m
           /tmp/metal_probe
+      - name: Metal 重放层第一片（清屏 → 回读；离屏可验）
+        run: |
+          xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -o /tmp/mtl_selftest smo/gfx/nvn/nvn_mtl.m smo/gfx/nvn/tests/mtl_selftest.c
+          /tmp/mtl_selftest > /tmp/mtl.log 2>&1
+          rc=$?
+          cat /tmp/mtl.log
+          if [ $rc -ne 0 ]; then
+            echo "::error::[exit code] mtl_selftest = $rc"
+            tail -15 /tmp/mtl.log | while IFS= read -r l; do echo "::error::[mtl] $l"; done
+            exit 1
+          fi
       - name: macOS：逐个 C 单测（每个失败立刻进注解，不依赖日志文件）
         run: |
           set -o pipefail
