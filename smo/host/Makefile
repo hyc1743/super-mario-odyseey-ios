@@ -8,7 +8,9 @@
 CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
-SRC = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_oe.c hle_hid.c hle_force_gen.c hle_nvn_reg.c main.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+# CORE = 除 main.c 以外的宿主全部源（自检目标复用；内嵌装载自检也要它）
+CORE = loader_core.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_oe.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+SRC = $(CORE) main.c
 INC = -I. -I../gfx/nvn
 
 smo_host: $(SRC) dm.h hle.h
@@ -81,7 +83,23 @@ SYNDIR  = ../../work/synthetic
 $(SYNDIR)/sdk.patched.bin:
 	$(PY) ../tools/make_synthetic_artifacts.py $(SYNDIR)
 
-test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
+# 内嵌装载自检（只在 macOS 上跑：要 mach_vm_remap 与生成的 .S/.c）。
+# 用**合成产物**生成三段内嵌，验证：不读任何文件也能装起来、映像与 patched.bin 逐字节相同、
+# 代码段 RX / 可写段 RW 且真能写、门登记成功。iOS 真机路线就靠这条路，所以在 CI（macOS）上先证。
+EMBED_S = ../../work/embed_selftest.S
+EMBED_C = ../../work/embed_selftest.c
+embed_selftest: $(CORE) tests/embed_selftest.c $(EMBED_S) $(EMBED_C)
+	$(CC) $(CFLAGS) $(INC) -o $@ $(CORE) $(EMBED_S) $(EMBED_C) tests/embed_selftest.c
+
+$(EMBED_S): $(SYNDIR)/sdk.patched.bin ../ios/tools/gen_embed.py
+	$(PY) ../ios/tools/gen_embed.py $(SYNDIR) $(EMBED_S) sdk
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+TEST_EXTRA = embed_selftest
+endif
+
+test: $(TEST_EXTRA) loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
 	./loader_selftest $(SYNDIR) sdk main
 	./svc_selftest
 	./thread_selftest
@@ -94,17 +112,20 @@ test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nv
 	./tex_selftest
 	./bcdec_selftest
 	./texread_selftest
+ifeq ($(UNAME_S),Darwin)
+	./embed_selftest $(SYNDIR)/sdk.patched.bin
+endif
 
 # 改写前后动态等价性校验（Unicorn；需要 work/rewrite 里有真实产物，所以不进 CI）
-equiv: ../gfx/nvn/nvn_state.c
-	$(SMO_PY) ../../smo/tools/equiv_check.py sdk --limit 200
-	$(SMO_PY) ../../smo/tools/equiv_check.py sdk --kind cntpct --limit 40
-	$(SMO_PY) ../../smo/tools/equiv_check.py rtld --limit 10
+equiv: ../tools/equiv_check.py
+	$(PY) ../tools/equiv_check.py sdk --limit 200
+	$(PY) ../tools/equiv_check.py sdk --kind cntpct --limit 40
+	$(PY) ../tools/equiv_check.py rtld --limit 10
 
 run: smo_host
 	./smo_host work/rewrite rtld sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
+	rm -f smo_host embed_selftest loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
 
 .PHONY: test run equiv clean

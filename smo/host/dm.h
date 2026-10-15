@@ -30,6 +30,33 @@ enum { R_AARCH64_ABS64 = 257, R_AARCH64_GLOB_DAT = 1025, R_AARCH64_JUMP_SLOT = 1
 // 键页下标顺序必须与改写器 patch_nso.py 的 KEY_INDEX 一致
 enum { KEY_K18, KEY_KTLS, KEY_KTLR, KEY_KGATE, KEY_KRES0, KEY_KRES1, KEY_KASPECT, KEY_KASPECTUI, KEY_N };
 
+// ---------------------------------------------------------------- 内嵌模块（iOS 真机路线）
+//
+// iOS 真机不许运行时生成/修改代码，所以客体映像在出包时就被拆成三段编进签名段
+// （__TEXT,__dm<名>x0 / __DM<名>W,__img / __TEXT,__dm<名>x1，见 smo/ios/tools/gen_embed.py）。
+// 更关键的是：**iOS 上没有 work/rewrite/*.tsv 可读**，所以改写器表头与门表也必须内嵌，
+// 装载器只认下面这张表。macOS 开发/CI 走从文件装载的旧路，那时 dm_embed_find 返回 NULL。
+enum { DM_GK_SVC, DM_GK_CNTPCT, DM_GK_N };
+extern const char *const dm_gate_kind_name[DM_GK_N];      // 索引 → 种类名（与 gates.tsv 一致）
+
+typedef struct { uint64_t ret; uint32_t kind; uint32_t arg; uint64_t orig; } dm_embed_gate;
+
+typedef struct {
+    const char *name;
+    const uint8_t *x0; size_t x0_sz;          // 原代码（签名页 → RX）
+    const uint8_t *w;  size_t w_sz;           // ro + data + bss（写时复制 → RW）
+    const uint8_t *x1; size_t x1_sz;          // 补丁区（签名页 → RX）
+    size_t image_size;                        // 装载器要的映像大小（= patched.bin 大小，含 bss）
+    uint64_t text_end, ro_off, data_off, patch_off, key_page_off, key_page_size;
+    unsigned key_idx[KEY_N];
+    const dm_embed_gate *gates; unsigned n_gates;
+} dm_embed_mod;
+
+const dm_embed_mod *dm_embed_find(const char *name);   // 平台：按名查内嵌表（无内嵌返回 NULL）
+void *dm_embed_map(const dm_embed_mod *e);             // 平台：三段映射成一块连续映像（失败 NULL）
+extern const dm_embed_mod g_embed_mods[];              // 由 gen_embed.py 生成的 .c 提供（弱符号）
+extern const unsigned g_embed_n;
+
 // 一个模块的运行时状态
 typedef struct {
     char name[16];
@@ -37,6 +64,7 @@ typedef struct {
     size_t size;
     uint64_t text_end, ro_off, data_off, patch_off, key_page_off, key_page_size;   // 来自改写器 fixups 头
     unsigned key_idx[KEY_N];
+    const dm_embed_mod *embed;     // 非 NULL = 走内嵌映像（布局与门都来自它，不读文件/tsv）
     const Elf64_Dyn *dyn;
     const Elf64_Sym *symtab;
     const char *strtab;

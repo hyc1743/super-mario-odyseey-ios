@@ -20,6 +20,11 @@ void dm_code_protect(void *p, size_t n) { (void)p; (void)n; }
 void dm_ro_protect(void *p, size_t n) { (void)p; (void)n; }
 uint64_t dm_slot_key(unsigned i) { return 100 + i; }   // 假槽号：非 0 且互不相同即可
 
+// 本机自检没有内嵌映像（那是 iOS 真机路线）：两个钩子都返回 NULL，装载器就走文件路径。
+// macOS 上由 loader_apple.c 提供真实现；内嵌路径另有 embed_selftest 专门验。
+const dm_embed_mod *dm_embed_find(const char *name) { (void)name; return NULL; }
+void *dm_embed_map(const dm_embed_mod *e) { (void)e; return NULL; }
+
 // 宿主还没实现任何服务：强制接管表为空
 uint64_t dm_hle_force(const char *name) { (void)name; return 0; }
 

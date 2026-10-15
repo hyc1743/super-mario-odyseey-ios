@@ -90,7 +90,23 @@ void install_key_page(module_t *m) {
 
 // ------------------------------------------------------------------ 门
 
+// 门种类名（索引 = dm.h 的 DM_GK_*；与 gates.tsv 的字符串一致）
+const char *const dm_gate_kind_name[DM_GK_N] = { "svc", "cntpct" };
+
 void register_gates(module_t *m, const char *dir) {
+    // 内嵌表：门表直接来自生成物（iOS 上没有 gates.tsv）
+    if (m->embed) {
+        const dm_embed_mod *e = m->embed;
+        for (unsigned i = 0; i < e->n_gates; i++) {
+            const dm_embed_gate *g = &e->gates[i];
+            if (g->kind >= DM_GK_N) die("%s: 内嵌门种类越界 %u", m->name, g->kind);
+            gate_register((uint64_t)(uintptr_t)(m->base + g->ret), dm_gate_kind_name[g->kind],
+                          (int)g->arg, g->orig);
+        }
+        g_gates += e->n_gates;
+        LOG("%s: 门 %u 个（内嵌）", m->name, e->n_gates);
+        return;
+    }
     char path[1024], line[256];
     snprintf(path, sizeof path, "%s/%s.gates.tsv", dir, m->name);
     FILE *f = fopen(path, "r");
@@ -239,11 +255,37 @@ void load_modules(const char *dir, const char *const *names, int n) {
         module_t *m = &g_mod[g_nmod];
         memset(m, 0, sizeof *m);
         snprintf(m->name, sizeof m->name, "%s", names[i]);
+
+        // ① 优先看内嵌表（iOS 真机路线）：映像与布局都来自内嵌，不读文件、不读 tsv。
+        const dm_embed_mod *emb = dm_embed_find(m->name);
+        if (emb) {
+            m->base = dm_embed_map(emb);
+            if (!m->base) die("%s: 内嵌映像映射失败（签名段/mach_vm_remap？）", m->name);
+            m->embed = emb;
+            m->size = emb->image_size;
+            m->text_end = emb->text_end;
+            m->ro_off = emb->ro_off;
+            m->data_off = emb->data_off;
+            m->patch_off = emb->patch_off;
+            m->key_page_off = emb->key_page_off;
+            m->key_page_size = emb->key_page_size;
+            for (unsigned k = 0; k < KEY_N; k++) m->key_idx[k] = emb->key_idx[k];
+            // 代码段已是 RX（来自签名页），不再 mprotect；只把键页填好并设只读
+            parse_dynamic(m);
+            install_key_page(m);
+            g_nmod++;
+            LOG("%s: 内嵌映像 %#zx 字节（三段签名段），text_end=%#llx patch=%#llx 门 %u",
+                m->name, m->size, (unsigned long long)m->text_end,
+                (unsigned long long)m->patch_off, emb->n_gates);
+            continue;
+        }
+
+        // ② macOS 开发/CI：从文件装载（旧路）
         char path[1024];
         snprintf(path, sizeof path, "%s/%s.patched.bin", dir, m->name);
         size_t n_bytes = 0;
         uint8_t *raw = read_file(path, &n_bytes);
-        if (!raw) die("打不开 %s", path);
+        if (!raw) die("打不开 %s（且内嵌表里也没有）", path);
         m->size = n_bytes;
         m->base = dm_image_alloc(n_bytes);
         if (!m->base) die("分配映像失败 %s", path);

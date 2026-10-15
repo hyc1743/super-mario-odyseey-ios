@@ -15,9 +15,62 @@
 //      于是补丁区的相对位置与改写器算出来的 PATCH_OFF 一致。参考项目这样做，出包脚本是
 //      dm/ios/tools/gen_embed.py；本项目的对应物还没写（见 STATUS.md 的 TODO）。
 #include "dm.h"
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <pthread.h>
+
+// ---------------------------------------------------------------- 内嵌映像（iOS 真机路线）
+//
+// 真机不许运行时生成/修改代码，所以三段都由 gen_embed.py 在出包时编进签名段：
+//   __TEXT,__dm<名>x0（原代码，RX）/ __DM<名>W,__img（ro+data+bss，RW）/ __TEXT,__dm<名>x1（补丁区，RX）
+// 这里把它们重映射到**同一块连续地址**的原相对位置上：代码页共享已签名页（可直接执行，不需要 JIT），
+// 可写那段用写时复制，于是运行时布局与 patched.bin 逐字节相同 ——
+// PC 相对寻址、补丁区的跳转、宿主「基址 + 原偏移」的引用全都不用改。
+//
+// 弱引用：只有链接了生成的表（gen_embed.py 的 .c）时才存在；macOS 开发/CI 从文件装载，这里返回 NULL。
+extern const dm_embed_mod g_embed_mods[] __attribute__((weak));
+extern const unsigned g_embed_n __attribute__((weak));
+
+const dm_embed_mod *dm_embed_find(const char *name) {
+    if (!&g_embed_mods || !&g_embed_n) return NULL;          // 没链接内嵌表
+    for (unsigned i = 0; i < g_embed_n; i++)
+        if (!strcmp(g_embed_mods[i].name, name)) return &g_embed_mods[i];
+    return NULL;
+}
+
+void *dm_embed_map(const dm_embed_mod *e) {
+    size_t total = (e->image_size + PAGE - 1) & ~(size_t)(PAGE - 1);
+    mach_vm_address_t base = 0;
+    kern_return_t kr = mach_vm_allocate(mach_task_self(), &base, total, VM_FLAGS_ANYWHERE);
+    if (kr != KERN_SUCCESS) { LOG("%s: mach_vm_allocate(%zu) 失败：%d", e->name, total, (int)kr); return NULL; }
+
+    struct part { const uint8_t *src; size_t sz; size_t off; vm_prot_t prot; boolean_t copy; const char *what; };
+    struct part parts[3] = {
+        { e->x0, e->x0_sz, 0,                   VM_PROT_READ | VM_PROT_EXECUTE, FALSE, "x0 代码" },
+        { e->w,  e->w_sz,  e->x0_sz,            VM_PROT_READ | VM_PROT_WRITE,   TRUE,  "W 数据" },
+        { e->x1, e->x1_sz, e->x0_sz + e->w_sz,  VM_PROT_READ | VM_PROT_EXECUTE, FALSE, "x1 补丁" },
+    };
+    for (int i = 0; i < 3; i++) {
+        if (!parts[i].sz) continue;
+        mach_vm_address_t dst = base + parts[i].off;
+        mach_vm_address_t src = (mach_vm_address_t)(uintptr_t)parts[i].src;
+        vm_prot_t cur = parts[i].prot;
+        kr = mach_vm_remap(mach_task_self(), &dst, parts[i].sz, 0,
+                           VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, mach_task_self(), src,
+                           parts[i].copy, &cur, parts[i].prot, VM_INHERIT_NONE);
+        if (kr != KERN_SUCCESS) {
+            LOG("%s: %s 段 mach_vm_remap 失败：%d（dst=%#llx src=%#llx sz=%zu）",
+                e->name, parts[i].what, (int)kr, (unsigned long long)dst,
+                (unsigned long long)src, parts[i].sz);
+            return NULL;
+        }
+    }
+    LOG("%s: 内嵌映像已就位 基址 %p（三段映射 %zu + %zu + %zu 字节）",
+        e->name, (void *)(uintptr_t)base, e->x0_sz, e->w_sz, e->x1_sz);
+    return (void *)(uintptr_t)base;
+}
 
 #define PAGE 0x4000                      // Apple Silicon 16 KB 页
 

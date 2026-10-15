@@ -16,8 +16,9 @@ PC 相对寻址、补丁区的相对跳转、宿主「基址 + 原偏移」的�
 
 用法：
   gen_embed.py <产物目录> <输出 .S> <模块名...>
-  → 写出 .S 与 `<输出>.manifest.tsv`（每段的偏移/大小/sha256，供 check_embed.py 校验），
-    链接参数（可写段的 -segprot）打印到 stdout。
+  → 写出 .S、`<输出>.manifest.tsv`（每段的偏移/大小/sha256，供 check_embed.py 校验），
+    以及 `<输出>.c`（内嵌表：三段指针/大小 + 改写器表头 + 门表 —— iOS 上没有 work/rewrite/*.tsv 可读，
+    装载器必须从这张表里取布局与门），链接参数（可写段的 -segprot）打印到 stdout。
 """
 import hashlib
 import os
@@ -48,7 +49,7 @@ def main():
         return 1
     out, dst, names = sys.argv[1], sys.argv[2], sys.argv[3:]
     asm = ["// 由 smo/ios/tools/gen_embed.py 生成，勿手改"]
-    flags, rows = [], []
+    flags, rows, mods = [], [], []
     for n in names:
         hdr = read_hdr(os.path.join(out, f"{n}.fixups.tsv"))
         need = ("TEXT_END", "PATCH_OFF", "KEY_PAGE_OFF", "KEY_PAGE_SIZE")
@@ -77,8 +78,14 @@ def main():
                 print(f"🔴 {n}: {why}")
                 return 2
 
+        # 每段前加全局标签：装载器（loader_apple.c 的内嵌分支）要用它们拿到段地址
+        syms = {}
         secs = ((f"__TEXT,__dm{n}x0", 0, a), (f"__DM{n}W,__img", a, po), (f"__TEXT,__dm{n}x1", po, end))
-        for sect, lo, hi in secs:
+        for idx, (sect, lo, hi) in enumerate(secs):
+            sym = f"_dm_{n}_{'x0' if idx == 0 else ('w' if idx == 1 else 'x1')}"
+            syms[idx] = sym
+            asm += [f"    .globl {sym}", f"{sym}:", "    .p2align 14"]
+        for idx, (sect, lo, hi) in enumerate(secs):
             seg, sec = sect.split(",")
             if len(seg) > 16 or len(sec) > 16:      # Mach-O 段名/节名上限 16 字节
                 print(f"🔴 {n}: 名字太长（Mach-O 上限 16 字节）：{sect}")
@@ -87,7 +94,7 @@ def main():
             if fill < 0:
                 print(f"🔴 {n}: 段 {sect} 越界")
                 return 2
-            asm += [f"    .section {sect}", "    .p2align 14",
+            asm += [f"    .section {sect}",
                     f'    .incbin "{binp}", {lo:#x}, {fill:#x}']
             if hi - lo > fill:
                 asm.append(f"    .space {hi - lo - fill:#x}")
@@ -96,13 +103,59 @@ def main():
             rows.append((n, sect, lo, hi - lo, hashlib.sha256(piece).hexdigest()[:16]))
         flags.append(f"-Wl,-segprot,__DM{n}W,rw,rw")
 
+        # 门表：gates.tsv 每行 `返回点 种类 参数 原指令地址`（装载器用它登记宿主门）
+        gates = []
+        gp = os.path.join(out, f"{n}.gates.tsv")
+        if os.path.exists(gp):
+            for line in open(gp, encoding="utf-8"):
+                if line.startswith("#"):
+                    continue
+                q = line.split()
+                if len(q) == 4:
+                    gates.append((int(q[0], 16), q[1], int(q[2]), int(q[3], 16)))
+        mods.append((n, hdr, te, po, a, end, syms, gates))
+
     open(dst, "w", encoding="utf-8", newline="\n").write("\n".join(asm) + "\n")
     man = dst + ".manifest.tsv"
     with open(man, "w", encoding="utf-8", newline="\n") as f:
         f.write("# 模块\t段\t偏移\t大小\tsha256前16\n")
         for r in rows:
             f.write(f"{r[0]}\t{r[1]}\t0x{r[2]:x}\t0x{r[3]:x}\t{r[4]}\n")
-    print(f"已生成 {dst}（{len(names)} 个模块，{len(rows)} 段）与 {man}")
+    # ---- 内嵌表（.c）：布局头 + 门表 + 三段指针。装载器在 iOS 上没有 tsv 可读，只认这张表 ----
+    KEY_NAMES = ["K18", "KTLS", "KTLR", "KGATE", "KRES0", "KRES1", "KASPECT", "KASPECTUI"]
+    c = ["// 由 smo/ios/tools/gen_embed.py 生成，勿手改。",
+         "// 内嵌表：三段指针/大小 + 改写器表头 + 门表（iOS 上没有 work/rewrite/*.tsv 可读）。",
+         "#include \"../host/dm.h\"", ""]
+    for n, hdr, te, po, a, end, syms, gates in mods:
+        c.append(f"// ---- {n} ----")
+        for sym, kind in ((syms[0], "x0"), (syms[1], "w"), (syms[2], "x1")):
+            c.append(f"extern const uint8_t {sym}[];")
+        c.append(f"static const dm_embed_gate g_gate_{n}[] = {{")
+        for ret, kind, arg, orig in gates:
+            c.append(f"    {{ 0x{ret:x}, DM_GK_{kind.upper()}, {arg}, 0x{orig:x} }},")
+        c.append("};")
+        c.append("")
+    c.append("const dm_embed_mod g_embed_mods[] = {")
+    for n, hdr, te, po, a, end, syms, gates in mods:
+        t, r, d = (int(hdr.get("TEXT_END", "0"), 16), int(hdr.get("RO_OFF", "0"), 16),
+                   int(hdr.get("DATA_OFF", "0"), 16))
+        kpo, kps = int(hdr["KEY_PAGE_OFF"], 16), int(hdr["KEY_PAGE_SIZE"], 16)
+        idxs = []
+        for k in KEY_NAMES:
+            key = f"KEY_{k}_IDX"
+            idxs.append(int(hdr.get(key, "0"), 10))
+        idx_s = ", ".join(str(i) for i in idxs)
+        c.append(f'    {{ "{n}",')
+        c.append(f"      {syms[0]}, 0x{a:x}, {syms[1]}, 0x{po - a:x}, {syms[2]}, 0x{end - po:x},")
+        c.append(f"      0x{os.path.getsize(os.path.join(out, n + '.patched.bin')):x},   // image_size")
+        c.append(f"      0x{t:x}, 0x{r:x}, 0x{d:x}, 0x{po:x}, 0x{kpo:x}, 0x{kps:x},")
+        c.append(f"      {{ {idx_s} }},")
+        c.append(f"      g_gate_{n}, (unsigned)(sizeof g_gate_{n} / sizeof g_gate_{n}[0]) }},")
+    c.append("};")
+    c.append(f"const unsigned g_embed_n = {len(mods)};")
+    cpath = os.path.splitext(dst)[0] + ".c"
+    open(cpath, "w", encoding="utf-8", newline=chr(10)).write(chr(10).join(c) + chr(10))
+    print(f"已生成 {dst}（{len(names)} 个模块，{len(rows)} 段）、{man} 与 {cpath}")
     print(" ".join(flags))
     return 0
 

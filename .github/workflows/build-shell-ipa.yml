@@ -105,6 +105,10 @@ jobs:
           xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation \
               -o /tmp/metal_probe smo/ios/tools/metal_probe.m
           /tmp/metal_probe
+      - name: macOS：全套 C 单测（含内嵌装载自检 —— 三段签名段 → 连续映像）
+        run: |
+          set -o pipefail
+          make -C smo/host test PY=python3 2>&1 | tee smo/host/test.log
       - name: 编译宿主（macOS：entry.S / thread.c / loader_apple.c / main.c 的真实检查）
         run: |
           set -o pipefail
