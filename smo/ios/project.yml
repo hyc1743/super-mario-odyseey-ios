@@ -25,8 +25,9 @@ targets:
     sources:
       - path: Sources
       - path: Resources
-      # 二分接 C 源：先只加 logbuf.c（上次一次加两个 + main.m 引用，ScanDependencies 失败）
+      # 二分接 C 源：logbuf.c 单独加入已验证；现在加 romfs_resolve.c（main.m 的引用最后一步）
       - path: ../host/logbuf.c
+      - path: ../host/romfs_resolve.c
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.smomobile
