@@ -1810,3 +1810,12 @@ smo_host 编译链接、出未签名 IPA）。
   以后工作流改动后必须跑重复键检查（python yaml 构造器钩子）
 - CI 的分段循环曾只打注解不设 fail —— job 绿了但段挂了。已修：失败计入 fail
 - `-DSMO_EMBED` 在 Makefile 链接行里丢失过一次（字符串替换没命中）→ 表查找变 NULL。已修
+
+## 2.95 M2 继续：纹理上传往返 + 管线缓存
+
+- `nvn_mtl_offscreen_texture`：上传 RGBA → 最近邻采样画全屏 → 回读与输入**逐字节相同**（含 alpha=0 像素）。
+  CPU 纹理链 → GPU 的交接验证成立。
+- `nvn_mtl_replay_frame_multi` + 管线缓存（ctx 里按 prog id 缓存）：
+  同 prog 复用（缓存数不增）、异 prog 新建（0=纯色 / 1=纹理采样）、prog1 输出与纹理输入逐字节一致。
+  验证的是真机上「按管线键缓存」的核心性质（iPhone 上编管线很贵，复用必须可证）。
+- CI 全绿（macOS：Metal 各片 + 合龙点 + embed 1-6 + 11 个 C 单测 + 宿主 + IPA）。
