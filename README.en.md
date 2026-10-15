@@ -41,6 +41,8 @@ The technical path is taken wholesale from [jhaizhou-ops/d2r-mobile](https://git
 
 ## Progress
 
+**Milestones** (towards running on a real device): **M0 guest side ready ✅** → M1 installs, boots, logs on screen (next) → M2 first frame → M3 title screen → M4 playable. Deliverables, verification method and size estimates per milestone are in the "project plan v2" section of [STATUS.md](STATUS.md).
+
 | Stage | State | Evidence |
 |---|---|---|
 | Unpacking game files (NSP → ExeFS / RomFS, 4,636 files / 5.2 GB) | ✅ done, verified | `smo/tools/nsp_extract.py` (algorithm checked line by line against hactool's source) |

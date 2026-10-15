@@ -51,13 +51,17 @@ import texture2ddecoder
 # BNTX 格式 id → (我们的 NVN 格式号, 每像素字节数, texture2ddecoder 解码函数)
 # BC2（0x1b）texture2ddecoder 没有，跳过并计数。
 FMT = {
-    0x1A: (0x41, 4, "bc1"),
-    0x1B: None,                       # BC2：参考没实现（先计数跳过）
-    0x1C: (0x44, 4, "bc3"),
-    0x1D: (0x49, 1, "bc4"),
-    0x1E: (0x4B, 2, "bc5"),
-    0x1F: None,                       # BC6H / BC7：参考解码器下一步再写（先计数跳过）
+    # (我们的 NVN 格式号, 输出每像素/块字节, block_w, block_h, 参考解码名或 None)
+    # None = 只解交错不解码（ASTC / 未压缩，输出即线性块/像素，与判据逐字节比）
+    0x0B: (0x00, 4, 1, 1, None),      # RGBA8
+    0x1A: (0x41, 4, 4, 4, "bc1"),
+    0x1B: None,                       # BC2：游戏里不存在（survey 实测）
+    0x1C: (0x44, 4, 4, 4, "bc3"),
+    0x1D: (0x49, 1, 4, 4, "bc4"),
+    0x1E: (0x4B, 2, 4, 4, "bc5"),
+    0x1F: None,                       # BC6H / BC7：游戏里不存在（survey 实测）
     0x20: None,
+    0x2D: (0x00, 16, 4, 4, None),     # ASTC_4x4
 }
 BLOCK_BYTES = {0x1A: 8, 0x1B: 16, 0x1C: 16, 0x1D: 8, 0x1E: 16, 0x1F: 16, 0x20: 16}
 
@@ -206,15 +210,16 @@ def main():
                     if f is None:
                         stats[f"skip:id{fid:#x}"] += 1
                         continue
-                    nvn_fmt, bpp, decfn = f
-                    bb = BLOCK_BYTES[fid]
+                    nvn_fmt, bpp, bw, bh, decfn = f
+                    bb = BLOCK_BYTES.get(fid, bpp)
                     # 路径 A：我们的整链（只解 mip0）
                     L = Layout()
                     L.width = w; L.height = h; L.depth = 1; L.layers = 1; L.mip_levels = 1
-                    L.bytes_per_block = bb; L.block_w = 4; L.block_h = 4
+                    L.bytes_per_block = bb; L.block_w = bw; L.block_h = bh
                     L.samples_x = L.samples_y = 1; L.dims = 2
                     L.tile_h_log2 = bhl; L.tile_d_log2 = 0; L.linear = 0; L.stride = 0
-                    want = w * h * bpp
+                    wb = (w + bw - 1) // bw; hb = (h + bh - 1) // bh
+                    want = (w * h * bpp) if decfn else wb * hb * bb   # BC 出像素；只解交错出块
                     src = ctypes.create_string_buffer(mip0, len(mip0))
                     dst = ctypes.create_string_buffer(max(want, 1))
                     got = lib.nvn_tex_decode(ctypes.byref(L), nvn_fmt, src, len(mip0), dst, want)
@@ -225,13 +230,23 @@ def main():
                     # 路径 B1：独立解交错（线性 BC 字节）
                     lin = judge_deswizzle(w, h, bb, bhl, mip0, align)
                     # 判据的输出按 surfSize 对齐，可能比实际块数据长；只比有效前缀
-                    wb = (w + 3) // 4; hb = (h + 3) // 4
                     need = wb * bb * hb
                     lin = lin[:need]
                     mid = ctypes.create_string_buffer(max(need, 1))
                     gotm = lib.nvn_tex_detile(mid, need, 0, src, len(mip0), wb, hb, bb, bhl)
                     if gotm != need or mid.raw[:need] != lin:
                         bad.append((os.path.basename(p), name, w, h, fid, "解交错与独立实现不一致"))
+                        continue
+                    # 只解交错不解码的格式（ASTC / 未压缩）：输出就是线性块/像素，直接逐字节比
+                    if decfn is None:
+                        if ours == lin:
+                            stats[f"pass:{fid:#x}"] += 1
+                            checked += 1
+                            continue
+                        k = next((j for j in range(len(lin)) if ours[j] != lin[j]), -1)
+                        bad.append((os.path.basename(p), name, w, h, fid,
+                                    f"只解交错不一致（@ {k}，我们 {ours[k]} vs 判据 {lin[k]}）"))
+                        checked += 1
                         continue
                     # 路径 B2：规范式参考
                     ref = bytes(getattr(bc_spec_ref, "decode_" + decfn)(lin, w, h))
@@ -276,9 +291,7 @@ def main():
     if bad:
         print("\n有不一致的贴图 —— 内容级证据不足，先修")
         return 1
-    print("
-✅ 全部通过：解交错与独立实现逐字节一致；解码与规范参考
-          "「端点逐字节、插值全部 ≤1」（逐字节计数见上）")
+    print("✅ 全部通过：解交错与独立实现逐字节一致；解码与规范参考「端点逐字节、插值全部 ≤1」（逐字节计数见上）")
     return 0
 
 

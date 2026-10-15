@@ -72,9 +72,59 @@ int main(void) {
         if (!(m1[i * 4] == 255 && m1[i * 4 + 2] == 0)) ok = 0;
     CHK(ok, "mip1 的 16 个像素都是红");
 
-    printf("== 4. 失败路径 ==\n");
+    printf("== 4. ASTC_4x4：只解交错不解码（苹果 GPU 原生支持，Metal 层直接上传）==");
+    putchar('\n');
+    nvn_tex_layout LA;
+    memset(&LA, 0, sizeof LA);
+    LA.width = 8; LA.height = 8; LA.depth = 1; LA.layers = 1; LA.mip_levels = 1;
+    LA.bytes_per_block = 16; LA.block_w = 4; LA.block_h = 4;
+    LA.samples_x = LA.samples_y = 1; LA.dims = 2; LA.tile_h_log2 = 0; LA.tile_d_log2 = 0;
+    uint8_t *sa = calloc((size_t)nvn_tex_storage_size(&LA), 1);
+    CHK(sa != NULL, "ASTC 源缓冲");
+    uint8_t astcblk[16];
+    for (unsigned i = 0; i < 16; i++) astcblk[i] = (uint8_t)(0x50 + i);
+    for (int by = 0; by < 2; by++) for (int bx = 0; bx < 2; bx++)
+        memcpy(sa + nvn_tex_block_offset(bx, by, 2, 16, 0), astcblk, 16);
+    uint8_t da[2 * 2 * 16 + 16];
+    memset(da, 0xAA, sizeof da);
+    int64_t na = nvn_tex_decode(&LA, 0x00, sa, (size_t)nvn_tex_storage_size(&LA), da, 64);
+    CHK(na == 64, "ASTC 8×8 输出 = 2×2 块 × 16 字节 = 64");
+    CHK(da[0] == 0x50 && da[16] == 0x50 && da[32] == 0x50 && da[48] == 0x50, "四块按行序排列（每块首字节 0x50）");
+    CHK(da[64] == 0xAA, "没写出 64 字节之外");
+
+    printf("== 5. RGBA8 未压缩块线性（块 = 1×1 texel）==");
+    putchar('\n');
+    nvn_tex_layout LU;
+    memset(&LU, 0, sizeof LU);
+    LU.width = 8; LU.height = 8; LU.depth = 1; LU.layers = 1; LU.mip_levels = 1;
+    LU.bytes_per_block = 4; LU.block_w = 1; LU.block_h = 1;
+    LU.samples_x = LU.samples_y = 1; LU.dims = 2; LU.tile_h_log2 = 0; LU.tile_d_log2 = 0;
+    uint8_t *su = calloc((size_t)nvn_tex_storage_size(&LU), 1);
+    CHK(su != NULL, "RGBA8 源缓冲");
+    for (unsigned y = 0; y < 8; y++) for (unsigned x = 0; x < 8; x++) {
+        uint64_t o = nvn_tex_block_offset(x, y, 8, 4, 0);
+        uint32_t v = 0x01000000u * (y * 8 + x);
+        memcpy(su + o, &v, 4);
+    }
+    uint8_t du[8 * 8 * 4 + 8];
+    memset(du, 0xAA, sizeof du);
+    int64_t nu = nvn_tex_decode(&LU, 0x00, su, (size_t)nvn_tex_storage_size(&LU), du, 256);
+    CHK(nu == 256, "RGBA8 输出 256 字节");
+    int okU = 1;
+    for (unsigned i = 0; i < 64; i++) {
+        uint32_t v;
+        memcpy(&v, du + i * 4, 4);
+        if (v != 0x01000000u * i) okU = 0;
+    }
+    CHK(okU, "解交错后每个 texel 的值与摆放一致（第 i 个 = i）");
+    free(sa); free(su);
+
+    printf("== 6. 失败路径 ==");
+    putchar('\n');
     CHK(nvn_tex_decode(&L, 0x41, src, 4, dst, 99999) < 0, "src 太小 → 报错");
-    CHK(nvn_tex_decode(&L, 0x00, src, (size_t)total_sz, dst, 8 * 8 * 4 + 4 * 4 * 4) < 0, "BC 布局 + 非 BC 格式号 → 报错（块≠1×1）");
+    // 新语义：块>1×1 的非 BC 格式 = 只解交错不解码（ASTC 路径），不再是错误
+    CHK(nvn_tex_decode(&L, 0x00, src, (size_t)total_sz, dst, 8 * 8 * 4 + 4 * 4 * 4) == 40,
+        "BC 布局 + 非 BC 格式号 → 只解交错（mip0 32 字节 + mip1 8 字节 = 40）");
 
     free(src); free(dst);
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");

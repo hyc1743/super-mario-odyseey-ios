@@ -66,9 +66,7 @@ int64_t nvn_tex_decode(const nvn_tex_layout *L, uint32_t nvn_fmt,
                 free(blockbuf);
                 if (rc != 0) return -1;
                 total += (int64_t)h_px * w_px * bpp;
-            } else {
-                // 非 BC 格式必须块 = 1×1：不然「解交错后就是像素」不成立（4×4 块但没有解码器）
-                if (L->block_w != 1 || L->block_h != 1) return -1;
+            } else if (L->block_w == 1 && L->block_h == 1) {
                 uint32_t px = L->bytes_per_block;               // 块 = 1×1 texel
                 size_t need = (size_t)w_px * h_px * px;
                 if ((uint64_t)total + need > dst_cap) return -1;
@@ -81,6 +79,25 @@ int64_t nvn_tex_decode(const nvn_tex_layout *L, uint32_t nvn_fmt,
                 } else {
                     size_t got = nvn_tex_detile(dst + total, dst_cap - (size_t)total, 0, msrc, mip_src,
                                                 w_px, h_px, px, L->tile_h_log2);
+                    if (got != need) return -1;
+                }
+                total += (int64_t)need;
+            } else {
+                // 块 > 1×1 但不需要 CPU 解码（实测游戏里的 ASTC_4x4；BC2/BC6H/BC7 不存在于本游戏，
+                // 见 bntx_survey）：只解交错成「行优先块」，不解码 —— 苹果 GPU 原生支持 ASTC，
+                // Metal 层拿线性 ASTC 块直接上传。
+                size_t row = (size_t)w_blk * bb;
+                size_t need = (size_t)h_blk * row;
+                if ((uint64_t)total + need > dst_cap) return -1;
+                if (L->linear) {
+                    size_t stride = L->stride ? L->stride : row;
+                    for (uint32_t y = 0; y < h_blk; y++) {
+                        if ((size_t)y * stride + row > mip_src) return -1;
+                        memcpy(dst + total + (size_t)y * row, msrc + (size_t)y * stride, row);
+                    }
+                } else {
+                    size_t got = nvn_tex_detile(dst + total, dst_cap - (size_t)total, 0, msrc, mip_src,
+                                                w_blk, h_blk, bb, L->tile_h_log2);
                     if (got != need) return -1;
                 }
                 total += (int64_t)need;
