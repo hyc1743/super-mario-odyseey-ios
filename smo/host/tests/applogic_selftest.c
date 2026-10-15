@@ -4,6 +4,7 @@
 #include "../logbuf.h"
 #include "../romfs_resolve.h"
 #include <sys/stat.h>
+#include <unistd.h>       // rmdir（macOS 的 C99 不会经 stdio 传递声明）
 #ifdef _WIN32
 #include <direct.h>
 #define SMO_MKDIR(p) _mkdir(p)
