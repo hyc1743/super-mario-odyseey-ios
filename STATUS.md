@@ -1854,3 +1854,10 @@ smo_host 编译链接、出未签名 IPA）。
   固定名 SMO-log-latest.txt，并拉起系统分享（AirDrop/邮件/存文件）
 - 用户首跑流程（全链条）：本机跑 guest_dylib.py → 解压 IPA 放入 Frameworks/Guest.framework →
   重打包 → Sideloadly 签名 → 文件 App 放 RomFS + 各 .tsv → 打开 App → 日志滚动 → 导出日志发回
+
+## 2.99 首跑链路完整（代码层面）+ 日志导出按钮
+
+- 日志导出按钮：一键存 SMO-log-<时间>.txt + SMO-log-latest.txt（Documents，文件 App 可见）并拉起系统分享
+- guest dylib 壳模式 + 宿主 bootstrap 全部就绪，App 构建绿（CI）
+- 首跑全链条（用户侧）：guest_dylib.py → 放 Frameworks + RomFS + tsv → Sideloadly 签名 → 打开 → 日志滚 → 导出日志发回
+- 发 v0.2.0 release（含导出按钮）
