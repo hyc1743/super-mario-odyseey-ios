@@ -25,6 +25,8 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+      # 二分接 C 源：先只加 logbuf.c（上次一次加两个 + main.m 引用，ScanDependencies 失败）
+      - path: ../host/logbuf.c
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.smomobile
