@@ -6,7 +6,6 @@
 #import <UIKit/UIKit.h>
 #include "../host/romfs_resolve.h"
 #include "../host/logbuf.h"
-#include "../host/dm.h"
 
 // 各子系统状态。写在代码里，改的时候顺手改，别让它和 STATUS.md 对不上。
 static NSArray<NSArray<NSString *> *> *kSubsystems(void) {

@@ -195,7 +195,7 @@ jobs:
         run: |
           set -o pipefail
           bash smo/ios/shell_build.sh 2>&1 | tee smo/ios/out_step.log
-      - name: 失败时把报错发成注解
+      - name: 失败时把报错发成注解（错误行优先）
         # 注释：这是维护者/协作方在拿不到仓库管理员权限时，唯一能直接看到真实报错的通道
         if: failure()
         run: |
