@@ -128,7 +128,7 @@ jobs:
               echo "::notice::[macOS] $t 通过（$(grep -c '✅' $log) 条断言）"
             else
               echo "::error::[macOS] $t 失败"
-              tail -14 $log | while IFS= read -r l; do echo "::error::[macOS $t] $l"; done
+              tail -40 $log | while IFS= read -r l; do echo "::error::[macOS $t] $l"; done
               fail=1
             fi
           done

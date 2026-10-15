@@ -271,9 +271,15 @@ void load_modules(const char *dir, const char *const *names, int n) {
             m->key_page_off = emb->key_page_off;
             m->key_page_size = emb->key_page_size;
             for (unsigned k = 0; k < KEY_N; k++) m->key_idx[k] = emb->key_idx[k];
-            // 代码段已是 RX（来自签名页），不再 mprotect；只把键页填好并设只读
+            // 代码段已是 RX（来自签名页），不再 mprotect；只把键页填好并设只读。
+            // 三步各打一行（stderr 不缓冲）：内嵌路径在 CI 上出过崩溃，这样能直接定位到哪一步。
+            LOG("%s: 内嵌 ① 布局就位 text_end=%#llx patch=%#llx keypage=%#llx", m->name,
+                (unsigned long long)m->text_end, (unsigned long long)m->patch_off,
+                (unsigned long long)m->key_page_off);
             parse_dynamic(m);
+            LOG("%s: 内嵌 ② 动态段解析完成（符号 %u，dyn %p）", m->name, m->nsym, (void *)m->dyn);
             install_key_page(m);
+            LOG("%s: 内嵌 ③ 键页装好", m->name);
             g_nmod++;
             LOG("%s: 内嵌映像 %#zx 字节（三段签名段），text_end=%#llx patch=%#llx 门 %u",
                 m->name, m->size, (unsigned long long)m->text_end,
