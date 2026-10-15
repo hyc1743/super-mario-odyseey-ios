@@ -15,7 +15,7 @@ settings:
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
     CLANG_ENABLE_OBJC_ARC: "YES"
-    HEADER_SEARCH_PATHS: "$(SRCROOT)/../host"      # App 直接链接宿主的 logbuf/romfs 组件
+    HEADER_SEARCH_PATHS: "$(SRCROOT)/../host $(SRCROOT)/../gfx/nvn"
     ENABLE_USER_SCRIPT_SANDBOXING: "NO"
     ALWAYS_SEARCH_USER_PATHS: "NO"
 
@@ -26,9 +26,31 @@ targets:
     sources:
       - path: Sources
       - path: Resources
-      # 二分接 C 源：logbuf.c 单独加入已验证；现在加 romfs_resolve.c（main.m 的引用最后一步）
+      # 宿主（同一份代码编进 App；不包含 host/main.c —— App 的引导在 main.m 的 RunHost 里）
+      - path: ../host/loader_core.c
+      - path: ../host/loader_apple.c
+      - path: ../host/thread.c
+      - path: ../host/hle.c
+      - path: ../host/hle_svc.c
+      - path: ../host/hle_thread.c
+      - path: ../host/hle_fs.c
+      - path: ../host/hle_oe.c
+      - path: ../host/hle_hid.c
+      - path: ../host/hle_force_gen.c
+      - path: ../host/hle_nvn_reg.c
       - path: ../host/logbuf.c
       - path: ../host/romfs_resolve.c
+      - path: ../host/entry.S
+      # 图形层（宿主同一份；nvn_mtl.m 暂不进 App —— 图形层接上时再加）
+      - path: ../gfx/nvn/hle_nvn.c
+      - path: ../gfx/nvn/nvn_table.c
+      - path: ../gfx/nvn/nvn_state.c
+      - path: ../gfx/nvn/nvn_core.c
+      - path: ../gfx/nvn/nvn_shader.c
+      - path: ../gfx/nvn/nvn_replay.c
+      - path: ../gfx/nvn/nvn_tex.c
+      - path: ../gfx/nvn/nvn_bcdec.c
+      - path: ../gfx/nvn/nvn_texread.c
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.smomobile

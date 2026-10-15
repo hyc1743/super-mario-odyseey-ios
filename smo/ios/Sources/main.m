@@ -6,6 +6,37 @@
 #import <UIKit/UIKit.h>
 #include "logbuf.h"
 #include "romfs_resolve.h"
+#include "dm.h"
+#include "hle.h"
+#include "hle_thread.h"
+extern void dm_jump_guest(void *arg, void *fn);
+
+// ---- 宿主引导（后台线程跑；日志进环形缓冲，前台定时刷新显示） ----
+static void RunHost(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSURL *docs = [fm URLForDirectory:NSDocumentDirectory inDomain:NSUserDomainMask
+                    appropriateForURL:nil create:NO error:nil];
+    char ep[1024];
+    if (!docs || !dm_exefs_path(ep, sizeof ep, docs.path.UTF8String)) {
+        LOG("App：Documents 里没有 ExeFS —— 只显示状态页（把改写产物放进「文件」App 的 SMOMobile/ExeFS）");
+        return;
+    }
+    LOG("== SMO 宿主（App 内）：从 %s 装载 ==", ep);
+    host_thread_keys_create();
+    static const char *names[] = { "rtld", "sdk", "subsdk0", "main" };
+    load_modules(ep, names, 4);
+    run_module_inits();
+    uint32_t h = svc_thread_main_init();
+    LOG("主线程句柄 %#x", h);
+    void *fn = guest_sym("nnMain");
+    if (!fn) { LOG("【红】找不到入口符号 nnMain"); return; }
+    module_t *m = module_of(fn);
+    LOG("== 进入客体入口 nnMain（在 %s，偏移 +%#zx）==", m ? m->name : "?",
+        m ? (size_t)((const uint8_t *)fn - m->base) : 0);
+    guest_thread_init();
+    dm_jump_guest(NULL, fn);
+    LOG("== 客体入口返回了（正常游戏里 nnMain 不会返回）==");
+}
 
 // 各子系统状态。写在代码里，改的时候顺手改，别让它和 STATUS.md 对不上。
 static NSArray<NSArray<NSString *> *> *kSubsystems(void) {
@@ -101,6 +132,12 @@ static NSString *ScanDocuments(void) {
     ]];
 
     _text.text = [self statusText];
+
+    // 每秒刷新：宿主日志是活的（后台引导 + 客体初始化都会往环形缓冲里写）
+    [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
+        (void)t;
+        _text.text = [self statusText];
+    }];
 }
 
 - (NSString *)statusText {
@@ -128,6 +165,9 @@ static NSString *ScanDocuments(void) {
     [out addObject:@"== 游戏文件 =="];
     [out addObject:ScanDocuments()];
     [out addObject:@""];
+    [out addObject:@"== 宿主日志 =="];
+    [out addObject:RecentLog()];
+    [out addObject:@""];
     [out addObject:@"== 这个壳是什么 =="];
     [out addObject:@"不模拟 CPU：游戏自己的 aarch64 程序将来会在本机直接执行。"];
     [out addObject:@"本仓库不含任何游戏内容；游戏文件由你自己提供。"];
@@ -147,7 +187,8 @@ static NSString *ScanDocuments(void) {
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.rootViewController = [[SMOViewController alloc] init];
     [self.window makeKeyAndVisible];
-    NSLog(@"[SMO] 壳已启动；宿主与图形层尚未接入");
+    // 宿主引导放后台：不得阻塞主线程（引导 + 客体入口会一直跑）
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ RunHost(); });
     return YES;
 }
 
