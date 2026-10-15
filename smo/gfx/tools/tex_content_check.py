@@ -114,14 +114,18 @@ def build_lib():
     return lib
 
 
-def judge_deswizzle(w, h, bpp, block_h_log2, data, alignment):
-    """BNTX-Extractor 的 deswizzle（外部 GPL-3 判据，运行时 import，不进仓）。"""
+def judge_deswizzle(w, h, bpp, block_h_log2, data, alignment, bw=4, bh=4):
+    """BNTX-Extractor 的 deswizzle（外部 GPL-3 判据，运行时 import，不进仓）。
+
+    bw/bh = 压缩块尺寸，**必须按格式传**：BC 与 ASTC_4x4 是 4×4，未压缩（RGBA8 等）是 1×1。
+    曾经把它们硬编码成 4×4 —— 那时只有 RGBA8 的贴图对不上（判据拿它当 4×4 块解），
+    而 BC/ASTC 全过，正是这个参数错的指纹。"""
     # 注意别用 "/tmp/..."：Git Bash 的 /tmp 与 Windows 版 Python 看到的不是同一个目录
     ext = os.environ.get("SMO_BNTX_EXTRACTOR", os.path.join(tempfile.gettempdir(), "BNTX-Extractor"))
     if ext not in sys.path:
         sys.path.insert(0, ext)
     import swizzle
-    return swizzle.deswizzle(w, h, 4, 4, bpp, 1, alignment, block_h_log2, data)
+    return swizzle.deswizzle(w, h, bw, bh, bpp, 1, alignment, block_h_log2, data)
 
 
 def iter_textures(blob):
@@ -228,7 +232,7 @@ def main():
                         continue
                     ours = dst.raw[:want]
                     # 路径 B1：独立解交错（线性 BC 字节）
-                    lin = judge_deswizzle(w, h, bb, bhl, mip0, align)
+                    lin = judge_deswizzle(w, h, bb, bhl, mip0, align, bw, bh)
                     # 判据的输出按 surfSize 对齐，可能比实际块数据长；只比有效前缀
                     need = wb * bb * hb
                     lin = lin[:need]
