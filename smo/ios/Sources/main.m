@@ -1,25 +1,33 @@
-// SMO Mobile —— iOS App 壳
+// SMO Mobile —— iOS App 壳。
 //
-// 现在这一版**故意**什么都不做：它只报告「移植做到哪一步」和「游戏文件在不在」。
-// 这样既能让出包链路（GitHub Actions → 未签名 IPA → 你自己签名装机）先跑通并稳定下来，
-// 也避免出现「装上去什么都不显示、你以为坏了」的情况。
-//
-// 宿主（系统服务 HLE）与图形层接进来之后，这里会换成加载改写后的游戏程序、开 Metal 视图。
+// 现状：报告「移植做到哪一步」+「游戏文件在不在」（用与宿主同一份的 romfs_resolve 逻辑），
+// 并把宿主的**日志环形缓冲**显示在屏幕上（未接电脑也能看）。宿主启动在下一轮接入。
 
 #import <UIKit/UIKit.h>
+#include "../host/romfs_resolve.h"
+#include "../host/logbuf.h"
+#include "../host/dm.h"
 
 // 各子系统状态。写在代码里，改的时候顺手改，别让它和 STATUS.md 对不上。
 static NSArray<NSArray<NSString *> *> *kSubsystems(void) {
     return @[
         @[@"游戏文件解包（NSP → ExeFS / RomFS）", @"已完成"],
         @[@"模块侦察（导入 / 图形入口 / 着色器位置）", @"已完成"],
-        @[@"程序改写（4 个 NSO）", @"已完成"],
-        @[@"着色器解包（Yaz0 → SARC → sharc）", @"已完成"],
-        @[@"着色器翻译（Maxwell → SPIR-V → MSL）", @"进行中"],
-        @[@"宿主加载器与系统服务 HLE", @"未开始"],
-        @[@"图形层（NVN → Metal）", @"未开始"],
+        @[@"程序改写（4 个 NSO，含动态等价性）", @"已完成"],
+        @[@"着色器翻译（18470 个 → SPIR-V → MSL）", @"已完成"],
+        @[@"宿主加载器（文件与三段内嵌两条路径）", @"已完成"],
+        @[@"内核 svc + fs/oe/hid 服务", @"部分"],
+        @[@"图形层（NVN → Metal，离屏验证中）", @"进行中"],
         @[@"触屏 / 手柄输入", @"未开始"],
     ];
+}
+
+// 最近日志（环形缓冲，logbuf.c）：屏幕下方滚动显示，未接电脑也能看
+static NSString *RecentLog(void) {
+    char buf[16384];
+    size_t n = dm_log_dump(buf, sizeof buf);
+    if (!n) return @"（暂无宿主日志）";
+    return [NSString stringWithUTF8String:buf];
 }
 
 // 在 App 自己的目录里找游戏文件。装包流程与参考项目一致：资源放在 App 的目录里，

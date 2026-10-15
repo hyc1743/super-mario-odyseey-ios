@@ -14,7 +14,9 @@
 #include <string.h>
 
 #define MAX_MOD 8
-#define LOG(...) do { fprintf(stderr, "[smo] " __VA_ARGS__); fputc('\n', stderr); } while (0)
+// 全量写 stderr + 环形缓冲（logbuf.c）：真机没有终端，App 把缓冲显示在屏幕上
+void dm_log_emit(const char *fmt, ...);
+#define LOG(...) do { dm_log_emit(__VA_ARGS__); } while (0)
 #define die(...) do { LOG("FATAL " __VA_ARGS__); abort(); } while (0)
 
 typedef struct { uint32_t st_name; uint8_t st_info, st_other; uint16_t st_shndx; uint64_t st_value, st_size; } Elf64_Sym;
