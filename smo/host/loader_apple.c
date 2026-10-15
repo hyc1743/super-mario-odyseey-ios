@@ -11,7 +11,7 @@
 //        __TEXT,__dm<模块名>x0   原始代码（不含补丁区）        → RX
 //        __img,__DM<模块名>W     ro + data（可写的那部分）      → RW
 //        __TEXT,__dm<模块名>x1   补丁区                        → RX
-//      装载器用带 FIXED|OVERWRITE 的 mach_vm_remap 把三段重映射到同一个基址的原相对位置上，
+//      装载器用带 FIXED|OVERWRITE 的 vm_remap 把三段重映射到同一个基址的原相对位置上，
 //      于是运行时布局与 patched.bin 逐字节相同（PC 相对寻址、补丁区跳转、宿主「基址+原偏移」全不用改）。
 //      出包脚本是 smo/ios/tools/gen_embed.py，CI 上用合成产物验（tests/embed_selftest.c）。
 #include "dm.h"
