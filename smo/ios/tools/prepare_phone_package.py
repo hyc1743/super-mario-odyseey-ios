@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""把首跑需要的全部东西整理成「直接可用」的包。
+
+产出结构（out/smo-phone-package/）：
+
+    ①放进App安装包/Frameworks/Guest.framework/    ← 解压 IPA 后放进 SMOMobile.app/Frameworks/，
+                                                    重打包签名（guest dylib：真机上唯一能执行的映像）
+    ②复制到手机SMOMobile文件夹/ExeFS/             ← 经「文件」App 拷进 我的 iPhone → SMOMobile
+      （rtld/sdk/subsdk0/main 的 .fixups.tsv 与 .gates.tsv —— 装载器的布局与门表）
+    ②复制到手机SMOMobile文件夹/RomFS/             ← 巨大（5.2 GB）：默认不复制，只写说明；
+                                                    你要么自己把 work/game/RomFS 拷过去，要么 --romfs 指定别的
+    ③说明.txt                                      ← 逐步操作（含 Sideloadly、7 天重签提醒）
+
+用法：
+    prepare_phone_package.py [--rewrite work/rewrite] [--out out/smo-phone-package]
+                             [--romfs work/game/RomFS]     # 给了就硬拷 RomFS（慢）
+                             [--no-dylib]                  # 跳过 Guest.framework
+"""
+import os
+import shutil
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+
+
+def main():
+    rewrite = os.path.join(ROOT, "work", "rewrite")
+    out = os.path.join(ROOT, "out", "smo-phone-package")
+    romfs = None
+    no_dylib = False
+    argv = sys.argv[1:]
+    for i, a in enumerate(argv):
+        if a == "--rewrite" and i + 1 < len(argv):
+            rewrite = argv[i + 1]
+        if a == "--out" and i + 1 < len(argv):
+            out = argv[i + 1]
+        if a == "--romfs" and i + 1 < len(argv):
+            romfs = argv[i + 1]
+        if a == "--no-dylib":
+            no_dylib = True
+
+    need = ["rtld", "sdk", "subsdk0", "main"]
+    missing = [n for n in need
+               if not (os.path.exists(os.path.join(rewrite, n + ".fixups.tsv"))
+                       and os.path.exists(os.path.join(rewrite, n + ".gates.tsv")))]
+    if missing:
+        print(f"🔴 {rewrite} 里缺：{missing}（先跑 patch_nso.py 生成改写产物）")
+        return 2
+
+    exefs_out = os.path.join(out, "②复制到手机SMOMobile文件夹", "ExeFS")
+    fw_out = os.path.join(out, "①放进App安装包", "Frameworks", "Guest.framework")
+    os.makedirs(exefs_out, exist_ok=True)
+    os.makedirs(fw_out, exist_ok=True)
+
+    # ① guest dylib
+    if not no_dylib:
+        sys.path.insert(0, os.path.join(HERE))
+        import guest_dylib
+        data = guest_dylib.build(rewrite, need)
+        with open(os.path.join(fw_out, "Guest"), "wb") as f:
+            f.write(data)
+        with open(os.path.join(fw_out, "Info.plist"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(guest_dylib.INFO_PLIST % "local.guest")
+        print(f"① Guest.framework → {fw_out}（{len(data)} 字节）")
+
+    # ② tsv + 着色器索引（小文件；索引供图形层用，现在带上无妨）
+    for n in need:
+        for ext in ("fixups.tsv", "gates.tsv"):
+            shutil.copy2(os.path.join(rewrite, n + "." + ext), exefs_out)
+    idx = os.path.join(ROOT, "work", "shaders.idx")
+    if os.path.exists(idx):
+        shutil.copy2(idx, exefs_out)
+    print(f"② ExeFS（tsv × {2 * len(need)} + shaders.idx）→ {exefs_out}")
+
+    # ② RomFS：巨大，默认只写说明
+    romfs_out = os.path.join(out, "②复制到手机SMOMobile文件夹", "RomFS")
+    if romfs and os.path.isdir(romfs):
+        if os.path.exists(romfs_out):
+            shutil.rmtree(romfs_out)
+        shutil.copytree(romfs, romfs_out)
+        print(f"② RomFS 已复制 → {romfs_out}")
+    else:
+        print(f"② RomFS：未复制（5.2 GB）—— 直接把 {romfs or 'work/game/RomFS'} 整个拷进手机的 SMOMobile 文件夹即可")
+
+    # ③ 说明
+    readme = os.path.join(out, "③说明.txt")
+    with open(readme, "w", encoding="utf-8", newline="\n") as f:
+        f.write("""SMO 首跑包 —— 分三步
+========================
+
+【一】把 Guest.framework 放进 App 安装包
+  1. 解压 SMOMobile-shell.ipa（改后缀 .zip 再解压）
+  2. 把本包「①放进App安装包/Frameworks/Guest.framework」整个放进
+     Payload/SMOMobile.app/Frameworks/ 里面
+  3. 重新压缩 Payload 目录为 zip，改名 .ipa
+  4. Sideloadly 签名安装（你的 Apple ID；免费 7 天，到期重签重装，数据不丢）
+
+【二】把数据拷到手机
+  1. 先打开一次 App（让它在「文件」里出现）
+  2. 用「文件」App：我的 iPhone → SMOMobile 文件夹
+  3. 把「②复制到手机SMOMobile文件夹」里的 ExeFS 整个拷进去
+  4. 把 RomFS 整个拷进去（如果本包没含，就拷 work/game/RomFS）
+
+【三】跑起来、拿日志
+  1. 打开 App：宿主自动装载 → 屏幕日志滚动
+  2. 点右下角「导出日志」→ 存文件并拉起分享 → AirDrop/邮件发给开发者
+  3. 期待行为：日志滚到某个 UNIMPL/FATAL 停住 —— 那就是要修的第一个点
+
+【注意】本包不含任何游戏内容（RomFS 由你自己的游戏提取）；项目与 Nintendo 无关。
+""")
+    print(f"③ 说明 → {readme}")
+    print("\n完成。把「②」拷进手机，「①」放进 IPA 重签名即可。")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
