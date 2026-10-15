@@ -1830,3 +1830,14 @@ smo_host 编译链接、出未签名 IPA）。
   改用 `HEADER_SEARCH_PATHS: $(SRCROOT)/../host` + 裸头名。
 - 至此 M1 只剩「初始化路径所需服务」（settings/applet/am 等）—— 它们的真实语义要真机日志定，
   本地写死没有依据；继续按计划进入 M2 主体。
+
+## 2.97 宿主 bootstrap 接进 App（CI 编译验证）；vm_* 修复 iOS 构建
+
+- main.m：RunHost（后台线程）＝ host_thread_keys_create → load_modules(rtld/sdk/subsdk0/main)
+  → run_module_inits → svc_thread_main_init → guest_thread_init → dm_jump_guest(nnMain)；
+  状态页加「宿主日志」区 + 每秒定时刷新
+- project.yml：宿主全部源（除 main.c）+ 图形层 C 源 + entry.S 编进 App；头路径补 gfx/nvn
+- **iOS SDK 没有 mach_vm_\***（mach/mach_vm.h 直接标 unsupported）→ dm_embed_map 换成
+  vm_allocate/vm_remap（旧 API，macOS/iOS 都有；macOS CI 继续验同一路径）
+- 第一跑的真机路径还差最后一块：**guest dylib**（参考项目的 DM_SHELL 机制 —— CI 壳不含游戏内容，
+  使用者在本机用脚本把改写产物打包成只装段的 dylib 放进 App，装载器 dlopen 后 vm_remap）
