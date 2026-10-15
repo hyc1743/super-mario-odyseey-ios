@@ -13,14 +13,6 @@
 // 名字前缀分类（不去解析每个名字：这里只关心"这属于哪一类动作"）
 enum { ACT_OTHER = 0, ACT_BIND, ACT_SET, ACT_DRAW, ACT_DISPATCH, ACT_CLEAR, ACT_COPY, ACT_PRESENT, ACT_SYNC };
 
-typedef struct {
-    uint16_t act;
-    uint16_t stage_hint;         // 绘制/分派：着色器阶段（来自控制段查找）
-    uint64_t program;            // 当时的 program 对象
-    uint64_t a0, a1, a2;         // 原始参数（绘制计数等）
-    const char *name;
-} nvn_draw_item;
-
 #define PLAN_MAX 65536
 static nvn_draw_item g_plan[PLAN_MAX];
 static uint64_t      g_keys[PLAN_MAX];

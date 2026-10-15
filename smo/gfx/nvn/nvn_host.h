@@ -45,9 +45,19 @@ unsigned nvn_record_count(void);
 void     nvn_record_reset(void);
 
 // 重放记账层（nvn_replay.c）：把记录归类成「绘制计划」。不含任何 Metal 调用，所以本机可测。
+// 一条绘制/分派计划项。act：ACT_DRAW/ACT_DISPATCH（枚举在 nvn_replay.c，外部只看这两个宏值）。
+typedef struct {
+    uint16_t act;
+    uint16_t stage_hint;         // 0xFFFF=查过索引未命中；0xFFFE=当时还没 SetShaders
+    uint64_t program;            // 当时的 program 对象
+    uint64_t a0, a1, a2;         // 原始参数
+    const char *name;            // 记录的函数名
+} nvn_draw_item;
 int  nvn_replay_call(const char *name, const uint64_t *a);
 void nvn_replay_reset(void);
 unsigned nvn_replay_count(void);
 unsigned nvn_replay_draws(void);
 unsigned nvn_replay_unresolved(void);
 const char *nvn_replay_unresolved_name(void);
+const nvn_draw_item *nvn_replay_item(unsigned i);
+uint64_t nvn_replay_item_key(unsigned i);   // 该绘制项的管线键（状态哈希 + 着色器键）

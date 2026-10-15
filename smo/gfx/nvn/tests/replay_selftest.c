@@ -15,19 +15,7 @@ DECL(nvn_ProgramInitialize);
 DECL(nvn_ProgramSetShaders);
 DECL(nvn_CommandBufferInitialize);
 
-int nvn_replay_call(const char *name, const uint64_t *a);
-void nvn_replay_reset(void);
-unsigned nvn_replay_count(void);
-unsigned nvn_replay_draws(void);
-unsigned nvn_replay_unresolved(void);
-const char *nvn_replay_unresolved_name(void);
 void nvn_replay_stats(unsigned *, unsigned *, unsigned *, unsigned *, unsigned *, unsigned *, unsigned *, unsigned *);
-struct nvn_draw_item_fwd;      /* 计划项结构在 nvn_replay.c 里；这里只用访问器 */
-
-// 计划项（与 nvn_replay.c 里的定义一致；测试只需要看前四个字段）
-typedef struct { uint16_t act; uint16_t stage_hint; uint64_t program; uint64_t a0, a1, a2; const char *name; } item_t;
-const item_t *nvn_replay_item(unsigned i);
-uint64_t nvn_replay_item_key(unsigned i);
 
 static void call(const char *n, uint64_t a0, uint64_t a1, uint64_t a2) {
     uint64_t a[8] = { a0, a1, a2, 0, 0, 0, 0, 0 };
@@ -69,7 +57,7 @@ int main(void) {
     CHK(nvn_replay_unresolved() == 0, "没有绑到未初始化的对象");
 
     printf("== 3. 计划项内容：带上了当时的 program 与控制段查出的阶段 ==\n");
-    const item_t *it = nvn_replay_item(0);
+    const nvn_draw_item *it = nvn_replay_item(0);
     CHK(it && it->program == (uint64_t)(uintptr_t)prog, "第 1 条计划项带着当前 program");
     // 合成本测试里的 blob 不在索引里，所以阶段提示应是"没查到"(0xFFFF) 而不是 0xFFFE（当时已 SetShaders）
     CHK(it && it->stage_hint == 0xFFFF, "着色器未载入索引 → 阶段提示 0xFFFF（与「当时还没 SetShaders」的 0xFFFE 区分开）");
