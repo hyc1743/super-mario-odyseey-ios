@@ -86,8 +86,9 @@ uint64_t dm_hle_force(const char *name);     // 服务层强制接管（对应�
 uint64_t resolve_import(module_t *m, const char *name);
 void gate_register(uint64_t ret_addr, const char *kind, int arg, uint64_t orig);
 uint64_t dm_slot_key(unsigned i);            // 第 i 个键的实际槽号（Apple：pthread TSD 键；自检：假槽号）
-// 宿主线程键是否已建。**不能靠「键号为 0 就是没建」来判断**：Darwin 的 pthread_key_create
-// 从 0 开始编号，第一个键就是 0，而 0 号槽是合法槽位。*/
+// 宿主线程键是否已建。用途：把「键没建」与「槽值恰好是 0」分开 —— 前者是配置错误（必须响亮），
+// 后者是合法状态（客体自己会把槽写成 0）。实测 Darwin 的键号是 258 起（不是从 0 编号），
+// 但判断仍然要走这个显式标志，别用槽值反推。*/
 int dm_slot_keys_ready(void);
 
 // ---- 核心（loader_core.c）----

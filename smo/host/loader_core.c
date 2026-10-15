@@ -82,8 +82,8 @@ void install_key_page(module_t *m) {
     uint64_t *page = (uint64_t *)(m->base + m->key_page_off);
     memset(page, 0, m->key_page_size);
     for (unsigned i = 0; i < KEY_N; i++) page[m->key_idx[i]] = dm_slot_key(i) * 8;
-    // 判断标准是「键建没建」，不是「槽值非 0」：Darwin 的键从 0 编号，0 号槽是合法的
-    // （之前用槽值推断，第一个键就是 0，于是 macOS/iOS 上必然误报「宿主键没建」）
+    // 判断标准是「键建没建」，不是「槽值非 0」：客体完全可能把某个槽写成 0（合法状态），
+    // 用槽值反推会把「没建键」和「槽值是 0」混在一起。macOS 上第一次真跑就撞上了这个坑
     if (!dm_slot_keys_ready())
         die("%s: 宿主线程键没建（host_thread_keys_create 没调？）", m->name);
     dm_ro_protect(m->base + m->key_page_off, m->key_page_size);
