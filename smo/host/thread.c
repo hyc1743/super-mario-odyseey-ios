@@ -48,7 +48,10 @@ static void tsd_check(void) {
     pthread_setspecific(g_key18, (void *)0x1234);
     uint64_t base;
     __asm__ volatile("mrs %0, tpidrro_el0" : "=r"(base));
-    uint64_t off = *(const uint64_t *)(g_mod[0].base + g_mod[0].key_page_off + g_mod[0].key_idx[KEY_K18] * 8);
+    // 用键号本身算偏移（键页里存的就是「键号 × 8」，两侧等价）。
+    // **不要**去读 g_mod[0] 的键页：host_thread_keys_create 是在 load_modules **之前**调的，
+    // 那时 g_mod[0].base 还是 NULL —— 原来那么写就是空指针解引用，一跑就崩（从未被执行过所以一直没暴露）。
+    uint64_t off = (uint64_t)g_key18 * 8;
     if (((const uint64_t *)(base & ~7ull))[off / 8] != 0x1234)
         die("pthread TSD 布局与改写器的假设不符（tpidrro_el0 + 8×键号 取不到刚设的值）");
     pthread_setspecific(g_key18, 0);
