@@ -108,7 +108,11 @@ jobs:
       - name: macOS：全套 C 单测（含内嵌装载自检 —— 三段签名段 → 连续映像）
         run: |
           set -o pipefail
-          make -C smo/host test PY=python3 2>&1 | tee smo/host/test.log
+          if ! make -C smo/host test PY=python3 2>&1 | tee smo/host/test.log; then
+            echo "---- macOS 单测失败，尾部 40 行进注解 ----"
+            tail -40 smo/host/test.log | while IFS= read -r l; do echo "::error::[macOS 单测] $l"; done
+            exit 1
+          fi
       - name: 编译宿主（macOS：entry.S / thread.c / loader_apple.c / main.c 的真实检查）
         run: |
           set -o pipefail
