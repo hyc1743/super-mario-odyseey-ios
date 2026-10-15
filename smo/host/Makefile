@@ -49,6 +49,10 @@ tex_selftest: ../gfx/nvn/nvn_tex.c ../gfx/nvn/tests/tex_selftest.c ../gfx/nvn/nv
 bcdec_selftest: ../gfx/nvn/nvn_bcdec.c ../gfx/nvn/tests/bcdec_selftest.c ../gfx/nvn/nvn_bcdec.h
 	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/nvn_bcdec.c ../gfx/nvn/tests/bcdec_selftest.c
 
+# 纹理整链单测（块线性 BC 贴图 → 行优先像素：解交错 + 解码组合层）
+texread_selftest: ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_bcdec.c ../gfx/nvn/nvn_texread.c ../gfx/nvn/tests/texread_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_bcdec.c ../gfx/nvn/nvn_texread.c ../gfx/nvn/tests/texread_selftest.c
+
 # 装载器自检只用平台无关的那部分（本机也能编，见 smo/host/tests/loader_selftest.c）
 loader_selftest: loader_core.c tests/loader_selftest.c dm.h
 	$(CC) $(CFLAGS) -o $@ loader_core.c tests/loader_selftest.c
@@ -77,7 +81,7 @@ SYNDIR  = ../../work/synthetic
 $(SYNDIR)/sdk.patched.bin:
 	$(PY) ../tools/make_synthetic_artifacts.py $(SYNDIR)
 
-test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest $(SYNDIR)/sdk.patched.bin
+test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
 	./loader_selftest $(SYNDIR) sdk main
 	./svc_selftest
 	./thread_selftest
@@ -89,6 +93,7 @@ test: loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nv
 	./replay_selftest
 	./tex_selftest
 	./bcdec_selftest
+	./texread_selftest
 
 # 改写前后动态等价性校验（Unicorn；需要 work/rewrite 里有真实产物，所以不进 CI）
 equiv: ../gfx/nvn/nvn_state.c
@@ -100,6 +105,6 @@ run: smo_host
 	./smo_host work/rewrite rtld sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest
+	rm -f smo_host loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
 
 .PHONY: test run equiv clean
