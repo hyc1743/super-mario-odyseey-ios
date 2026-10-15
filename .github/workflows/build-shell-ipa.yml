@@ -105,7 +105,34 @@ jobs:
           xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation \
               -o /tmp/metal_probe smo/ios/tools/metal_probe.m
           /tmp/metal_probe
-      - name: Metal 重放层第一片（清屏 → 回读；离屏可验）
+      - name: Metal 重放层第一片（清屏 → 回读；离屏可验）+ 合龙点（记录流 → 帧）
+        run: |
+          if ! xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -Ismo/host -o /tmp/mtl_selftest smo/gfx/nvn/nvn_mtl.m smo/gfx/nvn/tests/mtl_selftest.c               > /tmp/mtl_build.log 2>&1; then
+            echo "::error::[mtl 编译] 失败"
+            tail -20 /tmp/mtl_build.log | while IFS= read -r l; do echo "::error::[mtl 编译] $l"; done
+            exit 1
+          fi
+          /tmp/mtl_selftest > /tmp/mtl.log 2>&1
+          rc=$?
+          cat /tmp/mtl.log
+          if [ $rc -ne 0 ]; then
+            echo "::error::[exit code] mtl_selftest = $rc"
+            tail -15 /tmp/mtl.log | while IFS= read -r l; do echo "::error::[mtl] $l"; done
+            exit 1
+          fi
+          if ! xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -Ismo/host -o /tmp/mtl_replay_selftest smo/gfx/nvn/nvn_mtl.m               smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/nvn_shader.c               smo/gfx/nvn/nvn_replay.c smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c               smo/gfx/nvn/tests/mtl_replay_selftest.c               > /tmp/mtl2_build.log 2>&1; then
+            echo "::error::[mtl 合龙 编译] 失败"
+            tail -20 /tmp/mtl2_build.log | while IFS= read -r l; do echo "::error::[mtl 合龙 编译] $l"; done
+            exit 1
+          fi
+          /tmp/mtl_replay_selftest > /tmp/mtl2.log 2>&1
+          rc=$?
+          cat /tmp/mtl2.log
+          if [ $rc -ne 0 ]; then
+            echo "::error::[exit code] mtl_replay_selftest = $rc"
+            tail -15 /tmp/mtl2.log | while IFS= read -r l; do echo "::error::[mtl 合龙] $l"; done
+            exit 1
+          fi
         run: |
           if ! xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -o /tmp/mtl_selftest smo/gfx/nvn/nvn_mtl.m smo/gfx/nvn/tests/mtl_selftest.c               > /tmp/mtl_build.log 2>&1; then
             echo "::error::[mtl 编译] 失败"

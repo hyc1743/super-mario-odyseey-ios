@@ -23,6 +23,13 @@ int nvn_mtl_offscreen_clear(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
                             float r, float g, float b, float a,
                             uint8_t *out, size_t cap);
 
+// 离屏执行**一条重放帧**：清成 clear_rgba32（0xAABBGGRR 直读，无 Metal 头耦合），
+// 然后按顺序为每个绘制项画一遍全屏三角形，颜色 = 该项管线键的低 24 位（状态变颜色就变）。
+// 这是「重放记账层的计划项 → Metal 帧」的合龙点：之后把真实参数的翻译接进来即可。
+int nvn_mtl_replay_frame(nvn_mtl_ctx *c, uint32_t w, uint32_t h, uint32_t clear_rgba32,
+                         const uint64_t *draw_keys, unsigned n_draws,
+                         uint8_t *out, size_t cap);
+
 // 离屏画一个**全屏三角形**（内置 MSL 着色器，片段颜色经 uniform 传入），回读像素。
 // 这一步验证的是着色器链：newLibraryWithSource（Metal 编译器）→ 两个入口函数 → 管线状态 →
 // drawPrimitives → 片段 uniform。之后把 NVN 的程序/管线按键接进来，就长成真正的重放层。

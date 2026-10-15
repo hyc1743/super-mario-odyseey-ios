@@ -123,3 +123,60 @@ int nvn_mtl_offscreen_draw(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
         return (int)(w * h * 4);
     }
 }
+
+// 离屏执行一条**重放帧**：清成 clear_rgba32（0xAABBGGRR 直读），然后按顺序为每个绘制项画一遍
+// 全屏三角形，颜色 = 该项管线键的低 24 位（状态变颜色就变）。
+// 这是「重放记账层的计划项 → Metal 帧」的合龙点；真实参数的翻译在此之后逐步接进来。
+int nvn_mtl_replay_frame(nvn_mtl_ctx *c, uint32_t w, uint32_t h, uint32_t clear_rgba32,
+                         const uint64_t *draw_keys, unsigned n_draws,
+                         uint8_t *out, size_t cap) {
+    if (!c || !out || cap < (size_t)w * h * 4) return -1;
+    @autoreleasepool {
+        NSError *err = nil;
+        id<MTLLibrary> lib = [c->dev newLibraryWithSource:kVS options:nil error:&err];
+        if (!lib) return -1;
+        id<MTLFunction> vs = [lib newFunctionWithName:@"vs_full"];
+        id<MTLFunction> fs = [lib newFunctionWithName:@"fs_full"];
+        if (!vs || !fs) return -1;
+        MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+        pd.vertexFunction = vs;
+        pd.fragmentFunction = fs;
+        pd.colorAttachments[0].pixelFormat = MTLPixelFormatRGBA8Unorm;
+        id<MTLRenderPipelineState> pso = [c->dev newRenderPipelineStateWithDescriptor:pd error:&err];
+        if (!pso) return -1;
+
+        MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                     width:w height:h mipmapped:NO];
+        td.usage = MTLTextureUsageRenderTarget;
+        id<MTLTexture> tex = [c->dev newTextureWithDescriptor:td];
+        if (!tex) return -1;
+
+        id<MTLCommandBuffer> cb = [c->queue commandBuffer];
+        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = tex;
+        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
+        rp.colorAttachments[0].clearColor = MTLClearColorMake((float)(clear_rgba32 & 0xFF) / 255.0f,
+                                                              (float)((clear_rgba32 >> 8) & 0xFF) / 255.0f,
+                                                              (float)((clear_rgba32 >> 16) & 0xFF) / 255.0f,
+                                                              (float)((clear_rgba32 >> 24) & 0xFF) / 255.0f);
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+        [enc setRenderPipelineState:pso];
+        for (unsigned i = 0; i < n_draws; i++) {
+            float color[4] = {
+                (float)((draw_keys[i] >> 16) & 0xFF) / 255.0f,
+                (float)((draw_keys[i] >> 8) & 0xFF) / 255.0f,
+                (float)(draw_keys[i] & 0xFF) / 255.0f,
+                1.0f,
+            };
+            [enc setFragmentBytes:color length:sizeof color atIndex:0];
+            [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        }
+        [enc endEncoding];
+        [cb commit];
+        [cb waitUntilCompleted];
+        if (cb.status == MTLCommandBufferStatusError) return -1;
+        [tex getBytes:out bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
+        return (int)(w * h * 4);
+    }
+}
