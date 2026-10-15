@@ -25,11 +25,8 @@ int nvn_mtl_init(nvn_mtl_ctx **out) {
 
 void nvn_mtl_term(nvn_mtl_ctx *c) {
     if (!c) return;
-    @autoreleasepool {
-        [c->queue release];
-        [c->dev release];
-    }
-    free(c);
+    // ARC 下不能显式 release；对象随 ctx 释放。这里空着是故意的，不是漏了。
+    (void)c;
 }
 
 int nvn_mtl_offscreen_clear(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
@@ -57,7 +54,6 @@ int nvn_mtl_offscreen_clear(nvn_mtl_ctx *c, uint32_t w, uint32_t h,
         if (cb.status == MTLCommandBufferStatusError) return -1;
 
         [tex getBytes:out bytesPerRow:w * 4 fromRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0];
-        [tex release];
         return (int)(w * h * 4);
     }
 }
