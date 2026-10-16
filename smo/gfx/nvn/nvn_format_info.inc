@@ -1,0 +1,24 @@
+// Adapted from d2r-mobile dm/gfx/nvn/nvn_tex.c (MIT).
+// See third_party/d2r-mobile.LICENSE. NVN format block dimensions.
+typedef struct { uint8_t bpb, bw, bh; } texture_fmt;   // 每块字节、块宽、块高（非压缩格式块宽高 = 1） | Bytes per block, block width, block height (for uncompressed formats block width and height = 1)
+
+static texture_fmt texture_format(int f) {
+    static const uint8_t astc[14][2] = {{4,4},{5,4},{5,5},{6,5},{6,6},{8,5},{8,6},{8,8},{10,5},{10,6},{10,8},{10,10},{12,10},{12,12}};
+    if (f >= 0x79 && f <= 0x94) { int k = (f - 0x79) % 14; return (texture_fmt){16, astc[k][0], astc[k][1]}; }
+    if (f >= 0x41 && f <= 0x50) {                         // DXT / RGTC / BPTC：4×4 块 | DXT / RGTC / BPTC: 4×4 blocks
+        int b8 = (f <= 0x42) || (f == 0x45 || f == 0x46) || (f == 0x49 || f == 0x4A);
+        return (texture_fmt){b8 ? 8 : 16, 4, 4};
+    }
+    static const struct { uint8_t lo, hi, bpb; } r[] = {
+        {0x01,0x04,1},{0x05,0x09,2},{0x0A,0x0C,4},{0x0D,0x10,2},{0x11,0x15,4},{0x16,0x18,8},
+        {0x19,0x1C,3},{0x1D,0x21,6},{0x22,0x24,12},{0x25,0x28,4},{0x29,0x2D,8},{0x2E,0x30,16},
+        {0x31,0x31,1},{0x32,0x32,2},{0x33,0x35,4},{0x36,0x36,8},{0x37,0x38,4},{0x39,0x3C,2},{0x3D,0x40,4},
+        {0x51,0x52,1},{0x53,0x54,2},{0x55,0x56,4},{0x57,0x58,2},{0x59,0x5A,4},{0x5B,0x5C,8},
+        {0x5D,0x5E,3},{0x5F,0x60,6},{0x61,0x62,12},{0x63,0x64,4},{0x65,0x66,8},{0x67,0x68,16},
+        {0x69,0x6C,4},{0x6D,0x70,4},{0x71,0x75,8},{0x76,0x78,16},{0x95,0x98,2},{0x99,0x9C,4},
+    };
+    for (unsigned i = 0; i < sizeof r / sizeof *r; i++)
+        if (f >= r[i].lo && f <= r[i].hi) return (texture_fmt){r[i].bpb, 1, 1};
+    return (texture_fmt){0, 1, 1};
+}
+

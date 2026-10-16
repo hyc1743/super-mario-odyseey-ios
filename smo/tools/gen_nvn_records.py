@@ -21,6 +21,26 @@ FAMILIES = ["nvnDevice", "nvnMemoryPool", "nvnBuffer", "nvnSync", "nvnWindow",
 
 # 已经在 hle_nvn.c 里手写了状态实现的名字（逐步往这里加）
 SKIP = {
+    'nvnTextureBuilderSetDevice',
+    'nvnTextureBuilderSetWidth',
+    'nvnTextureBuilderSetHeight',
+    'nvnTextureBuilderSetDepth',
+    'nvnTextureBuilderSetLevels',
+    'nvnTextureBuilderSetFormat',
+    'nvnTextureBuilderSetFlags',
+    'nvnTextureBuilderSetTarget',
+    'nvnTextureBuilderSetSamples',
+    'nvnTextureBuilderSetStride',
+    'nvnTextureBuilderSetSize1D',
+    'nvnTextureBuilderSetSize2D',
+    'nvnTextureBuilderSetSize3D',
+    'nvnTextureBuilderSetStorage',
+    'nvnTextureBuilderSetDefaults',
+    'nvnTextureBuilderGetStorageSize',
+    'nvnTextureBuilderGetStorageAlignment',
+    'nvnTextureInitialize',
+    'nvnTextureFinalize',
+
     "nvnBootstrapLoader",            # 本体（不是表项）
     # 以下在 nvn_core.c 里手写了状态实现（见该文件）；每次新增实现都要往这里加，
     # 否则生成的记录桩会和真实现重复定义（链接期报 duplicate symbol）。

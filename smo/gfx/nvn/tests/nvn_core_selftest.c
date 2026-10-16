@@ -153,6 +153,32 @@ int main(void) {
     printf("     表内 %u：手写实现 38，接记录桩 %u，接未实现入口 %u\n",
            g_nvn_table_n, g_nvn_impl_n - 38, g_nvn_table_n - g_nvn_impl_n);
 
+    printf("== 10. Texture storage through the game's proc dispatch ==\n");
+    uint64_t tb[16] = {0}, texture[16] = {0};
+    nvn_lookup("nvnTextureBuilderSetDevice")(OBJ(tb), OBJ(dev), 0, 0, 0, 0, 0, 0);
+    nvn_lookup("nvnTextureBuilderSetDefaults")(OBJ(tb), 0, 0, 0, 0, 0, 0, 0);
+    nvn_lookup("nvnTextureBuilderSetSize2D")(OBJ(tb), 4, 4, 0, 0, 0, 0, 0);
+    nvn_lookup("nvnTextureBuilderSetFormat")(OBJ(tb), 0x25, 0, 0, 0, 0, 0, 0);
+    CHK(nvn_lookup("nvnTextureBuilderGetStorageSize")(OBJ(tb), 0, 0, 0, 0, 0, 0, 0) == 512,
+        "4x4 RGBA8 occupies one 512-byte GOB, never zero (PrimitiveTexture crash)");
+    CHK(nvn_lookup("nvnTextureBuilderGetStorageAlignment")(OBJ(tb), 0, 0, 0, 0, 0, 0, 0) == 512,
+        "block texture storage alignment is 512");
+    nvn_lookup("nvnTextureBuilderSetLevels")(OBJ(tb), 3, 0, 0, 0, 0, 0, 0);
+    CHK(nvn_lookup("nvnTextureBuilderGetStorageSize")(OBJ(tb), 0, 0, 0, 0, 0, 0, 0) == 1536,
+        "three tiny mip levels occupy three GOBs");
+    nvn_lookup("nvnTextureBuilderSetLevels")(OBJ(tb), 1, 0, 0, 0, 0, 0, 0);
+    nvn_lookup("nvnTextureBuilderSetFlags")(OBJ(tb), 0x10, 0, 0, 0, 0, 0, 0);
+    CHK(nvn_lookup("nvnTextureBuilderGetStorageSize")(OBJ(tb), 0, 0, 0, 0, 0, 0, 0) == 128,
+        "linear texture uses aligned 32-byte rows");
+    nvn_lookup("nvnTextureBuilderSetFlags")(OBJ(tb), 0, 0, 0, 0, 0, 0, 0);
+    nvn_lookup("nvnTextureBuilderSetStorage")(OBJ(tb), OBJ(pool), 512, 0, 0, 0, 0, 0);
+    CHK(nvn_lookup("nvnTextureInitialize")(OBJ(texture), OBJ(tb), 0, 0, 0, 0, 0, 0) == 1,
+        "texture initialization succeeds with valid pool storage");
+    const nvn_st_ent *te = nvn_st_get(texture, 12);
+    CHK(te && te->v[0] == OBJ(dev) && te->v[10] == 512, "defaults preserves device and texture keeps pool offset");
+    nvn_lookup("nvnTextureBuilderSetStorage")(OBJ(tb), OBJ(pool), 4000, 0, 0, 0, 0, 0);
+    CHK(nvn_lookup("nvnTextureInitialize")(OBJ(texture), OBJ(tb), 0, 0, 0, 0, 0, 0) == 0,
+        "texture cannot exceed pool bounds");
     nvn_st_reset();
     CHK(nvn_st_count() == 0, "清空状态表");
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");

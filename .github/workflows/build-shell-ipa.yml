@@ -136,7 +136,7 @@ jobs:
             tail -15 /tmp/mtl.log | while IFS= read -r l; do echo "::error::[mtl] $l"; done
             exit 1
           fi
-          if ! xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -Ismo/host -o /tmp/mtl_replay_selftest smo/gfx/nvn/nvn_mtl.m               smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/nvn_shader.c               smo/gfx/nvn/nvn_replay.c smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c               smo/gfx/nvn/tests/mtl_replay_selftest.c               > /tmp/mtl2_build.log 2>&1; then
+          if ! xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -Ismo/host -o /tmp/mtl_replay_selftest smo/gfx/nvn/nvn_mtl.m               smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/nvn_tex.c smo/gfx/nvn/nvn_shader.c               smo/gfx/nvn/nvn_replay.c smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c               smo/gfx/nvn/tests/mtl_replay_selftest.c               > /tmp/mtl2_build.log 2>&1; then
             echo "::error::[mtl 合龙 编译] 失败"
             tail -20 /tmp/mtl2_build.log | while IFS= read -r l; do echo "::error::[mtl 合龙 编译] $l"; done
             exit 1

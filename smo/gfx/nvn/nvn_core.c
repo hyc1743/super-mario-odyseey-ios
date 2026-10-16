@@ -10,6 +10,7 @@
 
 // ------------------------------------------------------------------ 状态表（nvn_state.c）
 #include "nvn_state.h"
+#include "nvn_tex.h"
 
 // 宿主侧睡眠：轮询等待用。mingw 有 usleep，其他平台用 nanosleep。
 #if defined(_WIN32)
@@ -35,6 +36,8 @@ void nvn_host_sleep_us(unsigned us) {
 #define NVN_T_SAMPLER  8
 #define NVN_T_SYNC     9
 #define NVN_T_PROG     10
+#define NVN_T_TEXB     11
+#define NVN_T_TEX      12
 
 // 各类型的字段位置（v[] 下标）—— 只在本文件用，集中写在这里便于对照
 #define DEVB_FLAGS      0
@@ -133,7 +136,11 @@ uint64_t nvn_DeviceGetInteger(uint64_t dev, uint64_t pname, uint64_t out, uint64
     uint32_t index = ARG_U32(pname);
     int value = index < sizeof g_devinfo / sizeof g_devinfo[0] ? g_devinfo[index] : 0;
     if (out) *(int32_t *)(uintptr_t)out = value;
-    NVN_LOG("DeviceGetInteger(%u) = %d", index, value);
+    static uint8_t logged[256];
+    if (index >= sizeof logged || !logged[index]) {
+        if (index < sizeof logged) logged[index] = 1;
+        NVN_LOG("DeviceGetInteger(%u) = %d", index, value);
+    }
     return 0;
 }
 
@@ -198,6 +205,8 @@ uint64_t nvn_MemoryPoolInitialize(uint64_t pool, uint64_t builder, uint64_t a2, 
     p->v[POOL_SIZE]    = b->v[POOLB_SIZE];
     p->v[POOL_FLAGS]   = b->v[POOLB_FLAGS];
     p->v[POOL_MAPPED]  = 0;
+    NVN_LOG("MemoryPoolInitialize pool=%p storage=%p size=%#llx flags=%#llx", ARG_OBJ(pool),
+            ARG_OBJ(p->v[POOL_STORAGE]), (unsigned long long)p->v[POOL_SIZE], (unsigned long long)p->v[POOL_FLAGS]);
     return NVN_TRUE;
 }
 
@@ -217,6 +226,8 @@ uint64_t nvn_MemoryPoolMap(uint64_t pool, uint64_t a1, uint64_t a2, uint64_t a3,
     nvn_st_ent *p = need(ARG_OBJ(pool), NVN_T_POOL, "MemoryPoolMap");
     if (!p) return 0;
     p->v[POOL_MAPPED] = 1;
+    if (!p->v[POOL_STORAGE]) NVN_LOG("【红】MemoryPoolMap pool=%p has no CPU storage size=%#llx flags=%#llx",
+        ARG_OBJ(pool), (unsigned long long)p->v[POOL_SIZE], (unsigned long long)p->v[POOL_FLAGS]);
     return p->v[POOL_STORAGE];
 }
 
@@ -308,6 +319,127 @@ uint64_t nvn_BufferGetAddress(uint64_t buf, uint64_t a1, uint64_t a2, uint64_t a
 uint64_t nvn_BufferMap(uint64_t buf, uint64_t a1, uint64_t a2, uint64_t a3,
                        uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     return nvn_BufferGetAddress(buf, a1, a2, a3, a4, a5, a6, a7);
+}
+
+// ------------------------------------------------------------------ Texture storage (same block layout as the detiler).
+// v[]: device, width, height, depth, levels, format, flags, target,
+// samples, pool, pool byte offset, linear stride. Objects remain opaque.
+#include "nvn_format_info.inc"
+uint64_t nvn_TextureBuilderSetDefaults(uint64_t obj, uint64_t a1, uint64_t a2, uint64_t a3,
+                                      uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    nvn_st_ent *e = nvn_st_get(ARG_OBJ(obj), NVN_T_TEXB);
+    uint64_t dev = e ? e->v[0] : 0;
+    e = nvn_st_new(ARG_OBJ(obj), NVN_T_TEXB);
+    if (e) { e->v[0] = dev; e->v[1] = e->v[2] = e->v[3] = e->v[4] = e->v[7] = 1; }
+    return 0;
+}
+#define TEX_SET(name, index) \
+uint64_t nvn_TextureBuilderSet##name(uint64_t obj, uint64_t value, uint64_t a2, uint64_t a3, \
+                                    uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) { \
+    (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7; \
+    nvn_st_ent *e = nvn_st_get(ARG_OBJ(obj), NVN_T_TEXB); \
+    if (!e) e = nvn_st_new(ARG_OBJ(obj), NVN_T_TEXB); \
+    if (e) { e->v[index] = value; } return 0; \
+}
+TEX_SET(Device, 0)
+TEX_SET(Width, 1)
+TEX_SET(Height, 2)
+TEX_SET(Depth, 3)
+TEX_SET(Levels, 4)
+TEX_SET(Format, 5)
+TEX_SET(Flags, 6)
+TEX_SET(Target, 7)
+TEX_SET(Samples, 8)
+TEX_SET(Stride, 11)
+#undef TEX_SET
+uint64_t nvn_TextureBuilderSetSize3D(uint64_t obj, uint64_t w, uint64_t h, uint64_t d,
+                                    uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a4; (void)a5; (void)a6; (void)a7;
+    nvn_st_ent *e = need(ARG_OBJ(obj), NVN_T_TEXB, "TextureBuilderSetSize");
+    if (e) { e->v[1] = w; e->v[2] = h; e->v[3] = d; }
+    return 0;
+}
+uint64_t nvn_TextureBuilderSetSize2D(uint64_t obj, uint64_t w, uint64_t h, uint64_t a3,
+                                    uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a3; return nvn_TextureBuilderSetSize3D(obj, w, h, 1, a4, a5, a6, a7);
+}
+uint64_t nvn_TextureBuilderSetSize1D(uint64_t obj, uint64_t w, uint64_t a2, uint64_t a3,
+                                    uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a2; (void)a3; return nvn_TextureBuilderSetSize3D(obj, w, 1, 1, a4, a5, a6, a7);
+}
+uint64_t nvn_TextureBuilderSetStorage(uint64_t obj, uint64_t pool, uint64_t off, uint64_t a3,
+                                     uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    nvn_st_ent *e = need(ARG_OBJ(obj), NVN_T_TEXB, "TextureBuilderSetStorage");
+    if (e) { e->v[9] = pool; e->v[10] = off; }
+    return 0;
+}
+static uint64_t texture_size(const nvn_st_ent *e) {
+    if (!e) return 0;
+    texture_fmt fmt = texture_format((int)e->v[5]);
+    if (!fmt.bpb) { NVN_LOG("【红】unsupported texture format %#llx", (unsigned long long)e->v[5]); return 0; }
+    nvn_tex_layout l = {0};
+    l.width = (uint32_t)e->v[1]; l.height = (uint32_t)e->v[2]; l.depth = (uint32_t)e->v[3];
+    l.mip_levels = (uint32_t)e->v[4];
+    if (!l.width || !l.height || !l.depth || l.mip_levels > 32) return 0;
+    l.block_w = fmt.bw; l.block_h = fmt.bh; l.bytes_per_block = fmt.bpb;
+    l.samples_x = l.samples_y = 1; l.layers = 1; l.dims = 2;
+    switch (e->v[7]) {
+    case 0: l.dims = 1; l.height = l.depth = 1; break;
+    case 2: l.dims = 3; break;
+    case 3: l.dims = 1; l.layers = l.height; l.height = l.depth = 1; break;
+    case 4: case 6: l.layers = l.depth; l.depth = 1; break;
+    case 8: l.layers = 6; l.depth = 1; break;
+    case 9: l.layers = l.depth * 6; l.depth = 1; break;
+    case 10: return (uint64_t)l.width * fmt.bpb;
+    default: l.depth = 1; break;
+    }
+    if (e->v[8] == 2) l.samples_x = 2;
+    if (e->v[8] == 4) l.samples_x = l.samples_y = 2;
+    if (e->v[8] == 8) { l.samples_x = 4; l.samples_y = 2; }
+    l.linear = !!(e->v[6] & 0x10);
+    l.stride = (uint32_t)e->v[11];
+    if (l.linear && !l.stride) {
+        uint32_t align = e->v[6] & 0x40 ? 128 : 32;
+        l.stride = (tex_div_ceil(l.width, fmt.bw) * fmt.bpb + align - 1) & ~(align - 1);
+        l.height = tex_div_ceil(l.height, fmt.bh);
+    }
+    if (l.dims == 2) l.tile_h_log2 = nvn_tex_default_tile_h(l.height, l.samples_y, fmt.bh);
+    if (l.dims == 3) l.tile_d_log2 = tex_pick_tile_size(l.depth + l.depth / 2);
+    return nvn_tex_storage_size(&l);
+}
+uint64_t nvn_TextureBuilderGetStorageSize(uint64_t obj, uint64_t a1, uint64_t a2, uint64_t a3,
+                                         uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    return texture_size(need(ARG_OBJ(obj), NVN_T_TEXB, "TextureBuilderGetStorageSize"));
+}
+uint64_t nvn_TextureBuilderGetStorageAlignment(uint64_t obj, uint64_t a1, uint64_t a2, uint64_t a3,
+                                              uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    nvn_st_ent *e = need(ARG_OBJ(obj), NVN_T_TEXB, "TextureBuilderGetStorageAlignment");
+    if (!e) return 0;
+    texture_fmt fmt = texture_format((int)e->v[5]);
+    if (e->v[7] == 10) return fmt.bpb == 12 ? 4 : fmt.bpb;
+    return e->v[6] & 0x10 ? (e->v[6] & 0x40 ? 128 : 32) : 512;
+}
+uint64_t nvn_TextureInitialize(uint64_t obj, uint64_t builder, uint64_t a2, uint64_t a3,
+                               uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    nvn_st_ent *b = need(ARG_OBJ(builder), NVN_T_TEXB, "TextureInitialize(builder)");
+    uint64_t size = texture_size(b);
+    if (!size) return NVN_FALSE;
+    nvn_st_ent *p = need(ARG_OBJ(b->v[9]), NVN_T_POOL, "TextureInitialize(pool)");
+    if (!p || b->v[10] > p->v[POOL_SIZE] || size > p->v[POOL_SIZE] - b->v[10]) return NVN_FALSE;
+    nvn_st_ent *t = nvn_st_new(ARG_OBJ(obj), NVN_T_TEX);
+    if (!t) return NVN_FALSE;
+    memcpy(t->v, b->v, sizeof t->v);
+    return NVN_TRUE;
+}
+uint64_t nvn_TextureFinalize(uint64_t obj, uint64_t a1, uint64_t a2, uint64_t a3,
+                             uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    nvn_st_del(ARG_OBJ(obj), NVN_T_TEX); return 0;
 }
 
 // ------------------------------------------------------------------ 同步对象
