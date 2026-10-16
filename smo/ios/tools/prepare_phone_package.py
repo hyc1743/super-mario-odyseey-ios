@@ -15,6 +15,8 @@
     prepare_phone_package.py [--rewrite work/rewrite] [--out out/smo-phone-package]
                              [--romfs work/game/RomFS]     # 给了就硬拷 RomFS（慢）
                              [--no-dylib]                  # 跳过 Guest.framework
+                             [--guest-zip <路径>]           # 额外把 Guest.framework 压成 zip 并打印 sha256
+                                                             #（上传到任意网盘/URL，供私有 fork 的 CI 注入）
 """
 import os
 import shutil
@@ -54,6 +56,11 @@ def main():
     os.makedirs(fw_out, exist_ok=True)
 
     # ① guest dylib
+    guest_zip = None
+    for i, a in enumerate(argv):
+        if a == "--guest-zip" and i + 1 < len(argv):
+            guest_zip = argv[i + 1]
+
     if not no_dylib:
         sys.path.insert(0, os.path.join(HERE))
         import guest_dylib
@@ -63,6 +70,16 @@ def main():
         with open(os.path.join(fw_out, "Info.plist"), "w", encoding="utf-8", newline="\n") as f:
             f.write(guest_dylib.INFO_PLIST % "local.guest")
         print(f"① Guest.framework → {fw_out}（{len(data)} 字节）")
+        if guest_zip:
+            import hashlib
+            import zipfile
+            with zipfile.ZipFile(guest_zip, "w", zipfile.ZIP_DEFLATED) as z:
+                z.writestr("Guest.framework/Guest", data)
+                z.writestr("Guest.framework/Info.plist",
+                           guest_dylib.INFO_PLIST % "local.guest")
+            h = hashlib.sha256(open(guest_zip, "rb").read()).hexdigest()
+            print(f"① guest.zip → {guest_zip}")
+            print(f"① sha256 = {h}   ← 私有 fork 的仓库变量 GUEST_SHA256 填这个，GUEST_URL 填 zip 的下载地址")
 
     # ② tsv + 着色器索引（小文件；索引供图形层用，现在带上无妨）
     for n in need:
