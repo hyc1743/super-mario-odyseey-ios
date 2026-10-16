@@ -119,7 +119,7 @@ uint64_t resolve_import(module_t *m, const char *name) {
 // 再分派到 svc 层或计时器。
 // ==================================================================================
 
-#include <time.h>
+#include "guest_clock.h"
 
 // ---- 门表：以返回点为键（改写产物的 gates.tsv 一行一条）----
 #define GATE_CAP 4096                                  // SMO 实测 139 个门，留足余量
@@ -142,16 +142,6 @@ static const gate_ent *gate_find(uint64_t ret) {
 }
 
 // ---- 客体时钟：Horizon 的 cntpct 是 19.2 MHz 系统计数器（参考项目同口径）----
-static uint64_t host_ns(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
-}
-static uint64_t g_t0_ns;
-static uint64_t tick_192(void) {                       // 19.2 MHz
-    if (!g_t0_ns) g_t0_ns = host_ns();
-    return (host_ns() - g_t0_ns) * 192 / 10;           // ns → 19.2 MHz 计数
-}
 
 // svc 实现在 hle_svc.c（内存族）与 hle_thread.c（线程族）；这里只做门分派
 int svc_dispatch(unsigned num, uint64_t *regs);
@@ -162,7 +152,7 @@ uint64_t gate_dispatch(uint64_t ret, uint64_t *regs) {
     if (!g) die("门返回点 %#llx 不在门表里（产物与宿主不匹配）", (unsigned long long)ret);
     if (!strcmp(g->kind, "svc")) return svc_dispatch((unsigned)g->arg, regs);
     if (!strcmp(g->kind, "cntpct") || !strcmp(g->kind, "cntvct")) {
-        regs[g->arg & 31] = tick_192();                 // 目标寄存器可以是任意 xN（实测含 x20/x21/x23）
+        regs[g->arg & 31] = dm_guest_tick();             // 目标寄存器可以是任意 xN（实测含 x20/x21/x23）
         return 0;
     }
     die("未知门种类 %s", g->kind);

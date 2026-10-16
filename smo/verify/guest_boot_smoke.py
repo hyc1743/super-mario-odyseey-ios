@@ -3,7 +3,7 @@
 
 This is a limited startup gate, not a rendering/gameplay test. A private RomFS
 fixture can be provided for startup resources. Time alone never counts
-as success: nnMain and at least one started guest thread must both be observed.
+as success: nnMain, a guest thread and 60 presentation requests are required.
 """
 import argparse
 import json
@@ -49,12 +49,13 @@ def main():
         data = log.read_text(encoding="utf-8", errors="replace")
         entry = "== 进入客体入口 nnMain" in data
         thread = "GUEST_THREAD_STARTED" in data
+        frames = "GUEST_FRAME_PRESENT count=60" in data
         fatal = "FATAL" in data or "【红】" in data
-        passed = timed_out and entry and thread and not fatal
-        result = dict(passed=passed, scope="nnMain + guest thread startup; no rendering validation",
+        passed = timed_out and entry and thread and frames and not fatal
+        result = dict(passed=passed, scope="nnMain + guest thread + 60 presentation requests; no rendering validation",
                       romfs_fixture=bool(args.romfs),
                       seconds=args.seconds, timed_out=timed_out, exit_code=code,
-                      entered_nnmain=entry, started_guest_thread=thread, error_log=fatal,
+                      entered_nnmain=entry, started_guest_thread=thread, presented_60_frames=frames, error_log=fatal,
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))
         (args.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)
@@ -63,19 +64,27 @@ def main():
         failures = [line for line in data.splitlines() if "失败" in line or "【红】" in line or "UNIMPL" in line]
         if failures:
             print("Startup dependency/error evidence:\n" + "\n".join(failures[-60:]), flush=True)
-        if code is not None and code != 0:
-            commands = ["xcrun", "lldb", "-b", "-o", "run",
-                        "-k", "thread backtrace all -c 8", "-k", "register read pc x0 x8 x21 x23 x24",
-                        "-k", "expression -f x -- (unsigned long long)g_mod[0].base",
-                        "-k", "expression -f x -- (unsigned long long)g_mod[1].base",
-                        "-k", "expression -f x -- (unsigned long long)g_mod[2].base",
-                        "--", executable]
+        if not passed:
+            # Interrupt a stalled replay too: an absent crash is not proof of boot.
+            interrupt = ("script import threading; "
+                         f"smo_timer = threading.Timer({args.seconds}, "
+                         "lambda: lldb.debugger.GetSelectedTarget().GetProcess().SendAsyncInterrupt()); "
+                         "smo_timer.daemon = True; smo_timer.start()")
+            inspect = ["thread backtrace all -c 12", "register read pc x0 x1 x2 x8 x21 x23 x24",
+                       "expression -f x -- (unsigned long long)g_mod[0].base",
+                       "expression -f x -- (unsigned long long)g_mod[1].base",
+                       "expression -f x -- (unsigned long long)g_mod[2].base"]
+            commands = ["xcrun", "lldb", "-b", "-o", interrupt, "-o", "run"]
+            for flag in ("-o", "-k"):
+                for command in inspect:
+                    commands.extend([flag, command])
+            commands.extend(["--", executable])
             with (args.output / "backtrace.log").open("wb") as output:
                 try:
                     subprocess.run(commands, env=env, stdout=output, stderr=subprocess.STDOUT,
-                                   timeout=args.seconds, check=False)
+                                   timeout=args.seconds + 15, check=False)
                 except subprocess.TimeoutExpired:
-                    print("Debugger replay timed out; original crash remains a failure.")
+                    print("Debugger replay timed out; original failed startup remains a failure.")
             trace = (args.output / "backtrace.log").read_text(encoding="utf-8", errors="replace")
             start = trace.find("(lldb) thread backtrace")
             lines = trace[start:].splitlines() if start >= 0 else trace.splitlines()[-85:]

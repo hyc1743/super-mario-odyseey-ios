@@ -12,6 +12,7 @@
 // 所以这份文件能在本机当单测跑（smo/host/tests/svc_selftest.c）。
 #include "dm.h"
 #include "logbuf.h"
+#include "guest_clock.h"
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
@@ -272,11 +273,7 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
     // 为什么必须实现：未实现的 svc 以前既不写 regs[0] 也不报错，SDK 读到的是**栈上的垃圾** ——
     // 真机上 GetInfo(RandomEntropy) 拿到垃圾后 SDK 直接 svcBreak(Panic)（日志停在 svc #38）。
     case 0x1E: {                                          // GetSystemTick：19.2 MHz 计数器
-        static uint64_t t0;
-        struct timespec ts; timespec_get(&ts, TIME_UTC);
-        uint64_t now = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
-        if (!t0) t0 = now;
-        regs[0] = (now - t0) * 192 / 10;
+        regs[0] = dm_guest_tick();
         return 0;
     }
     case 0x26: {                                          // Break(reason, ptr, size)：SDK 致命中止

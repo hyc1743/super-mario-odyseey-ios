@@ -8,6 +8,7 @@
 //   5. MapMemory 目标非法 → 0xDC01
 //   6. QueryMemory：堆=5、映射=0xB、空闲=0、宿主栈整段 0xB
 #include "../dm.h"
+#include "../guest_clock.h"
 #include "../hle.h"
 
 module_t g_mod[MAX_MOD];          // 内存族的额度计算要用映像大小
@@ -84,6 +85,12 @@ static uint64_t call(unsigned num, uint64_t a, uint64_t b, uint64_t c, uint64_t 
 static uint64_t last_x1;
 
 int main(void) {
+    struct timespec exact = {1, 500000000};
+    CHK(dm_tick_from_timespec(&exact) == 28800000ull, "1.5 seconds is 28.8 million guest ticks, not 28.8 billion");
+    uint64_t before_tick = dm_guest_tick();
+    uint64_t syscall_tick = call(0x1e, 0, 0, 0, 0);
+    CHK(syscall_tick >= before_tick && syscall_tick <= dm_guest_tick(),
+        "GetSystemTick and counter instructions share one monotonic epoch and frequency");
     // 造两个假模块：image_bytes() 要用到大小
     static uint8_t m0[1 << 20], m1[2 << 20];
     g_mod[0].base = m0; g_mod[0].size = sizeof m0;

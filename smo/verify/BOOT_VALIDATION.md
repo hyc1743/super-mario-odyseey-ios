@@ -11,15 +11,16 @@ make -C smo/host smo_host_embedded
 python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded --romfs /path/to/private/boot-romfs
 ```
 
-通过条件：观察到进入 nnMain、StartThread 成功，持续运行 30 秒，且无红色错误日志。
-提前退出、崩溃、只有超时而没有里程碑，均判失败。崩溃自动通过 LLDB 再运行一次，
+通过条件：观察到进入 nnMain、StartThread 成功、至少 60 次 QueuePresentTexture 请求，
+持续运行 30 秒，且无红色错误日志。提前退出、崩溃、只有超时而没有里程碑，均判失败。
+失败自动通过 LLDB 再运行一次，卡住时定时中断，
 输出所有线程回溯、关键寄存器和三个游戏模块的装载基址，可换算实际游戏偏移。
 本地结果写到 `work/boot-smoke/`。不上传游戏二进制或内存转储到公开 artifact。
 
 范围：这是早期启动检查。CI 从固定的私有提交下载并校验约 63 MiB 的启动资源测试包，
 包含 SystemData、LocalizedData、LayoutData、ShaderData、EventData 和 EffectDataBase；
 不带 --romfs 手动运行时使用空目录。没有验证完整资源、iOS 签名和系统差异、
-Metal 绘制或可玩性；30 秒存活也不能排除线程死锁。需要资源的后续路径应补充真实输入
+Metal 绘制或可玩性；呈现请求也不代表画面正确。需要资源的后续路径应补充真实输入
 再验证，不能通过屏蔽错误或伪造接口成功来让构建变绿。
 
 2026-10-17 首次执行记录：
@@ -48,3 +49,9 @@ Metal 绘制或可玩性；30 秒存活也不能排除线程死锁。需要资�
 - 云端运行 `38934019465` 越过特效数据库，停在字体初始化调用的
   main+0xa7d2ec `al::ResourceSystem::createResource`。补充真实本地化、布局和着色器资源，
   并实现原先返回 0 的 LanguageCode::Make 与语言代码比较，验证目录选择所用的 ABI。
+- 对照参考项目及 SDK+0x14f56c，进一步修正 GetDesiredLanguage：返回 8 字节语言代码，
+  原先返回的是枚举数字。运行 `38935138605` 达到 30 秒存活，但最后停在未实现的
+  GetSharedFontLoadState；这不能算启动完成，因此加强呈现里程碑并增加卡住时抓栈。
+- 同时修正计时：计数器门与 GetSystemTick 原先用纳秒乘 192/10，快了 1000 倍，
+  且各用不同起点。现在共享单调时钟，按每秒 19,200,000 tick 换算；
+  自检验证确定的秒数及两个读取接口的共同时间轴。

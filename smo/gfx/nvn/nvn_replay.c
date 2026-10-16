@@ -17,6 +17,7 @@ enum { ACT_OTHER = 0, ACT_BIND, ACT_SET, ACT_DRAW, ACT_DISPATCH, ACT_CLEAR, ACT_
 static nvn_draw_item g_plan[PLAN_MAX];
 static uint64_t      g_keys[PLAN_MAX];
 static unsigned g_plan_n;
+static unsigned g_frame_presents;
 static unsigned g_binds, g_sets, g_draws, g_dispatches, g_clears, g_copies, g_presents, g_syncs;
 static unsigned g_unresolved;                 // 绑定了状态表里没有的对象 = 记账出错
 static const char *g_unresolved_name;
@@ -59,6 +60,7 @@ static uint64_t bind_object(const char *n, uint64_t a1) {
 uint64_t nvn_replay_item_key(unsigned i) { return i < g_plan_n ? g_keys[i] : 0; }
 
 void nvn_replay_reset(void) {
+    g_frame_presents = 0;
     g_state_hash = 1469598103934665603ULL;
     g_plan_n = g_binds = g_sets = g_draws = g_dispatches = g_clears = g_copies = g_presents = g_syncs = 0;
     g_unresolved = 0;
@@ -68,6 +70,12 @@ void nvn_replay_reset(void) {
 
 // 处理一条记录。返回 1 表示产生了计划项（绘制/分派）。
 int nvn_replay_call(const char *name, const uint64_t *a) {
+    // This proves a guest presentation request, not actual Metal output.
+    if (!strcmp(name, "nvnQueuePresentTexture")) {
+        g_frame_presents++;
+        if (g_frame_presents == 1 || g_frame_presents == 60)
+            NVN_LOG("GUEST_FRAME_PRESENT count=%u", g_frame_presents);
+    }
     uint16_t act = classify(name);
     switch (act) {
     case ACT_BIND: {
