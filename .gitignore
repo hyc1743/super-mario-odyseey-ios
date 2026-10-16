@@ -65,3 +65,6 @@ smo/host/smo_host.exe
 
 # 内嵌段与内嵌表（从游戏改写产物生成，含游戏程序，绝不入库）
 smo/ios/Sources/Embedded.*
+
+# 游戏程序输入包（只提交进你的私有仓；公开仓永远不该有这个目录）
+input/

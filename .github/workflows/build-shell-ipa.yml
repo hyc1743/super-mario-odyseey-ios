@@ -193,25 +193,31 @@ jobs:
           make -C smo/host smo_host 2>&1 | tee smo/host/build.log
       - name: 装 xcodegen（生成 .xcodeproj）
         run: brew install xcodegen
-      - name: 注入游戏程序（可选：仓库变量 GUEST_URL / GUEST_SHA256 都设了才做）—— 内嵌路线
-        # 与参考项目一致：映像编进 App **主二进制自己的段**（不是单独的大 dylib）——
-        # 签名工具只需签一个二进制，不会出现「大库/换壳 Framework」那类失败。
-        if: ${{ vars.GUEST_URL != '' }}
+      - name: 注入游戏程序（内嵌路线；任一条满足即做）
+        # 两种输入来源：
+        #   ① 仓库内自带 `input/embed-input.zip`（私有仓专用：把输入包直接提交进你自己的私有仓，
+        #      不需要任何外部网盘/变量 —— 公开仓不会有这个文件）
+        #   ② 仓库变量 GUEST_URL（可选带 GUEST_SHA256 校验），CI 带 token 下载
+        if: ${{ vars.GUEST_URL != '' || hashFiles('input/embed-input.zip') != '' }}
         env:
           GUEST_URL: ${{ vars.GUEST_URL }}
           GUEST_SHA256: ${{ vars.GUEST_SHA256 }}
         run: |
           set -o pipefail
-          # 带 token 下载：输入包放在本仓（私有仓）的 release 附件里也能取到，不需要外部网盘
-          curl -sL -H "Authorization: Bearer ${{ github.token }}"                -H "Accept: application/octet-stream" "$GUEST_URL" -o /tmp/embed-input.zip
-          head -c 2 /tmp/embed-input.zip | grep -q "PK" || { echo "::error::下载到的不是 zip（URL 或权限不对）"; exit 1; }
-          GOT=$(python3 -c "import hashlib;print(hashlib.sha256(open('/tmp/embed-input.zip','rb').read()).hexdigest())")
-          if [ -n "$GUEST_SHA256" ] && [ "$GOT" != "$GUEST_SHA256" ]; then
-            echo "::error::输入包校验失败：期望 $GUEST_SHA256 实得 $GOT"; exit 1
+          if [ -f input/embed-input.zip ]; then
+            cp input/embed-input.zip /tmp/embed-input.zip
+            echo "输入来源：仓库内 input/embed-input.zip（$（stat -f%z /tmp/embed-input.zip） 字节）"
+          else
+            curl -sL -H "Authorization: Bearer ${{ github.token }}"                  -H "Accept: application/octet-stream" "$GUEST_URL" -o /tmp/embed-input.zip
+            head -c 2 /tmp/embed-input.zip | grep -q "PK" || { echo "::error::下载到的不是 zip（URL 或权限不对）"; exit 1; }
+            if [ -n "$GUEST_SHA256" ]; then
+              GOT=$(python3 -c "import hashlib;print(hashlib.sha256(open('/tmp/embed-input.zip','rb').read()).hexdigest())")
+              [ "$GOT" = "$GUEST_SHA256" ] || { echo "::error::输入包校验失败：期望 $GUEST_SHA256 实得 $GOT"; exit 1; }
+              echo "输入包校验通过（sha256 ${GOT:0:16}…）"
+            fi
           fi
-          echo "输入包校验通过（sha256 ${GOT:0:16}…）"
           python3 smo/ios/tools/embed_inject.py /tmp/embed-input.zip .
-      - name: 构建并打包
+      - name: 构建并打包      - name: 构建并打包
         env:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
           # MARKETING_VERSION（CFBundleShortVersionString 只允许数字与点，脚本里会归化）
