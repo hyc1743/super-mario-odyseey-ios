@@ -1,13 +1,14 @@
 // 资源容器的展开实现。见 smoarc.h。
 #include "smoarc.h"
+#include <dirent.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #if defined(_WIN32)
 #include <direct.h>     // _mkdir
 #else
-#include <sys/stat.h>   // mkdir
 #include <unistd.h>
 #endif
 
@@ -61,9 +62,11 @@ static int mkdirs(char *path) {
     return 0;
 }
 
-int smoarc_extract(const char *dir, const char *const *volumes, unsigned n) {
+int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
+                      smoarc_progress_fn cb, void *user) {
     char name[4096], full[8192];
     unsigned long long total = 0;
+    unsigned done = 0;
     for (unsigned v = 0; v < n; v++) {
         FILE *f = fopen(volumes[v], "rb");
         if (!f) return -2;
@@ -105,9 +108,78 @@ int smoarc_extract(const char *dir, const char *const *volumes, unsigned n) {
             fclose(o);
             if (crc != (int)~c) { fclose(f); return -2; }   // 校验不匹配：多半是卷不完整
             total += (unsigned)sz;
+            if (cb) cb(user, ++done, name);
         }
         fclose(f);
     }
     fprintf(stderr, "[smoarc] 展开完成：%llu 字节\n", total);
+    return 0;
+}
+
+int smoarc_extract(const char *dir, const char *const *volumes, unsigned n) {
+    return smoarc_extract_cb(dir, volumes, n, NULL, NULL);
+}
+
+// ---- 卷组规划（见 smoarc.h 的说明）----
+static int is_dir_p(const char *p) {
+    struct stat st;
+    return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static int is_file_p(const char *p) {
+    struct stat st;
+    return stat(p, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+// 收集 base 下的 RomFS.smoa.0/.1/…（不连续就停），返回卷数
+static unsigned collect_vols(const char *base, char (*vols)[1024], unsigned max) {
+    unsigned n = 0;
+    for (unsigned i = 0; i < max; i++) {
+        char p[1024];
+        if (snprintf(p, sizeof p, "%s/RomFS.smoa.%u", base, i) >= (int)sizeof p) break;
+        if (!is_file_p(p)) break;
+        snprintf(vols[n], 1024, "%s", p);
+        n++;
+    }
+    return n;
+}
+
+unsigned smoarc_plan(const char *docs_dir, char (*volumes)[1024], unsigned max,
+                     char *target, size_t tcap, char *base, size_t bcap) {
+    unsigned n = collect_vols(docs_dir, volumes, max);
+    if (n) {
+        snprintf(target, tcap, "%s/RomFS", docs_dir);
+        snprintf(base, bcap, "%s", docs_dir);
+        return n;
+    }
+    DIR *d = opendir(docs_dir);
+    if (!d) return 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        char sub[1024];
+        if (snprintf(sub, sizeof sub, "%s/%s", docs_dir, e->d_name) >= (int)sizeof sub) continue;
+        if (!is_dir_p(sub)) continue;
+        // ② 包装目录下直接放卷
+        n = collect_vols(sub, volumes, max);
+        if (n) {
+            snprintf(target, tcap, "%s/RomFS", sub);
+            snprintf(base, bcap, "%s", sub);
+            closedir(d);
+            return n;
+        }
+        // ③ 包装目录/RomFS 里放卷（我们打的包就是这个形状）
+        char sub2[1024];
+        if (snprintf(sub2, sizeof sub2, "%s/RomFS", sub) >= (int)sizeof sub2) continue;
+        if (!is_dir_p(sub2)) continue;
+        n = collect_vols(sub2, volumes, max);
+        if (n) {
+            snprintf(target, tcap, "%s", sub2);
+            snprintf(base, bcap, "%s", sub2);
+            closedir(d);
+            return n;
+        }
+    }
+    closedir(d);
     return 0;
 }

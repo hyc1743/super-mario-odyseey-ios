@@ -241,8 +241,9 @@ jobs:
       - name: 构建并打包
         env:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
-          # MARKETING_VERSION（CFBundleShortVersionString 只允许数字与点，脚本里会归化）
-          SMO_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.1.0' }}
+          # MARKETING_VERSION（CFBundleShortVersionString 只允许数字与点，脚本里会归化）。
+          # 分支构建用 0.1.<run号>：真机状态页第一行就能看出装的是哪一次构建，省得来回猜。
+          SMO_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || format('0.1.{0}', github.run_number) }}
           SMO_DEBUG: 1            # 构建脚本 set -x：日志里能看出卡在哪一条命令
         # 整段输出同时写文件：GitHub 的运行日志要管理员权限才能下载，
         # 而 check-run 的 annotations 是公开可读的，所以失败时把日志尾部发成注解（见下一步）

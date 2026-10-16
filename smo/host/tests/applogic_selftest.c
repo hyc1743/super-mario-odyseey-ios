@@ -40,6 +40,25 @@ int main(void) {
     CHK(strstr(dump, "环绕 699") != NULL, "最新一行在末尾");
     dm_log_clear();
 
+    // 「实时落盘」必须真的写文件。上一版只 fopen 没写过 —— 真机崩溃后日志是 0 字节，
+    // 首轮真机排查就栽在这。这个断言就是为它写的。
+    {
+        const char *lf = "/tmp/smo_applogic_log.txt";
+        remove(lf);
+        dm_log_set_file(lf);
+        dm_log_emit("落盘测试 %d", 42);
+        dm_log_emit("第二行");
+        dm_log_set_file(NULL);          // 关文件（实现里每行都 flush，这里只是收尾）
+        FILE *f = fopen(lf, "rb");
+        char txt[512] = {0};
+        size_t got = f ? fread(txt, 1, sizeof txt - 1, f) : 0;
+        if (f) fclose(f);
+        CHK(got > 0, "dm_log_set_file 之后文件里确实有内容（不是 0 字节）");
+        CHK(strstr(txt, "落盘测试 42") && strstr(txt, "第二行"), "两行都写进了文件");
+        remove(lf);
+        dm_log_clear();
+    }
+
     printf("== 2. RomFS / ExeFS 路径解析 ==\n");
     const char *root = "/tmp/smo_applogic_test";
     SMO_RMDIR(root);

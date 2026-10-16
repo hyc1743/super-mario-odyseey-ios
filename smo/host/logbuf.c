@@ -24,6 +24,12 @@ void dm_log_emit(const char *fmt, ...) {
     va_end(ap);
     slot[LOGBUF_LINE - 1] = 0;
     fprintf(stderr, "[smo] %s\n", slot);
+    // 真机崩溃时环形缓冲会随进程消失 —— 每行同时写盘并 flush，崩溃后文件里一定留得下尾部。
+    // （上一版这里只 fopen 没写过：所谓「实时落盘」是空的，第一次真机排查才发现。）
+    if (g_file) {
+        fprintf(g_file, "%s\n", slot);
+        fflush(g_file);
+    }
     g_head = (g_head + 1) % LOGBUF_LINES;
     if (g_n < LOGBUF_LINES) g_n++;
 }

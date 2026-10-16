@@ -4,6 +4,8 @@
 // 并把宿主的**日志环形缓冲**显示在屏幕上（未接电脑也能看）。宿主启动在下一轮接入。
 
 #import <UIKit/UIKit.h>
+#include <stdio.h>
+#include <string.h>
 #include "logbuf.h"
 #include "romfs_resolve.h"
 #include "smoarc.h"
@@ -13,6 +15,24 @@
 extern void dm_jump_guest(void *arg, void *fn);
 
 // ---- 宿主引导（后台线程跑；日志进环形缓冲，前台定时刷新显示） ----
+
+// 数「真实条目」：容器卷（RomFS.smoa.N）与展开标记不算 —— 只有卷不算「已展开」
+static unsigned CountRealEntries(NSFileManager *fm, NSString *dir) {
+    unsigned n = 0;
+    for (NSString *e in [fm contentsOfDirectoryAtPath:dir error:nil] ?: @[]) {
+        if ([e hasPrefix:@"RomFS.smoa."] || [e isEqualToString:@".smoa-done"]) continue;
+        n++;
+    }
+    return n;
+}
+
+// 5.5 GB 展开要几分钟：每 100 个文件一行，屏幕上能看见在动
+static void PackProgress(void *user, unsigned done, const char *name) {
+    (void)user;
+    if (done % 100) return;
+    LOG("  容器展开：%u 个文件（%s）", done, name ? name : "");
+}
+
 static void RunHost(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSURL *docs = [fm URLForDirectory:NSDocumentDirectory inDomain:NSUserDomainMask
@@ -22,36 +42,56 @@ static void RunHost(void) {
         LOG("App：Documents 里没有 ExeFS —— 只显示状态页（把改写产物放进「文件」App 的 SMOMobile/ExeFS）");
         return;
     }
-    // 首次运行：Documents 里没有 RomFS 目录、但有 RomFS.smoa.0 卷时，先展开（几千个小文件装在两个大文件里）
+    // ---- 资源容器：把 RomFS.smoa.N 卷展开成真正的目录树 ----
+    // 卷在哪、要展开到哪 —— 判断在 smoarc_plan()（C，能进 CI 单测）。它认三种形状，第三种
+    // （Documents/<包装目录>/RomFS/RomFS.smoa.N）就是我们自己打的包的形状：上一版不认它，
+    // 手机上根本没展开，RomFS 目录里只有两个卷，游戏一读文件就崩。
+    // 标记文件 .smoa-done 放在卷旁边（不放 RomFS 目录里，免得被游戏的目录列举撞上）。
     NSFileManager *fm2 = NSFileManager.defaultManager;
     NSURL *docs2 = [fm2 URLForDirectory:NSDocumentDirectory inDomain:NSUserDomainMask
                       appropriateForURL:nil create:NO error:nil];
     if (docs2) {
-        // 卷可能在 Documents 根，也可能在一层包装目录（用户拷的是整个 SMO Resource 文件夹）。
-        // 依次找：哪个目录里有 RomFS.smoa.0 且没有 RomFS 目录，就在哪里展开。
-        NSMutableArray<NSString *> *cands = [NSMutableArray arrayWithObject:docs2.path];
-        for (NSString *sub in [fm2 contentsOfDirectoryAtPath:docs2.path error:nil] ?: @[]) {
-            BOOL sd = NO;
-            NSString *sp = [docs2.path stringByAppendingPathComponent:sub];
-            if ([fm2 fileExistsAtPath:sp isDirectory:&sd] && sd) [cands addObject:sp];
+        char vols[8][1024], target[1024], base[1024];
+        unsigned nvols = smoarc_plan(docs2.path.UTF8String, vols, 8, target, sizeof target,
+                                     base, sizeof base);
+        if (nvols) {
+            const char *volp[8];
+            for (unsigned i = 0; i < nvols; i++) volp[i] = vols[i];
+            NSString *targetS = [NSString stringWithUTF8String:target];
+            NSString *marker = [[NSString stringWithUTF8String:base]
+                                 stringByAppendingPathComponent:@".smoa-done"];
+            if ([fm2 fileExistsAtPath:marker]) {
+                LOG("容器：%s 已展开过（.smoa-done），跳过", target);
+            } else if (CountRealEntries(fm2, targetS)) {
+                LOG("容器：%s 里已有内容（像是直接拷的目录树），跳过展开", target);
+            } else {
+                [fm2 createDirectoryAtPath:targetS withIntermediateDirectories:YES attributes:nil error:nil];
+                LOG("首次运行：展开 RomFS 容器 %u 卷 → %s（5.5 GB，几分钟；每 100 个文件一行）",
+                    nvols, target);
+                int rc = smoarc_extract_cb(target, volp, nvols, PackProgress, NULL);
+                LOG("展开结果：%d（0 = 成功；-1 格式错；-2 读写错或空间不够）", rc);
+                if (rc == 0) {
+                    [[NSString stringWithFormat:@"vols=%u\n", nvols] writeToFile:marker atomically:YES
+                                                                         encoding:NSUTF8StringEncoding error:nil];
+                } else {
+                    LOG("【红】展开没成功 —— 先别进游戏：重拷一遍卷，或看看手机剩余空间");
+                }
+            }
         }
-        for (NSString *base in cands) {
-            NSString *romfsDir = [base stringByAppendingPathComponent:@"RomFS"];
-            BOOL isDir = NO;
-            if ([fm2 fileExistsAtPath:romfsDir isDirectory:&isDir] && isDir) continue;
-            const char *vols[8];
-            unsigned nvols = 0;
-            for (int i = 0; i < 8; i++) {
-                NSString *v = [base stringByAppendingPathComponent:
-                               [NSString stringWithFormat:@"RomFS.smoa.%d", i]];
-                if (![fm2 fileExistsAtPath:v]) break;
-                vols[nvols++] = v.UTF8String;
-            }
-            if (nvols) {
-                LOG("首次运行：在 %s 展开 RomFS 容器（%u 卷，几分钟）…", base.UTF8String, nvols);
-                int rc = smoarc_extract(base.UTF8String, vols, nvols);
-                LOG("展开结果：%d（0 = 成功）", rc);
-            }
+    }
+    // RomFS 里到底有没有东西：只有卷没展开时，进了游戏就是一路读文件失败，最后以莫名其妙的崩溃收场。
+    // 这里直接拦下并把原因写清楚（比让用户拿个崩溃报告猜省事得多）。
+    {
+        char rp[1024];
+        if (!dm_romfs_path(rp, sizeof rp, docs.path.UTF8String)) {
+            LOG("【红】Documents 里没有 RomFS（放好 RomFS 目录，或 RomFS.smoa.N 卷）");
+            return;
+        }
+        unsigned n = CountRealEntries(fm, [NSString stringWithUTF8String:rp]);
+        LOG("RomFS：%s（顶层 %u 个条目）", rp, n);
+        if (!n) {
+            LOG("【红】RomFS 目录里没有展开的内容（只剩容器卷？）—— 见上面的展开日志");
+            return;
         }
     }
     LOG("== SMO 宿主（App 内）：从 %s 装载 ==", ep);

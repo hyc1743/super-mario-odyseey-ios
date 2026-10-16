@@ -74,6 +74,47 @@ int main(void) {
     static const char *badvols[] = { "/tmp/smoarc_test/smoa.0", "/tmp/smoarc_test/smoa.1" };
     CHK(smoarc_extract("/tmp/smoarc_test/out2", badvols, 2) != 0, "CRC 不匹配 → 报错");
 
+    printf("== 卷组规划（决定「在哪儿展开」—— 真机首次就错在这一步）==\n");
+    // 上一版只认「目录里没有 RomFS 子目录」的形状，而我们自己打的包是
+    // SMO Resource/RomFS/RomFS.smoa.N —— 结果手机上根本没展开，游戏一读文件就崩。
+    // 三种形状都造出来，逐个验。
+    const char *roots[3]   = { "/tmp/smo_plan_a", "/tmp/smo_plan_b", "/tmp/smo_plan_c" };
+    const char *voldirs[3] = { "/tmp/smo_plan_a", "/tmp/smo_plan_b/wrap", "/tmp/smo_plan_c/pack/RomFS" };
+    const char *names[3]   = { "形状①直接拷卷", "形状②包装目录下", "形状③包装/RomFS 里（我们的包）" };
+    SMO_MKDIR("/tmp/smo_plan_a");
+    SMO_MKDIR("/tmp/smo_plan_b");
+    SMO_MKDIR("/tmp/smo_plan_b/wrap");
+    SMO_MKDIR("/tmp/smo_plan_c");
+    SMO_MKDIR("/tmp/smo_plan_c/pack");
+    SMO_MKDIR("/tmp/smo_plan_c/pack/RomFS");
+    for (int i = 0; i < 3; i++) {
+        char p[512];
+        for (int v = 0; v < 2; v++) {
+            snprintf(p, sizeof p, "%s/RomFS.smoa.%d", voldirs[i], v);
+            FILE *f = fopen(p, "wb");
+            if (f) { fputs("SMOA", f); fclose(f); }
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        char vols[8][1024], target[1024], base[1024];
+        unsigned n = smoarc_plan(roots[i], vols, 8, target, sizeof target, base, sizeof base);
+        char msg[1600];   /* target/base 是 1024 字节缓冲：msg 小了会被 -Wformat-truncation 当错误 */
+        snprintf(msg, sizeof msg, "%s：找到 2 卷", names[i]);
+        CHK(n == 2, msg);
+        snprintf(msg, sizeof msg, "%s：目标是 %s", names[i], target);
+        CHK(strlen(target) > 6 && !strcmp(target + strlen(target) - 6, "/RomFS"), msg);
+        snprintf(msg, sizeof msg, "%s：第二卷是 %s", names[i], vols[1]);
+        CHK(strstr(vols[1], "RomFS.smoa.1") != NULL, msg);
+        snprintf(msg, sizeof msg, "%s：标记目录 base = %s", names[i], base);
+        CHK(strlen(base) > 0, msg);
+    }
+    {
+        // 只有展开好的目录树、没有卷（smoarc_test/out 是上面展开出来的）→ 0，不该重复展开
+        char vols[8][1024], target[1024], base[1024];
+        CHK(smoarc_plan("/tmp/smoarc_test/out", vols, 8, target, sizeof target, base, sizeof base) == 0,
+            "只有目录树没有卷 → 0（不该重复展开）");
+    }
+
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");
     return fails != 0;
 }
