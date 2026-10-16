@@ -6,6 +6,7 @@
 #include "nvn_host.h"
 #include <pthread.h>
 #include <limits.h>
+#include <stdatomic.h>
 
 enum { T_MEMORY=4, T_SAMPLER_BUILDER=7, T_SAMPLER=8, T_TEXTURE=12,
        T_TEXTURE_POOL=16, T_SAMPLER_POOL=17 };
@@ -38,8 +39,8 @@ int nvn_resources_snapshot(const void *object, uint32_t type, nvn_resource_snaps
         if(id.magic!=(RESOURCE_MAGIC|type) || !id.serial)return 0;
         e=nvn_st_get((void *)(uintptr_t)id.owner,type);
         if(!e || e->v[15]!=id.serial)return 0;
-        static unsigned aliases;
-        if(aliases++<8)NVN_LOG("NVN_RESOURCE_ALIAS object=%p owner=%p type=%u serial=%llu",object,e->key,type,(unsigned long long)id.serial);
+        static _Atomic unsigned aliases;
+        if(atomic_fetch_add(&aliases,1)<8)NVN_LOG("NVN_RESOURCE_ALIAS object=%p owner=%p type=%u serial=%llu",object,e->key,type,(unsigned long long)id.serial);
     }
     if (!e) return 0;
     out->object=(uint64_t)(uintptr_t)e->key;

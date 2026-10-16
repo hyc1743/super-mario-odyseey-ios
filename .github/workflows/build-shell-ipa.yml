@@ -154,7 +154,7 @@ jobs:
       - name: macOS：逐个 C 单测（每个失败立刻进注解，不依赖日志文件）
         run: |
           set -o pipefail
-          TARGETS="cmd_selftest queue_selftest cmd_render_selftest render_state_selftest resources_selftest metal_queue_selftest metal_resources_selftest applogic_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest embed_selftest gate_stack_selftest"
+          TARGETS="cmd_selftest queue_selftest cmd_render_selftest render_state_selftest resources_selftest metal_queue_selftest metal_resources_selftest metal_render_selftest applogic_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest embed_selftest gate_stack_selftest"
           if ! make -C smo/host $TARGETS PY=python3 > /tmp/build.log 2>&1; then
             echo "::error::[macOS] 单测编译/链接失败"
             tail -25 /tmp/build.log | while IFS= read -r l; do echo "::error::[macOS 编译] $l"; done
@@ -289,16 +289,17 @@ jobs:
             BOOT_ARGS=(--romfs /tmp/smo-boot-romfs)
             curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
               -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-shader-index.zip?ref=030c0510162cf4e4d12b1b4837e8e3e8016b02df" \
-              -o /tmp/boot-shader-index.zip
+              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-shaders.zip?ref=bd7600d44df2a8e659d334c5a8560c163b59b290" \
+              -o /tmp/boot-shaders.zip
             python3 - <<'PY'
           import hashlib, zipfile
-          path = '/tmp/boot-shader-index.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '02e40efd0e6e4b3c2f1b94c8368db1b51e17ba6ac4c3298d2fbc3af2f9178ccf'
+          path = '/tmp/boot-shaders.zip'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '1d6a8a637f12b4e275edee50177cdc37c8d38ac182ccaea1a14c5e5856fc78be'
           with zipfile.ZipFile(path) as archive:
               archive.extractall('/tmp/smo-boot-shaders')
           PY
             export SMO_SHADER_IDX=/tmp/smo-boot-shaders/shaders.idx
+            export SMO_SHADER_DIR=/tmp/smo-boot-shaders
           fi
           python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded "${BOOT_ARGS[@]}"
       - name: 构建并打包

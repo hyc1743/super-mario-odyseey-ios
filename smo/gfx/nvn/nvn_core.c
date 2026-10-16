@@ -16,6 +16,13 @@
 #include "nvn_resources.h"
 #include <time.h>
 
+/* Our GPU reports store the real Metal GPU clock converted to nanoseconds. */
+uint64_t nvn_DeviceGetTimestampInNanoseconds(const void *device,const void *counter) {
+    (void)device;uint64_t timestamp=0;
+    if(counter)memcpy(&timestamp,(const uint8_t *)counter+8,sizeof timestamp);
+    return timestamp;
+}
+
 // 宿主侧睡眠：轮询等待用。mingw 有 usleep，其他平台用 nanosleep。
 #if defined(_WIN32)
 #  include <unistd.h>

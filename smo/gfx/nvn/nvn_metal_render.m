@@ -1,0 +1,420 @@
+/* Guest command rendering. Every unsupported state fails with a diagnostic;
+ * no replacement game shaders, dummy bindings or synthetic frames. */
+#import "nvn_metal_private.h"
+#import "nvn_metal_resources.h"
+#include "nvn_cmd_render.h"
+#include "nvn_render_state.h"
+#include "nvn_shader.h"
+#include "nvn_state.h"
+#include "nvn_host.h"
+#include <math.h>
+#include <limits.h>
+
+@interface SMOMetalShader : NSObject
+@property(nonatomic,strong) id<MTLFunction> function;
+@property(nonatomic,strong) NSDictionary *bindings;
+@property(nonatomic,strong) id<MTLArgumentEncoder> arguments;
+@end
+@implementation SMOMetalShader
+@end
+
+@interface SMORenderState : NSObject {
+@public
+    nvn_cmd_targets targets;
+    nvn_blend_state blends[8];
+    nvn_color_state color;
+    nvn_channel_state channel;
+    nvn_depth_state depth;
+    nvn_polygon_state polygon;
+    nvn_vertex_attrib_state attributes[16];
+    nvn_vertex_stream_state streams[16];
+    NVNbufferRange vertex[32],uniforms[6][32],storage[6][32];
+    uint64_t handles[4][6][128];
+    uint64_t texture_pool,sampler_pool;
+    float viewports[16][4],depth_ranges[16][2],blend_color[4];
+    int32_t scissors[16][4];
+    unsigned viewport_count,scissor_count;
+}
+@property(nonatomic,strong) SMOMetalShader *vs;
+@property(nonatomic,strong) SMOMetalShader *fs;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,SMOMetalShader *> *shaders;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,id<MTLRenderPipelineState>> *pipelines;
+@end
+@implementation SMORenderState
+@end
+
+NSObject *nvn_metal_render_state(void) {
+    SMORenderState *s=[SMORenderState new];
+    NVNblendState b;nvn_BlendStateSetDefaults(&b);
+    for(unsigned i=0;i<8;i++)s->blends[i]=nvn_blend_snapshot(&b);
+    NVNcolorState c;nvn_ColorStateSetDefaults(&c);s->color=nvn_color_snapshot(&c);
+    NVNchannelMaskState m;nvn_ChannelMaskStateSetDefaults(&m);s->channel=nvn_channel_snapshot(&m);
+    NVNdepthStencilState d;nvn_DepthStencilStateSetDefaults(&d);s->depth=nvn_depth_snapshot(&d);
+    NVNpolygonState p;nvn_PolygonStateSetDefaults(&p);s->polygon=nvn_polygon_snapshot(&p);
+    for(unsigned i=0;i<16;i++)s->depth_ranges[i][1]=1;
+    s.shaders=[NSMutableDictionary new];s.pipelines=[NSMutableDictionary new];
+    return s;
+}
+void nvn_metal_render_end(SMOGuestEncoder *e) { [e.render endEncoding];e.render=nil; }
+static int reject(const char *what) { NVN_LOG("NVN_METAL_RENDER_UNSUPPORTED %s",what);return 0; }
+static id<MTLTexture> attachment_texture(SMOGuestEncoder *e,const nvn_attachment *a) {
+    if(!a->resource.object)return nil;
+    return nvn_metal_texture(e.device,&a->resource,a->has_view?&a->view:NULL,1);
+}
+static MTLRenderPassDescriptor *pass_for(SMOGuestEncoder *e) {
+    SMORenderState *s=(SMORenderState *)e.renderState;
+    MTLRenderPassDescriptor *p=[MTLRenderPassDescriptor renderPassDescriptor];
+    unsigned active=0;
+    for(int i=0;i<s->targets.count;i++)if(s->targets.colors[i].resource.object){
+        id<MTLTexture> t=attachment_texture(e,&s->targets.colors[i]);if(!t)return nil;
+        if(t.arrayLength!=1 || t.textureType==MTLTextureTypeCube)return nil;
+        p.colorAttachments[i].texture=t;p.colorAttachments[i].loadAction=MTLLoadActionLoad;
+        p.colorAttachments[i].storeAction=MTLStoreActionStore;active++;
+    }
+    if(s->targets.depth.resource.object){
+        id<MTLTexture> t=attachment_texture(e,&s->targets.depth);if(!t || t.arrayLength!=1)return nil;
+        if(t.pixelFormat!=MTLPixelFormatStencil8){
+            p.depthAttachment.texture=t;p.depthAttachment.loadAction=MTLLoadActionLoad;p.depthAttachment.storeAction=MTLStoreActionStore;
+        }
+        if(t.pixelFormat==MTLPixelFormatDepth32Float_Stencil8 || t.pixelFormat==MTLPixelFormatStencil8){
+            p.stencilAttachment.texture=t;p.stencilAttachment.loadAction=MTLLoadActionLoad;p.stencilAttachment.storeAction=MTLStoreActionStore;
+        }
+        active++;
+    }
+    return active?p:nil;
+}
+static int full_scissor(SMORenderState *s,id<MTLTexture> t) {
+    return !s->scissor_count || (s->scissor_count==1 && s->scissors[0][0]<=0 && s->scissors[0][1]<=0 &&
+        (int64_t)s->scissors[0][0]+s->scissors[0][2]>=(int64_t)t.width &&
+        (int64_t)s->scissors[0][1]+s->scissors[0][3]>=(int64_t)t.height);
+}
+static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entry) {
+    SMORenderState *s=(SMORenderState *)e.renderState;
+    NSString *filename=[NSString stringWithUTF8String:entry->msl];
+    NSString *key=filename.stringByDeletingPathExtension;
+    SMOMetalShader *cached=s.shaders[key];if(cached)return cached;
+    const char *directory=getenv("SMO_SHADER_DIR");
+    if(!directory){reject("SMO_SHADER_DIR missing");return nil;}
+    NSString *root=[NSString stringWithUTF8String:directory];
+    if(![filename.lastPathComponent isEqualToString:filename])return nil;
+    NSError *error=nil;
+    NSString *source=[NSString stringWithContentsOfFile:[root stringByAppendingPathComponent:filename]
+        encoding:NSUTF8StringEncoding error:&error];
+    NSData *data=[NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:[key stringByAppendingString:@".bindings.json"]]];
+    NSDictionary *bindings=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:&error]:nil;
+    if(!source || ![bindings isKindOfClass:[NSDictionary class]] || [bindings[@"version"] intValue]!=1 ||
+       ![bindings[@"key"] isEqualToString:key] || [bindings[@"stage"] intValue]!=entry->stage ||
+       ![bindings[@"arguments"] isKindOfClass:[NSArray class]] || [bindings[@"unsupported_arguments"] count]){
+        NVN_LOG("NVN_METAL_SHADER_MISSING key=%s stage=%u",key.UTF8String,entry->stage);return nil;
+    }
+    MTLCompileOptions *options=[MTLCompileOptions new];options.fastMathEnabled=NO;
+    id<MTLLibrary> library=[e.device newLibraryWithSource:source options:options error:&error];
+    id<MTLFunction> function=[library newFunctionWithName:bindings[@"entry"]];
+    if(!function){NVN_LOG("NVN_METAL_SHADER_COMPILE_FAILED key=%s error=%s",key.UTF8String,error.localizedDescription.UTF8String ?: "missing entry");return nil;}
+    SMOMetalShader *result=[SMOMetalShader new];result.function=function;result.bindings=bindings;
+    if([bindings[@"arguments"] count]){
+        result.arguments=[function newArgumentEncoderWithBufferIndex:[bindings[@"argument_buffer"] unsignedIntegerValue]];
+        if(!result.arguments)return nil;
+    }
+    s.shaders[key]=result;
+    NVN_LOG("NVN_METAL_SHADER_READY key=%s stage=%u",key.UTF8String,entry->stage);
+    return result;
+}
+static MTLVertexFormat vertex_format(unsigned fmt) {
+    switch(fmt){
+#define V(n,f) case n:return MTLVertexFormat##f
+    V(1,UCharNormalized);V(2,CharNormalized);V(3,UChar);V(4,Char);
+    V(5,Half);V(6,UShortNormalized);V(7,ShortNormalized);V(8,UShort);V(9,Short);
+    V(10,Float);V(11,UInt);V(12,Int);
+    V(13,UChar2Normalized);V(14,Char2Normalized);V(15,UChar2);V(16,Char2);
+    V(17,Half2);V(18,UShort2Normalized);V(19,Short2Normalized);V(20,UShort2);V(21,Short2);
+    V(22,Float2);V(23,UInt2);V(24,Int2);
+    V(25,UChar3Normalized);V(26,Char3Normalized);V(27,UChar3);V(28,Char3);
+    V(29,Half3);V(30,UShort3Normalized);V(31,Short3Normalized);V(32,UShort3);V(33,Short3);
+    V(34,Float3);V(35,UInt3);V(36,Int3);
+    V(37,UChar4Normalized);V(38,Char4Normalized);V(39,UChar4);V(40,Char4);
+    V(41,Half4);V(42,UShort4Normalized);V(43,Short4Normalized);V(44,UShort4);V(45,Short4);
+    V(46,Float4);V(47,UInt4);V(48,Int4);
+    V(61,UInt1010102Normalized);
+#undef V
+    default:return MTLVertexFormatInvalid;
+    }
+}
+static MTLBlendFactor blend_factor(unsigned factor) {
+    switch(factor){
+#define B(n,f) case n:return MTLBlendFactor##f
+    B(1,Zero);B(2,One);B(3,SourceColor);B(4,OneMinusSourceColor);B(5,SourceAlpha);B(6,OneMinusSourceAlpha);
+    B(7,DestinationAlpha);B(8,OneMinusDestinationAlpha);B(9,DestinationColor);B(10,OneMinusDestinationColor);
+    B(11,SourceAlphaSaturated);B(16,Source1Color);B(17,OneMinusSource1Color);B(18,Source1Alpha);B(19,OneMinusSource1Alpha);
+    B(97,BlendColor);B(98,OneMinusBlendColor);B(99,BlendAlpha);B(100,OneMinusBlendAlpha);
+#undef B
+    default:return (MTLBlendFactor)NSUIntegerMax;
+    }
+}
+static MTLColorWriteMask write_mask(unsigned m) {
+    return (m&1?MTLColorWriteMaskRed:0)|(m&2?MTLColorWriteMaskGreen:0)|
+           (m&4?MTLColorWriteMaskBlue:0)|(m&8?MTLColorWriteMaskAlpha:0);
+}
+static id<MTLRenderPipelineState> pipeline_for(SMOGuestEncoder *e,MTLRenderPassDescriptor *pass) {
+    SMORenderState *s=(SMORenderState *)e.renderState;
+    if(!s.vs)return nil;
+    if(s->color.logic_op!=NVN_LOGIC_OP_COPY || s->color.alpha_func!=NVN_ALPHA_FUNC_ALWAYS){reject("logic/alpha test");return nil;}
+    MTLRenderPipelineDescriptor *d=[MTLRenderPipelineDescriptor new];d.vertexFunction=s.vs.function;d.fragmentFunction=s.fs.function;
+    NSMutableString *key=[NSMutableString stringWithFormat:@"%@:%@",s.vs.bindings[@"key"],s.fs.bindings[@"key"] ?: @"depth"];
+    NSUInteger samples=0;
+    for(unsigned i=0;i<8;i++){
+        id<MTLTexture> tex=pass.colorAttachments[i].texture;
+        if(!tex)continue;
+        if(samples && samples!=tex.sampleCount)return nil;samples=tex.sampleCount;
+        MTLRenderPipelineColorAttachmentDescriptor *a=d.colorAttachments[i];a.pixelFormat=tex.pixelFormat;
+        a.writeMask=write_mask((s->channel.mask>>(4*i))&15);a.blendingEnabled=(s->color.blend_en>>i)&1;
+        nvn_blend_state b=s->blends[i];
+        if(b.advanced_mode || b.eq_rgb<1 || b.eq_rgb>5 || b.eq_a<1 || b.eq_a>5)return nil;
+        a.sourceRGBBlendFactor=blend_factor(b.src_rgb);a.destinationRGBBlendFactor=blend_factor(b.dst_rgb);
+        a.sourceAlphaBlendFactor=blend_factor(b.src_a);a.destinationAlphaBlendFactor=blend_factor(b.dst_a);
+        if(a.sourceRGBBlendFactor==(MTLBlendFactor)NSUIntegerMax || a.destinationRGBBlendFactor==(MTLBlendFactor)NSUIntegerMax ||
+           a.sourceAlphaBlendFactor==(MTLBlendFactor)NSUIntegerMax || a.destinationAlphaBlendFactor==(MTLBlendFactor)NSUIntegerMax)return nil;
+        a.rgbBlendOperation=(MTLBlendOperation)(b.eq_rgb-1);a.alphaBlendOperation=(MTLBlendOperation)(b.eq_a-1);
+        [key appendFormat:@":%u:%lu:%u:%u:%u:%u:%u:%u:%u",i,(unsigned long)tex.pixelFormat,(s->channel.mask>>(4*i))&15,
+            a.blendingEnabled,(unsigned)b.src_rgb,(unsigned)b.dst_rgb,(unsigned)b.src_a,(unsigned)b.dst_a,(unsigned)(b.eq_rgb|(b.eq_a<<4))];
+    }
+    id<MTLTexture> depth=pass.depthAttachment.texture ?: pass.stencilAttachment.texture;
+    if(depth){if(samples && samples!=depth.sampleCount)return nil;samples=depth.sampleCount;}
+    d.rasterSampleCount=samples?:1;
+    d.depthAttachmentPixelFormat=pass.depthAttachment.texture.pixelFormat;
+    d.stencilAttachmentPixelFormat=pass.stencilAttachment.texture.pixelFormat;
+    [key appendFormat:@":%lu:%lu:%lu",(unsigned long)d.rasterSampleCount,(unsigned long)d.depthAttachmentPixelFormat,(unsigned long)d.stencilAttachmentPixelFormat];
+    MTLVertexDescriptor *vd=[MTLVertexDescriptor vertexDescriptor];
+    for(NSDictionary *input in s.vs.bindings[@"vertex_inputs"]){
+        unsigned location=[input[@"location"] unsignedIntValue];if(location>=16)return nil;
+        nvn_vertex_attrib_state a=s->attributes[location];if(a.stream>=16)return nil;
+        nvn_vertex_stream_state stream=s->streams[a.stream];
+        MTLVertexFormat fmt=vertex_format(a.fmt);if(!fmt || !stream.stride)return nil;
+        vd.attributes[location].format=fmt;vd.attributes[location].offset=a.offset;vd.attributes[location].bufferIndex=1+a.stream;
+        vd.layouts[1+a.stream].stride=stream.stride;vd.layouts[1+a.stream].stepFunction=stream.divisor?MTLVertexStepFunctionPerInstance:MTLVertexStepFunctionPerVertex;
+        vd.layouts[1+a.stream].stepRate=stream.divisor?:1;
+        [key appendFormat:@":v%u:%u:%u:%u:%u:%u",location,(unsigned)a.fmt,(unsigned)a.offset,(unsigned)a.stream,stream.stride,stream.divisor];
+    }
+    d.vertexDescriptor=vd;
+    id<MTLRenderPipelineState> cached=s.pipelines[key];if(cached)return cached;
+    NSError *error=nil;cached=[e.device newRenderPipelineStateWithDescriptor:d error:&error];
+    if(!cached){NVN_LOG("NVN_METAL_PIPELINE_FAILED error=%s",error.localizedDescription.UTF8String);return nil;}
+    s.pipelines[key]=cached;return cached;
+}
+
+static int arguments_for(SMOGuestEncoder *e,SMOMetalShader *shader,unsigned stage) {
+    if(!shader || !shader.arguments)return 1;
+    SMORenderState *s=(SMORenderState *)e.renderState;
+    id<MTLArgumentEncoder> encoder=shader.arguments;
+    id<MTLBuffer> args=[e.device newBufferWithLength:encoder.encodedLength options:MTLResourceStorageModeShared];
+    if(!args)return 0;
+    [encoder setArgumentBuffer:args offset:0];
+    for(NSDictionary *arg in shader.bindings[@"arguments"]){
+        unsigned aid=[arg[@"id"] unsignedIntValue];NSString *kind=arg[@"kind"];
+        /* Maxwell bank numbers and texture instruction immediates are not NVN
+         * binding slots. Metadata must carry a verified conversion explicitly. */
+        if(!arg[@"nvn_slot"]){
+            NVN_LOG("NVN_METAL_BINDING_UNRESOLVED stage=%u name=%s",stage,[arg[@"name"] UTF8String]);return 0;
+        }
+        int slot=[arg[@"nvn_slot"] intValue];
+        if([kind isEqualToString:@"cbuf"] || [kind isEqualToString:@"sbuf"]){
+            if(slot<0 || slot>=32)return 0;
+            int storage=[kind isEqualToString:@"sbuf"];
+            NVNbufferRange range=storage?s->storage[stage][slot]:s->uniforms[stage][slot];
+            if(!range.size)return reject("unbound shader buffer");
+            NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,range.address,range.size,&offset);
+            if(!buffer)return 0;
+            [encoder setBuffer:buffer offset:offset atIndex:aid];
+            [e.render useResource:buffer usage:storage?MTLResourceUsageRead|MTLResourceUsageWrite:MTLResourceUsageRead];
+        }else if([kind isEqualToString:@"texture"] || [kind isEqualToString:@"sampler"]){
+            if(slot<0 || slot>=128 || (arg[@"array"] && [arg[@"array"] intValue]!=1))return reject("texture argument array");
+            int sampler=[kind isEqualToString:@"sampler"];
+            int separate=[arg[@"separate"] boolValue];
+            uint64_t handle=s->handles[sampler&&separate?NVN_BIND_SAMPLER:NVN_BIND_TEXTURE][stage][slot];
+            nvn_resource_snapshot resource;
+            if(sampler){
+                if(!nvn_resources_sampler((void *)(uintptr_t)s->sampler_pool,(uint32_t)(handle>>20),&resource))return reject("unregistered sampler descriptor");
+                id<MTLSamplerState> state=nvn_metal_sampler(e.device,&resource);if(!state)return 0;
+                [encoder setSamplerState:state atIndex:aid];
+            }else{
+                nvn_view_state view;
+                if(!nvn_resources_texture((void *)(uintptr_t)s->texture_pool,(uint32_t)(handle&0xfffff),0,&resource,&view))return reject("unregistered texture descriptor");
+                id<MTLTexture> texture=nvn_metal_texture(e.device,&resource,&view,0);if(!texture)return 0;
+                [encoder setTexture:texture atIndex:aid];[e.render useResource:texture usage:MTLResourceUsageRead];
+            }
+        }else return reject("shader support/driver/image argument");
+    }
+    NSUInteger index=[shader.bindings[@"argument_buffer"] unsignedIntegerValue];
+    if(stage==0)[e.render setVertexBuffer:args offset:0 atIndex:index];
+    else [e.render setFragmentBuffer:args offset:0 atIndex:index];
+    return 1;
+}
+static int set_depth_state(SMOGuestEncoder *e) {
+    SMORenderState *s=(SMORenderState *)e.renderState;nvn_depth_state d=s->depth;
+    if(d.df<1 || d.df>8)return 0;
+    MTLDepthStencilDescriptor *desc=[MTLDepthStencilDescriptor new];
+    desc.depthCompareFunction=d.dt?(MTLCompareFunction)(d.df-1):MTLCompareFunctionAlways;
+    desc.depthWriteEnabled=d.dt&&d.dw;
+    if(d.st){
+        unsigned funcs[]={d.sf_f,d.sf_b},fail[]={d.fail_f,d.fail_b},zfail[]={d.zfail_f,d.zfail_b},zpass[]={d.zpass_f,d.zpass_b};
+        for(unsigned i=0;i<2;i++){
+            if(funcs[i]<1||funcs[i]>8||fail[i]<1||fail[i]>8||zfail[i]<1||zfail[i]>8||zpass[i]<1||zpass[i]>8)return 0;
+            MTLStencilDescriptor *st=[MTLStencilDescriptor new];st.stencilCompareFunction=(MTLCompareFunction)(funcs[i]-1);
+            st.stencilFailureOperation=(MTLStencilOperation)(fail[i]-1);st.depthFailureOperation=(MTLStencilOperation)(zfail[i]-1);
+            st.depthStencilPassOperation=(MTLStencilOperation)(zpass[i]-1);
+            if(i)desc.backFaceStencil=st;else desc.frontFaceStencil=st;
+        }
+    }
+    id<MTLDepthStencilState> state=[e.device newDepthStencilStateWithDescriptor:desc];if(!state)return 0;
+    [e.render setDepthStencilState:state];return 1;
+}
+static int prepare_draw(SMOGuestEncoder *e) {
+    SMORenderState *s=(SMORenderState *)e.renderState;
+    MTLRenderPassDescriptor *pass=pass_for(e);if(!pass)return reject("render attachments");
+    id<MTLRenderPipelineState> pipeline=pipeline_for(e,pass);if(!pipeline)return reject("render pipeline");
+    if(!e.render){
+        [e.blit endEncoding];e.blit=nil;
+        e.render=[e.command renderCommandEncoderWithDescriptor:pass];if(!e.render)return 0;
+    }
+    [e.render setRenderPipelineState:pipeline];
+    if(!set_depth_state(e))return 0;
+    if(s->polygon.cull==NVN_FACE_FRONT_AND_BACK)return reject("front and back culling");
+    [e.render setCullMode:s->polygon.cull==NVN_FACE_FRONT?MTLCullModeFront:s->polygon.cull==NVN_FACE_BACK?MTLCullModeBack:MTLCullModeNone];
+    [e.render setFrontFacingWinding:s->polygon.front?MTLWindingCounterClockwise:MTLWindingClockwise];
+    if(s->polygon.mode==NVN_POLYGON_MODE_POINT || s->polygon.offset_en)return reject("polygon point/offset");
+    [e.render setTriangleFillMode:s->polygon.mode==NVN_POLYGON_MODE_LINE?MTLTriangleFillModeLines:MTLTriangleFillModeFill];
+    [e.render setBlendColorRed:s->blend_color[0] green:s->blend_color[1] blue:s->blend_color[2] alpha:s->blend_color[3]];
+    id<MTLTexture> target=pass.depthAttachment.texture;
+    for(unsigned i=0;i<8 && !target;i++)target=pass.colorAttachments[i].texture;
+    if(s->viewport_count>1 || s->scissor_count>1)return reject("multiple viewports/scissors");
+    float *v=s->viewports[0],*z=s->depth_ranges[0];
+    if(s->viewport_count && (!isfinite(v[0])||!isfinite(v[1])||!isfinite(v[2])||!isfinite(v[3])||v[2]<0||v[3]<0))return 0;
+    MTLViewport viewport={0,0,target.width,target.height,z[0],z[1]};
+    if(s->viewport_count){viewport.originX=v[0];viewport.originY=v[1];viewport.width=v[2];viewport.height=v[3];}
+    [e.render setViewport:viewport];
+    int64_t x=0,y=0,right=target.width,bottom=target.height;
+    if(s->scissor_count){int32_t *r=s->scissors[0];x=MAX(0,r[0]);y=MAX(0,r[1]);right=MIN(right,(int64_t)r[0]+r[2]);bottom=MIN(bottom,(int64_t)r[1]+r[3]);}
+    if(x>=(int64_t)target.width||y>=(int64_t)target.height||right<=x||bottom<=y)return 2;
+    [e.render setScissorRect:(MTLScissorRect){(NSUInteger)x,(NSUInteger)y,(NSUInteger)(right-x),(NSUInteger)(bottom-y)}];
+    for(NSDictionary *input in s.vs.bindings[@"vertex_inputs"]){
+        unsigned a=[input[@"location"] unsignedIntValue];if(a>=16)return 0;
+        unsigned stream=s->attributes[a].stream;if(stream>=16)return 0;
+        NVNbufferRange range=s->vertex[stream];NSUInteger offset=0;
+        id<MTLBuffer> buffer=range.size?nvn_metal_buffer(e,range.address,range.size,&offset):nil;
+        if(!buffer)return reject("unbound vertex buffer");
+        [e.render setVertexBuffer:buffer offset:offset atIndex:stream+1];
+    }
+    return arguments_for(e,s.vs,0)&&arguments_for(e,s.fs,1);
+}
+static int primitive_type(int primitive,MTLPrimitiveType *out) {
+    switch(primitive){
+    case NVN_DRAW_PRIMITIVE_POINTS:*out=MTLPrimitiveTypePoint;return 1;
+    case NVN_DRAW_PRIMITIVE_LINES:*out=MTLPrimitiveTypeLine;return 1;
+    case NVN_DRAW_PRIMITIVE_LINE_STRIP:*out=MTLPrimitiveTypeLineStrip;return 1;
+    case NVN_DRAW_PRIMITIVE_TRIANGLES:*out=MTLPrimitiveTypeTriangle;return 1;
+    case NVN_DRAW_PRIMITIVE_TRIANGLE_STRIP:*out=MTLPrimitiveTypeTriangleStrip;return 1;
+    default:return reject("primitive topology");
+    }
+}
+static int copied_array(const void *payload,size_t size,size_t element,int limit,nvn_cmd_array *header,const void **values) {
+    if(size<sizeof *header)return 0;memcpy(header,payload,sizeof *header);
+    if(header->first<0||header->count<0||header->first>limit||header->count>limit-header->first||
+       (size-sizeof *header)/element!=(size_t)header->count)return 0;
+    *values=(const uint8_t *)payload+sizeof *header;return 1;
+}
+int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,size_t size) {
+    SMORenderState *s=(SMORenderState *)e.renderState;
+#define READ(type,name) type name; if(size!=sizeof name)return 0;memcpy(&name,payload,sizeof name)
+    switch(op){
+    case NVN_CMD_SET_RT:{READ(nvn_cmd_targets,p);if(p.count<0||p.count>8)return 0;nvn_metal_render_end(e);s->targets=p;return 1;}
+    case NVN_CMD_CLEAR_COLOR:{
+        READ(nvn_cmd_color,c);if(c.index<0||c.index>=s->targets.count)return 0;if(!c.mask)return 1;
+        if(c.mask!=15)return reject("partial clear color mask");
+        nvn_metal_render_end(e);[e.blit endEncoding];e.blit=nil;
+        MTLRenderPassDescriptor *pass=pass_for(e);id<MTLTexture> target=pass.colorAttachments[c.index].texture;
+        if(!target||!full_scissor(s,target))return reject("scissored clear color");
+        pass.colorAttachments[c.index].loadAction=MTLLoadActionClear;
+        pass.colorAttachments[c.index].clearColor=MTLClearColorMake(c.value[0],c.value[1],c.value[2],c.value[3]);
+        id<MTLRenderCommandEncoder> clear=[e.command renderCommandEncoderWithDescriptor:pass];if(!clear)return 0;[clear endEncoding];return 1;
+    }
+    case NVN_CMD_CLEAR_DEPTH:{
+        READ(nvn_cmd_depth,c);if(!c.depth_mask&&!c.stencil_mask)return 1;
+        nvn_metal_render_end(e);[e.blit endEncoding];e.blit=nil;
+        MTLRenderPassDescriptor *pass=pass_for(e);if(!pass)return 0;
+        id<MTLTexture> tex=pass.depthAttachment.texture ?: pass.stencilAttachment.texture;
+        if(!tex || !full_scissor(s,tex))return reject("scissored clear depth");
+        if(c.depth_mask){if(!pass.depthAttachment.texture)return 0;pass.depthAttachment.loadAction=MTLLoadActionClear;pass.depthAttachment.clearDepth=c.depth;}
+        if(c.stencil_mask){if(c.stencil_mask!=255||!pass.stencilAttachment.texture)return reject("partial stencil clear");
+            pass.stencilAttachment.loadAction=MTLLoadActionClear;pass.stencilAttachment.clearStencil=(uint32_t)c.stencil;}
+        id<MTLRenderCommandEncoder> clear=[e.command renderCommandEncoderWithDescriptor:pass];if(!clear)return 0;[clear endEncoding];return 1;
+    }
+    case NVN_CMD_VIEWPORTS:case NVN_CMD_SCISSORS:case NVN_CMD_DEPTH_RANGES:case NVN_CMD_BIND_VATTR:case NVN_CMD_BIND_VSTREAM:{
+        nvn_cmd_array a;const void *values;size_t element;
+        if(op==NVN_CMD_DEPTH_RANGES)element=8;else if(op==NVN_CMD_BIND_VATTR)element=sizeof(nvn_vertex_attrib_state);
+        else if(op==NVN_CMD_BIND_VSTREAM)element=sizeof(nvn_vertex_stream_state);else element=16;
+        if(!copied_array(payload,size,element,16,&a,&values))return 0;
+        void *dst=op==NVN_CMD_VIEWPORTS?(void *)s->viewports:op==NVN_CMD_SCISSORS?(void *)s->scissors:
+            op==NVN_CMD_DEPTH_RANGES?(void *)s->depth_ranges:op==NVN_CMD_BIND_VATTR?(void *)s->attributes:(void *)s->streams;
+        memcpy((uint8_t *)dst+(size_t)a.first*element,values,(size_t)a.count*element);
+        if(op==NVN_CMD_VIEWPORTS)s->viewport_count=MAX(s->viewport_count,(unsigned)(a.first+a.count));
+        if(op==NVN_CMD_SCISSORS)s->scissor_count=MAX(s->scissor_count,(unsigned)(a.first+a.count));return 1;
+    }
+    case NVN_CMD_BIND_STATE:{
+        READ(nvn_cmd_state,p);size_t expected=0;void *dst=NULL;
+        switch(p.kind){
+        case NVN_STATE_BLEND:{if(p.size!=sizeof(nvn_blend_state))return 0;nvn_blend_state b=nvn_blend_snapshot(p.bytes);s->blends[b.target]=b;return 1;}
+        case NVN_STATE_COLOR:dst=&s->color;expected=sizeof s->color;break;
+        case NVN_STATE_CHANNEL:dst=&s->channel;expected=sizeof s->channel;break;
+        case NVN_STATE_DEPTH:dst=&s->depth;expected=sizeof s->depth;break;
+        case NVN_STATE_POLYGON:dst=&s->polygon;expected=sizeof s->polygon;break;
+        default:return reject("multisample state");
+        }
+        if(p.size!=expected)return 0;memcpy(dst,p.bytes,expected);return 1;
+    }
+    case NVN_CMD_BIND_BUFFER:{
+        nvn_cmd_buffers p;if(size<sizeof p)return 0;memcpy(&p,payload,sizeof p);
+        if(p.kind<0||p.kind>2||p.stage<0||p.stage>=6||p.first<0||p.count<0||p.first>32||p.count>32-p.first||size-sizeof p!=(size_t)p.count*sizeof(NVNbufferRange))return 0;
+        NVNbufferRange *dst=p.kind==NVN_BIND_VERTEX?s->vertex:p.kind==NVN_BIND_UNIFORM?s->uniforms[p.stage]:s->storage[p.stage];
+        memcpy(dst+p.first,(const uint8_t *)payload+sizeof p,(size_t)p.count*sizeof *dst);return 1;
+    }
+    case NVN_CMD_BIND_PROGRAM:{
+        READ(nvn_cmd_program,p);unsigned count=(unsigned)p.resource.words[1];if(count>6)return 0;
+        if(p.stages&1)s.vs=nil;if(p.stages&2)s.fs=nil;
+        for(unsigned i=0;i<count;i++){
+            nvn_shader_match match;const nvn_shader_ent *entry=nvn_shader_find_gpu(p.resource.words[2+i*2],&match);
+            if(!entry)return reject("exact guest shader match");
+            unsigned stage=entry->stage==1?0:entry->stage==5?1:UINT_MAX;
+            if(stage==UINT_MAX)return reject("geometry/tessellation/compute shader");
+            if(!(p.stages&(1u<<stage)))continue;
+            SMOMetalShader *shader=load_shader(e,entry);if(!shader)return 0;
+            if(stage==0)s.vs=shader;else s.fs=shader;
+        }
+        return 1;
+    }
+    case NVN_CMD_SET_POOL:{READ(nvn_cmd_pool,p);if(p.kind==0)s->texture_pool=p.pool;else if(p.kind==1)s->sampler_pool=p.pool;else return 0;return 1;}
+    case NVN_CMD_BIND_HANDLES:{
+        nvn_cmd_handles p;if(size<sizeof p)return 0;memcpy(&p,payload,sizeof p);
+        if(p.kind<0||p.kind>=4||p.stage<0||p.stage>=6||p.first<0||p.first>128||p.count<0||p.count>128-p.first||size-sizeof p!=(size_t)p.count*8)return 0;
+        memcpy(s->handles[p.kind][p.stage]+p.first,(const uint8_t *)payload+sizeof p,(size_t)p.count*8);return 1;
+    }
+    case NVN_CMD_BLEND_COLOR:if(size!=sizeof s->blend_color)return 0;memcpy(s->blend_color,payload,size);return 1;
+    case NVN_CMD_SCRATCH:/* Register spilling is allocated by the Metal compiler/runtime. */return size==sizeof(nvn_cmd_scratch);
+    case NVN_CMD_DRAW:{
+        READ(nvn_cmd_draw,p);if(p.count<0||p.first<0||p.instances<0||p.base_instance<0)return 0;if(!p.count||!p.instances)return 1;
+        MTLPrimitiveType primitive;if(!primitive_type(p.primitive,&primitive))return 0;int ready=prepare_draw(e);if(ready!=1)return ready==2;
+        [e.render drawPrimitives:primitive vertexStart:p.first vertexCount:p.count instanceCount:p.instances baseInstance:p.base_instance];return 1;
+    }
+    case NVN_CMD_DRAW_INDEXED:{
+        READ(nvn_cmd_draw_indexed,p);if(p.count<0||p.instances<0||p.base_instance<0)return 0;if(!p.count||!p.instances)return 1;
+        MTLPrimitiveType primitive;if(!primitive_type(p.primitive,&primitive))return 0;
+        if(p.index_type!=NVN_INDEX_TYPE_UNSIGNED_SHORT&&p.index_type!=NVN_INDEX_TYPE_UNSIGNED_INT)return reject("8-bit indices");
+        uint64_t stride=p.index_type==NVN_INDEX_TYPE_UNSIGNED_SHORT?2:4;if(p.address%stride)return 0;
+        NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,p.address,(uint64_t)p.count*stride,&offset);if(!buffer)return 0;
+        int ready=prepare_draw(e);if(ready!=1)return ready==2;
+        [e.render drawIndexedPrimitives:primitive indexCount:p.count indexType:stride==2?MTLIndexTypeUInt16:MTLIndexTypeUInt32
+            indexBuffer:buffer indexBufferOffset:offset instanceCount:p.instances baseVertex:p.base_vertex baseInstance:p.base_instance];return 1;
+    }
+    default:return reject("render opcode");
+    }
+#undef READ
+}

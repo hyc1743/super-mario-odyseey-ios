@@ -48,6 +48,7 @@ SKIP = {
     # 否则生成的记录桩会和真实现重复定义（链接期报 duplicate symbol）。
     "nvnDeviceBuilderSetDefaults", "nvnDeviceBuilderSetFlags",
     "nvnDeviceInitialize", "nvnDeviceFinalize", "nvnDeviceGetInteger", "nvnDeviceGetProcAddress",
+    "nvnDeviceGetTimestampInNanoseconds",
     "nvnMemoryPoolBuilderSetDefaults", "nvnMemoryPoolBuilderSetDevice",
     "nvnMemoryPoolBuilderSetStorage", "nvnMemoryPoolBuilderSetFlags",
     "nvnMemoryPoolInitialize", "nvnMemoryPoolFinalize", "nvnMemoryPoolMap",

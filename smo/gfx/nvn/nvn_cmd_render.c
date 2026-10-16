@@ -1,6 +1,8 @@
 #include "nvn_cmd_render.h"
 #include "nvn_state.h"
 #include "nvn_host.h"
+#include "nvn_shader.h"
+#include <stdatomic.h>
 
 static void snapshot(nvn_resource_snapshot *out, const void *object, unsigned type) {
     memset(out,0,sizeof *out);
@@ -81,6 +83,9 @@ static void buffers(NVNcommandBuffer *c,int kind,int stage,int first,int count,c
         NVN_DIE("invalid buffer bindings");
     for (int i=0;i<count;++i)
         if (ranges[i].size>UINT64_MAX-ranges[i].address) NVN_DIE("buffer binding overflow");
+    static _Atomic unsigned diagnostics;
+    if(atomic_fetch_add(&diagnostics,1)<24)
+        NVN_LOG("NVN_BUFFER_BINDING kind=%d stage=%d first=%d count=%d",kind,stage,first,count);
     size_t size=sizeof(nvn_cmd_buffers)+(size_t)count*sizeof *ranges;
     nvn_cmd_buffers *p=nvn_cmd_alloc(c,NVN_CMD_BIND_BUFFER,size);
     *p=(nvn_cmd_buffers){kind,stage,first,count};
@@ -107,6 +112,12 @@ void nvn_CommandBufferBindStorageBuffer(NVNcommandBuffer *c,NVNshaderStage stage
 void nvn_CommandBufferBindProgram(NVNcommandBuffer *c,const NVNprogram *program,int stages) {
     nvn_cmd_program *p=nvn_cmd_alloc(c,NVN_CMD_BIND_PROGRAM,sizeof *p);
     snapshot(&p->resource,program,10); p->stages=(uint32_t)stages;
+    static _Atomic unsigned diagnostics;
+    if(atomic_fetch_add(&diagnostics,1)<4 && nvn_shader_count())for(unsigned i=0;i<p->resource.words[1];i++){
+        nvn_shader_match match;const nvn_shader_ent *entry=nvn_shader_find_gpu(p->resource.words[2+2*i],&match);
+        NVN_LOG("NVN_SHADER_BIND_MATCH hit=%d stage=%u offset=%u code_only=%u bytes=%u candidates=%u matches=%u",
+            entry!=NULL,entry?entry->stage:UINT16_MAX,match.offset,match.code_only,match.bytes,match.candidates,match.matches);
+    }
 }
 static void pool(NVNcommandBuffer *c,int kind,const void *object) {
     nvn_cmd_pool p={(uintptr_t)object,kind,0};

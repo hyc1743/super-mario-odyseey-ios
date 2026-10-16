@@ -6,12 +6,16 @@
 #include "nvn_gpu.h"
 #include "nvn_host.h"
 #include "nvn_state.h"
+#include "nvn_cmd_render.h"
+#import "nvn_metal_private.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <unistd.h>
 
 static id<MTLDevice> device;
 static id<MTLCommandQueue> metal_queue;
+static NSObject *render_state;
+id<MTLDevice> nvn_metal_device(void) { return device; }
 static uint64_t submitted;
 static _Atomic uint64_t completed;
 static _Atomic uint64_t first_failure;
@@ -23,15 +27,10 @@ typedef struct completion_node {
 static completion_node *completion_head, *completion_tail;
 static pthread_mutex_t completion_lock=PTHREAD_MUTEX_INITIALIZER;
 
-@interface SMOGuestEncoder : NSObject
-@property(nonatomic, strong) id<MTLCommandBuffer> command;
-@property(nonatomic, strong) id<MTLBlitCommandEncoder> blit;
-@property(nonatomic, strong) NSMutableDictionary<NSString *, id<MTLBuffer>> *buffers;
-@end
 @implementation SMOGuestEncoder
 @end
 
-static id<MTLBuffer> buffer_for(SMOGuestEncoder *e, uint64_t address,
+id<MTLBuffer> nvn_metal_buffer(SMOGuestEncoder *e, uint64_t address,
                                 uint64_t size, NSUInteger *offset) {
     uint64_t base, length;
     if (!nvn_st_pool_range(address, size, &base, &length)) {
@@ -59,6 +58,7 @@ static id<MTLBuffer> buffer_for(SMOGuestEncoder *e, uint64_t address,
     return buffer;
 }
 static id<MTLBlitCommandEncoder> blit_for(SMOGuestEncoder *e) {
+    nvn_metal_render_end(e);
     if (!e.blit) e.blit = [e.command blitCommandEncoder];
     return e.blit;
 }
@@ -67,8 +67,32 @@ static int encode(void *context, uint32_t op, const void *payload, size_t size) 
     if (op == NVN_CMD_BARRIER) {
         if (size != 8) return 0;
         [e.blit endEncoding]; e.blit = nil;
+        nvn_metal_render_end(e);
         return 1;
     }
+    if(op==NVN_CMD_COUNTER){
+        nvn_cmd_counter c;if(size!=sizeof c)return 0;memcpy(&c,payload,sizeof c);
+        if(c.type!=0 && c.type!=16){NVN_LOG("NVN_GPU_COUNTER_UNSUPPORTED type=%llu",(unsigned long long)c.type);return 0;}
+        uint64_t base,length;if(!nvn_st_pool_range(c.address,16,&base,&length))return 0;
+        /* Conservative boundary: drain actual encoded GPU work and use its
+         * GPU clock result. This serializes timestamp reports until counter
+         * sample buffers are implemented; it never substitutes a CPU clock. */
+        [e.blit endEncoding];e.blit=nil;nvn_metal_render_end(e);
+        /* Empty command buffers need not have a GPU timing interval. An
+         * internal ordered blit gives this boundary an actual GPU clock sample. */
+        id<MTLBuffer> marker=[device newBufferWithLength:4 options:MTLResourceStorageModeShared];
+        id<MTLBlitCommandEncoder> clock=[e.command blitCommandEncoder];
+        if(!marker||!clock){[clock endEncoding];return 0;}
+        [clock fillBuffer:marker range:NSMakeRange(0,4) value:0];[clock endEncoding];
+        [e.command commit];[e.command waitUntilCompleted];
+        if(e.command.status!=MTLCommandBufferStatusCompleted)return 0;
+        double gpu=e.command.GPUEndTime;
+        if(!(gpu>0) || gpu>(double)UINT64_MAX/1e9)return 0;
+        NVNcounterData value={0,(uint64_t)(gpu*1e9)};
+        memcpy((void *)(uintptr_t)c.address,&value,sizeof value);
+        e.command=[metal_queue commandBuffer];return e.command!=nil;
+    }
+    if(op>=NVN_CMD_SET_RT)return nvn_metal_render_encode(e,op,payload,size);
     if (op == NVN_CMD_COPY_BUFFER) {
         nvn_cmd_copy c;
         if (size != sizeof c) return 0;
@@ -78,8 +102,8 @@ static int encode(void *context, uint32_t op, const void *payload, size_t size) 
         if ((c.src <= c.dst && c.dst - c.src < c.size) ||
             (c.dst < c.src && c.src - c.dst < c.size)) return 0;
         NSUInteger src_offset, dst_offset;
-        id<MTLBuffer> src = buffer_for(e,c.src,c.size,&src_offset);
-        id<MTLBuffer> dst = buffer_for(e,c.dst,c.size,&dst_offset);
+        id<MTLBuffer> src = nvn_metal_buffer(e,c.src,c.size,&src_offset);
+        id<MTLBuffer> dst = nvn_metal_buffer(e,c.dst,c.size,&dst_offset);
         id<MTLBlitCommandEncoder> blit = blit_for(e);
         if (!src || !dst || !blit) return 0;
         [blit copyFromBuffer:src sourceOffset:src_offset toBuffer:dst
@@ -115,7 +139,7 @@ static int encode(void *context, uint32_t op, const void *payload, size_t size) 
         return 0;
     }
     NSUInteger offset;
-    id<MTLBuffer> dst=buffer_for(e,address,bytes,&offset);
+    id<MTLBuffer> dst=nvn_metal_buffer(e,address,bytes,&offset);
     id<MTLBlitCommandEncoder> blit=blit_for(e);
     if (!staging || !dst || !blit) return 0;
     [blit copyFromBuffer:staging sourceOffset:0 toBuffer:dst destinationOffset:offset size:(NSUInteger)bytes];
@@ -124,17 +148,20 @@ static int encode(void *context, uint32_t op, const void *payload, size_t size) 
 static uint64_t submit(int count, const uint64_t *handles) {
     @autoreleasepool {
         SMOGuestEncoder *e=[SMOGuestEncoder new];
+        e.device=device;e.renderState=render_state;
         e.command=[metal_queue commandBuffer];
         e.buffers=[NSMutableDictionary new];
         if (!e.command) return 0;
         for (int i=0;i<count;++i) {
             if (!nvn_cmd_walk(handles[i],encode,(__bridge void *)e)) {
                 [e.blit endEncoding];
+                nvn_metal_render_end(e);
                 NVN_LOG("NVN_GPU_ENCODING_FAILED handle_index=%d",i);
                 return 0;
             }
         }
         [e.blit endEncoding]; e.blit=nil;
+        nvn_metal_render_end(e);
         uint64_t sequence=++submitted;
         completion_node *node=calloc(1,sizeof *node);
         if (!node) return 0;
@@ -185,6 +212,7 @@ static void initialize(void) {
         device=MTLCreateSystemDefaultDevice();
         metal_queue=[device newCommandQueue];
         if (!metal_queue) { NVN_LOG("NVN_GPU_UNAVAILABLE: Metal device/queue unavailable"); return; }
+        render_state=nvn_metal_render_state();
         static const nvn_gpu_backend backend={submit,poll};
         nvn_gpu_install_backend(&backend);
         NVN_LOG("NVN_GPU_BACKEND device=%s",device.name.UTF8String);
