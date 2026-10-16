@@ -112,6 +112,7 @@ jobs:
       - name: 工具版本
         run: |
           sw_vers
+          uname -m
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
       - name: Metal 探测（runner 有没有可用 GPU —— 决定 Metal 层能不能在 CI 上验）
@@ -238,6 +239,13 @@ jobs:
           python3 smo/ios/tools/embed_inject.py "$Z" .
           # 后面的「上传到哪」按这个开关分流（公开 artifact vs 私有 release）
           echo "SMO_INJECTED=1" >> "$GITHUB_ENV"
+      - name: 真实 ARM64 游戏启动检查（通过后才出包）
+        if: env.SMO_INJECTED == '1'
+        timeout-minutes: 4
+        run: |
+          set -o pipefail
+          make -C smo/host smo_host_embedded
+          python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded
       - name: 构建并打包
         env:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进

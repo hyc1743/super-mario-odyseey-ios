@@ -16,6 +16,7 @@ int g_nmod;
 // ---- 平台层：本机自检的朴素实现 ----
 static uint8_t *g_reserved;
 static unsigned char alias_rw[32768];
+static unsigned char stack_rw[16384];
 #ifndef _WIN32
 #include <sys/mman.h>
 #endif
@@ -33,9 +34,14 @@ void *dm_as_reserve(size_t size) {
 }
 void dm_as_protect(void *p, size_t n, int rw) {
     uintptr_t off = (uintptr_t)p - (uintptr_t)g_reserved;
+    if ((off | n) & 0x3fff) abort();
     if (off < (512ull << 20)) {
         if ((off | n) & 0x3fff) abort();
         for (size_t i = off / 0x4000; i < (off + n) / 0x4000; i++) alias_rw[i] = !!rw;
+    }
+    if (off >= (512ull << 20) && off < (768ull << 20)) {
+        size_t first = (off - (512ull << 20)) / 0x4000;
+        for (size_t i = first; i < first + n / 0x4000; i++) stack_rw[i] = !!rw;
     }
 #ifndef _WIN32
     if (mprotect(p, n, rw ? PROT_READ | PROT_WRITE : PROT_NONE)) abort();
@@ -170,6 +176,30 @@ int main(void) {
     CHK(call(0x2c, UINT64_MAX - 0xfff, 0x2000, 0, 0) != 0, "reject address overflow");
     CHK(call(0x2d, alias, 0x1000, 0, 0) != 0, "reject duplicate unmap");
 
+    printf("== 8. Stack mappings at every 4 KiB offset ==\n");
+    uint64_t stack = (uint64_t)(uintptr_t)g_reserved + (512ull << 20) + 0x20000;
+    for (unsigned i = 0; i < 4; i++) {
+        uint64_t target = stack + i * 0x1000;
+        memset((void *)(heap + i * 0x1000), 0x30 + i, 0x1000);
+        CHK(call(0x04, target, heap + i * 0x1000, 0x1000, 0) == 0, "map stack guest subpage");
+    }
+    CHK(call(0x05, stack + 0x1000, heap + 0x1000, 0x1000, 0) == 0 && stack_rw[8], "partial stack unmap keeps host page writable");
+    CHK(*(uint8_t *)stack == 0x30 && *(uint8_t *)(stack + 0x2000) == 0x32, "stack neighbors survive");
+    call(0x06, (uint64_t)(uintptr_t)mi, 0, stack + 0x1000, 0);
+    CHK(*(uint32_t *)(mi + 0x10) == 0 && *(uint64_t *)(mi + 8) == 0x1000, "stack hole remains exact in QueryMemory");
+    for (unsigned i = 0; i < 4; i++) {
+        if (i != 1) call(0x05, stack + i * 0x1000, heap + i * 0x1000, 0x1000, 0);
+    }
+    CHK(!stack_rw[8], "last stack unmap revokes host page");
+    for (unsigned i = 0; i < 4; i++) {
+        uint64_t target = stack + i * 0x1000;
+        CHK(call(0x04, target, heap, 0x4000, 0) == 0, "map 16 KiB stack across host boundary (device crash)");
+        CHK(memcmp((void *)target, (void *)heap, 0x4000) == 0, "stack contents copied across boundary");
+        CHK(call(0x05, target, heap, 0x4000, 0) == 0 && !stack_rw[8] && !stack_rw[9], "unmap closes both unused host pages");
+    }
+    CHK(call(0x04, stack + 1, heap, 0x1000, 0) != 0, "reject misaligned stack map");
+    CHK(call(0x04, stack, heap, 0, 0) != 0, "reject zero stack size");
+    CHK(call(0x04, stack, heap + dm_guest_heap_cur(), 0x1000, 0) != 0, "reject stack source outside heap");
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");
     return fails != 0;
 }

@@ -235,6 +235,8 @@ int svc_thread(int num, uint64_t *regs) {
         if (t->started) { regs[0] = R_BAD_STATE; return 1; }
         t->started = 1;
         if (pthread_create(&t->pt, NULL, thread_main, t)) die("pthread_create 失败");
+        LOG("GUEST_THREAD_STARTED handle=%#x entry=%#llx stack=%#llx", t->handle,
+            (unsigned long long)t->entry, (unsigned long long)t->stack_top);
         regs[0] = 0;
         return 1;
     }

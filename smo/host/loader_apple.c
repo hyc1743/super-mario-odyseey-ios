@@ -22,6 +22,7 @@
 #include "dm.h"
 #include <mach/mach.h>
 #include <sys/mman.h>
+#include <errno.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <TargetConditionals.h>
@@ -187,7 +188,10 @@ void *dm_as_reserve(size_t size) {                    // 只占地址不占内�
 
 void dm_as_protect(void *p, size_t n, int rw) {
     if (!n) return;
-    if (mprotect(p, n, rw ? (PROT_READ | PROT_WRITE) : PROT_NONE)) die("dm_as_protect(%p, %#zx, %d) 失败", p, n, rw);
+    if (mprotect(p, n, rw ? (PROT_READ | PROT_WRITE) : PROT_NONE)) {
+        int err = errno;
+        die("dm_as_protect(%p, %#zx, %d) errno=%d (%s), host_page=%#zx", p, n, rw, err, strerror(err), dm_as_page_size());
+    }
 }
 
 size_t dm_as_page_size(void) { return (size_t)getpagesize(); }

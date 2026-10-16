@@ -69,13 +69,11 @@ static int map_find(uint64_t a, uint64_t n) {           // 1 基下标；0 = 无
     return 0;
 }
 static void map_add(uint64_t b, uint64_t n, uint64_t src, uint32_t st) {
-    pthread_mutex_lock(&g_map_lock);
     if (g_nmap >= MAX_MAP) die("映射表满");
     g_map[g_nmap].base = b; g_map[g_nmap].size = n; g_map[g_nmap].src = src; g_map[g_nmap].state = st;
     g_nmap++;
-    pthread_mutex_unlock(&g_map_lock);
 }
-static void map_del(int i) { pthread_mutex_lock(&g_map_lock); g_map[i] = g_map[--g_nmap]; pthread_mutex_unlock(&g_map_lock); }
+static void map_del(int i) { g_map[i] = g_map[--g_nmap]; }
 
 // 供诊断/自检用
 uint64_t dm_guest_heap_base(void) { return (uint64_t)(uintptr_t)g_heap; }
@@ -95,6 +93,19 @@ enum { MS_FREE = 0, MS_CODE = 3, MS_HEAP = 5, MS_STACK = 0xB };
 #define ALIAS_PAGES (ALIAS_SZ / GUEST_PAGE)
 static uint8_t g_physical[ALIAS_PAGES];
 static uint64_t g_physical_used;
+
+// Caller holds g_map_lock. Guest stack allocations are 4 KiB aligned; the
+// protection range must cover whole host pages. Revoke only pages without a
+// remaining mapping, so adjacent guest stacks can safely share a host page.
+static void stack_protect(uint64_t addr, uint64_t size, int rw) {
+    size_t page = dm_as_page_size();
+    if (page < GUEST_PAGE || (page & (page - 1))) die("invalid host page size: %#zx", page);
+    uint64_t lo = addr & ~((uint64_t)page - 1);
+    uint64_t hi = (addr + size + page - 1) & ~((uint64_t)page - 1);
+    if (rw) dm_as_protect((void *)(uintptr_t)lo, hi - lo, 1);
+    else for (uint64_t p = lo; p < hi; p += page)
+        if (!map_find(p, page)) dm_as_protect((void *)(uintptr_t)p, page, 0);
+}
 
 static uint64_t physical_map(unsigned num, uint64_t addr, uint64_t size) {
     uint64_t base = (uint64_t)(uintptr_t)g_alias;
@@ -173,27 +184,37 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
     case 0x03: regs[0] = 0; return 0;                   // SetMemoryAttribute
     case 0x04: {                                        // MapMemory(dst, src, size)
         uint64_t dst = regs[0], src = regs[1], size = regs[2];
-        if ((uint8_t *)dst < g_stack || (uint8_t *)dst + size > g_stack + g_stack_cap || map_find(dst, size)) {
+        uint64_t stack = (uint64_t)(uintptr_t)g_stack, heap = (uint64_t)(uintptr_t)g_heap;
+        pthread_mutex_lock(&g_map_lock);
+        if (!size || ((dst | src | size) & (GUEST_PAGE - 1)) ||
+            size > g_stack_cap || dst < stack || dst - stack > g_stack_cap - size ||
+            size > g_heap_cur || src < heap || src - heap > g_heap_cur - size || map_find(dst, size)) {
+            pthread_mutex_unlock(&g_map_lock);
             LOG("MapMemory 目标非法或已占用 %#llx +%#llx", (unsigned long long)dst, (unsigned long long)size);
             regs[0] = 0xDC01;
             return 0;
         }
-        dm_as_protect((void *)dst, size, 1);
+        stack_protect(dst, size, 1);
         memcpy((void *)dst, (void *)src, size);          // 搬移语义
         map_add(dst, size, src, MS_STACK);
+        pthread_mutex_unlock(&g_map_lock);
         regs[0] = 0;
         return 0;
     }
     case 0x05: {                                        // UnmapMemory(dst, src, size)
         uint64_t dst = regs[0], src = regs[1], size = regs[2];
+        pthread_mutex_lock(&g_map_lock);
         int k = map_find(dst, size);
         if (!k || g_map[k - 1].base != dst || g_map[k - 1].size != size || g_map[k - 1].src != src) {
+            pthread_mutex_unlock(&g_map_lock);
             LOG("UnmapMemory 与映射不符 %#llx +%#llx", (unsigned long long)dst, (unsigned long long)size);
             regs[0] = 0xD401;
             return 0;
         }
         memcpy((void *)src, (void *)dst, size);           // 内容搬回源区
         map_del(k - 1);
+        stack_protect(dst, size, 0);
+        pthread_mutex_unlock(&g_map_lock);
         regs[0] = 0;
         return 0;
     }
@@ -202,8 +223,8 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
         uint8_t *a = (uint8_t *)addr;
         uint64_t base, size, state, perm;
         int k;
+        pthread_mutex_lock(&g_map_lock);
         if (addr >= (uint64_t)(uintptr_t)g_alias && addr - (uint64_t)(uintptr_t)g_alias < ALIAS_SZ) {
-            pthread_mutex_lock(&g_map_lock);
             uint64_t i = (addr - (uint64_t)(uintptr_t)g_alias) / GUEST_PAGE;
             uint64_t lo = i, hi = i + 1;
             int mapped = g_physical[i];
@@ -212,7 +233,6 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
             base = (uint64_t)(uintptr_t)g_alias + lo * GUEST_PAGE;
             size = (hi - lo) * GUEST_PAGE;
             state = mapped ? MS_HEAP : MS_FREE; perm = mapped ? 3 : 0;
-            pthread_mutex_unlock(&g_map_lock);
         }
         else if (a >= g_heap && a < g_heap + g_heap_cur) { base = (uint64_t)(uintptr_t)g_heap; size = g_heap_cur; state = MS_HEAP; perm = 3; }
         else if ((k = map_find(addr, 1))) { base = g_map[k - 1].base; size = g_map[k - 1].size; state = g_map[k - 1].state; perm = 3; }
@@ -233,6 +253,7 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
             if (top && addr < top && addr >= top - ssz) { base = top - ssz; size = ssz; state = MS_STACK; perm = 3; }
             else { base = addr & ~0xFFFull; size = 0x1000; state = MS_CODE; perm = 5; }
         }
+        pthread_mutex_unlock(&g_map_lock);
         if (mi) {                                         // MemoryInfo: base(0) size(8) state(0x10) attr(0x14) perm(0x18)
             uint64_t *m = (uint64_t *)mi;
             m[0] = base; m[1] = size;

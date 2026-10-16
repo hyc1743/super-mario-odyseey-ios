@@ -16,6 +16,11 @@ INC = -I. -I../gfx/nvn
 smo_host: $(SRC) dm.h hle.h
 	$(CC) $(CFLAGS) $(INC) -o $@ $(SRC) $(LDFLAGS)
 
+# Execute the exact embedded program used by the IPA, without the iOS UI.
+smo_host_embedded: $(SRC) ../ios/Sources/Embedded.S ../ios/Sources/Embedded.c
+	$(CC) $(CFLAGS) $(INC) -DSMO_EMBED -o $@ $^ \
+	    -Wl,-segprot,__DMsdkW,rw,rw -Wl,-segprot,__DMsubsdk0W,rw,rw -Wl,-segprot,__DMmainW,rw,rw
+
 # 图形层单测的公共依赖。
 #
 # 为什么是一个变量而不是每个目标各写一份：原先三个目标各自抄了一遍文件清单，
