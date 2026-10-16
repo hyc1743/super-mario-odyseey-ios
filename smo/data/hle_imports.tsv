@@ -217,9 +217,9 @@ main	_ZN2nn4diag6detail7LogImplERKNS0_11LogMetaDataEPKcz	diag	sdk	模块内
 main	_ZN2nn4diag6detail7PutImplERKNS0_11LogMetaDataEPKcm	diag	sdk	模块内
 main	_ZN2nn4diag6detail9AbortImplEPKcS3_S3_i	diag	sdk	模块内
 main	_ZN2nn4diag6detail9AbortImplEPKcS3_S3_iPKNS_6ResultES3_z	diag	sdk	模块内
-main	_ZN2nn4lmem15CreateFrameHeapEPvmi	lmem	sdk	模块内(服务客户端，仍需接管)
-main	_ZN2nn4lmem16DestroyFrameHeapEPNS0_6detail8HeapHeadE	lmem	sdk	模块内(服务客户端，仍需接管)
-main	_ZN2nn4lmem21AllocateFromFrameHeapEPNS0_6detail8HeapHeadEmi	lmem	sdk	模块内(服务客户端，仍需接管)
+main	_ZN2nn4lmem15CreateFrameHeapEPvmi	lmem	sdk	模块内
+main	_ZN2nn4lmem16DestroyFrameHeapEPNS0_6detail8HeapHeadE	lmem	sdk	模块内
+main	_ZN2nn4lmem21AllocateFromFrameHeapEPNS0_6detail8HeapHeadEmi	lmem	sdk	模块内
 main	_ZN2nn4nifm10InitializeEv	nifm	sdk	模块内(服务客户端，仍需接管)
 main	_ZN2nn4nifm18IsNetworkAvailableEv	nifm	sdk	模块内(服务客户端，仍需接管)
 main	_ZN2nn4nifm19SetLocalNetworkModeEb	nifm	sdk	模块内(服务客户端，仍需接管)
@@ -865,9 +865,9 @@ subsdk0	_ZN2nn3fgm7Request8FinalizeEv	fgm	sdk	模块内(服务客户端，仍需
 subsdk0	_ZN2nn3fgm7RequestC1Ev	fgm	sdk	模块内(服务客户端，仍需接管)
 subsdk0	_ZN2nn3fgm7RequestD1Ev	fgm	sdk	模块内(服务客户端，仍需接管)
 subsdk0	_ZN2nn4diag6detail9AbortImplEPKcS3_S3_i	diag	sdk	模块内
-subsdk0	_ZN2nn4lmem13CreateExpHeapEPvmi	lmem	sdk	模块内(服务客户端，仍需接管)
-subsdk0	_ZN2nn4lmem13FreeToExpHeapEPNS0_6detail8HeapHeadEPv	lmem	sdk	模块内(服务客户端，仍需接管)
-subsdk0	_ZN2nn4lmem19AllocateFromExpHeapEPNS0_6detail8HeapHeadEm	lmem	sdk	模块内(服务客户端，仍需接管)
+subsdk0	_ZN2nn4lmem13CreateExpHeapEPvmi	lmem	sdk	模块内
+subsdk0	_ZN2nn4lmem13FreeToExpHeapEPNS0_6detail8HeapHeadEPv	lmem	sdk	模块内
+subsdk0	_ZN2nn4lmem19AllocateFromExpHeapEPNS0_6detail8HeapHeadEm	lmem	sdk	模块内
 subsdk0	_ZN2nn4util11ReferSymbolEPKv	util	sdk	模块内
 subsdk0	_ZN2nn5audio12StopAudioOutEPNS0_8AudioOutE	audio	sdk	模块内(服务客户端，仍需接管)
 subsdk0	_ZN2nn5audio13CloseAudioOutEPNS0_8AudioOutE	audio	sdk	模块内(服务客户端，仍需接管)

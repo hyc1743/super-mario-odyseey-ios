@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 """自检：**不需要任何游戏文件**就能跑的测试。CI 用它保证工具链没被改坏。
 
-覆盖四块：
+覆盖五块：
   1. Yaz0 解压（整字节面量流、回引用流、长度扩展分支）
   2. SARC 解析（自造归档，校验名字/偏移/数据）
   3. NSO 头解析
   4. **改写器端到端**：自造一个合成 NSO（含 svc / mrs tpidr_el0 / x18 读写 / SMO 形状跳转表），
      跑 patch_nso.py，再用 rewrite_check.py 校验产物结构自洽。这条最有价值：
      它把「改写器没坏」变成 CI 每次都能证明的事，而不需要游戏文件。
+  5. HLE 接管边界：lmem 本地堆函数保留 SDK 实现，fs / NVN 服务接管仍然有效。
 
 用法：python3 smo/tools/selftest.py
 """
@@ -206,9 +207,42 @@ def test_rewriter():
               (r2.stdout + r2.stderr).strip()[-400:])
 
 
+def test_hle_policy():
+    import gen_hle_force
+    import hle_inventory
+
+    # v0.6.6 真机：本地堆函数被接到返回 0 的桩，SDK 随后解引用空指针。
+    # 同时检查策略、库存及生成的 C，不能只验证生成器与错误清单自洽。
+    symbols = (
+        "_ZN2nn4lmem13CreateExpHeapEPvmi",
+        "_ZN2nn4lmem13FreeToExpHeapEPNS0_6detail8HeapHeadEPv",
+        "_ZN2nn4lmem19AllocateFromExpHeapEPNS0_6detail8HeapHeadEm",
+        "_ZN2nn4lmem15CreateFrameHeapEPvmi",
+        "_ZN2nn4lmem16DestroyFrameHeapEPNS0_6detail8HeapHeadE",
+        "_ZN2nn4lmem21AllocateFromFrameHeapEPNS0_6detail8HeapHeadEmi",
+    )
+    forced = {r[1] for r in gen_hle_force.load_rows()}
+    with open(gen_hle_force.OUT, encoding="utf-8") as f:
+        generated = f.read()
+    with open(gen_hle_force.TSV, encoding="utf-8") as f:
+        inventory = [line.rstrip("\n").split("\t") for line in f]
+    for sym in symbols:
+        check("lmem 使用 SDK 实现：" + sym,
+              hle_inventory.verdict(sym, ["sdk"]) == ("模块内", "lmem")
+              and sym not in forced and sym not in generated
+              and any(len(r) == 5 and r[1] == sym and r[3:] == ["sdk", "模块内"]
+                      for r in inventory))
+    # 服务接管仍必须保留，不能通过关闭整个 HLE 表来修复本地库。
+    fs = "_ZN2nn2fs12MountRomCacheEPKcPvm"
+    check("fs 服务仍需接管", hle_inventory.verdict(fs, ["sdk"])[0]
+          == "模块内(服务客户端，仍需接管)")
+    check("图形入口仍需接管", "nvnBootstrapLoader" in forced)
+
+
 def main():
     for name, fn in (("1. Yaz0", test_yaz0), ("2. SARC", test_sarc),
-                     ("3. NSO 头", test_nso), ("4. 改写器端到端", test_rewriter)):
+                     ("3. NSO 头", test_nso), ("4. 改写器端到端", test_rewriter),
+                     ("5. HLE 接管边界", test_hle_policy)):
         print(f"== {name} ==")
         try:
             fn()

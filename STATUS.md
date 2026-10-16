@@ -2273,3 +2273,23 @@ v0.6.0 把 stderr 落盘后，SMO-stderr.txt 第一次给出系统库的消息�
 
 并把默认分支改成：**每个未实现的 svc 号记录一次**并占位返回成功（不再留垃圾寄存器）。
 `svc_selftest` 补了 `module_of` 空实现（该自检不链装载器）。本机 `make test` 14/14。
+
+## 2.123 v0.6.6 真机闪退：lmem 本地堆函数被误接管
+
+2026-10-16 上传的 `SMO-log-2026-10-16, 23.19.05.txt` 与 `SMO-log-latest.txt`
+内容相同。导出时本次运行还在第 3/6 步；实际崩溃现场保存在「上一次运行」部分：
+
+- SDK 已经过 `nnosInitialize`，在 `nninitInitializeSdkModule` 内调用了
+  `nn::lmem::CreateExpHeap` 和 `nn::lmem::AllocateFromExpHeap` 的 HLE 占位桩。
+- 紧接着 `SIGSEGV`，FAR=0、x0=0，PC 指令 `0xf9400008`（从 x0 指向的地址读取）。
+  该次 sdk 基址 `0x11a0dc000`，PC `0x11a205ccc`，偏移 `+0x129ccc`。
+- `hle_inventory.py` 错把 `lmem` 列为服务家族；6 个 SDK 提供的 ExpHeap / FrameHeap
+  函数因此进了强制接管表，覆盖掉 SDK 原有实现。占位桩返回 0 无法提供有效堆或分配结果。
+
+修复：把 `lmem` 归入本地库，同步修正库存的 6 行，重新生成接管表（447 → 441 条）。
+装载器原有解析顺序会回到本模块或跨模块的 SDK 定义；保留其原生堆管理实现。
+服务型 `sf::hipc` 接管策略本轮保持现有行为，后续若阻塞需按新日志补真实现。
+
+回归：工具链自检增加 6 个 lmem 符号的策略、库存、生成表检查，以及 fs / NVN
+接管仍保留的检查；修复前 6 项失败。Windows 快速回归通过 7 项（含 14 个 C 自检）。
+尚未在 macOS 构建修复后的 IPA，也未在真机验证能否继续完成 SDK 初始化。

@@ -41,12 +41,14 @@ SERVICE_FAMILIES = {
     # 安全 / 系统信息
     "spl", "crypto", "spsm", "tc", "pm", "fatal", "erpt",
     # 其它服务型
-    "time", "tcap", "pdm", "pcm", "htcs", "pl", "lmem", "pcv", "clkrst", "i2c", "pcie",
+    "time", "tcap", "pdm", "pcm", "htcs", "pl", "pcv", "clkrst", "i2c", "pcie",
     "usb", "sdmmc", "smm", "uart", "gpio", "pinmux", "psc", "pwm", "i2c", "spi", "ts",
     "nvnflinger", "nvdrv", "nvmap", "nvhost", "nvgfx", "gpu", "pwm", "avm",
 }
 # 这些是**本地库**（纯计算，跑在内核调用之上）：可以原样执行
-LOCAL_LIBRARIES = {"os", "util", "diag", "mem", "search", "nnex", "libc", "rtld", "gfx", "ro", "profiler"}
+# lmem 是在调用方提供的内存上管理 ExpHeap / FrameHeap 的本地库。
+# v0.6.6 把它误归为服务并强制接到返回 0 的桩，SDK 初始化随即空指针崩溃。
+LOCAL_LIBRARIES = {"os", "util", "diag", "mem", "lmem", "search", "nnex", "libc", "rtld", "gfx", "ro", "profiler"}
 
 
 def family_of(sym):
