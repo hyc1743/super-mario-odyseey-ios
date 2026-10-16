@@ -18,6 +18,8 @@ enum { NVN_PROG_NSTAGES = 1, NVN_PROG_STAGE_BASE = 2 };
 typedef struct { uint64_t data; const void *control; } nvn_shader_data;
 _Static_assert(sizeof(nvn_shader_data) == 16, "NVNshaderData ABI");
 
+// Entry pointers survive index growth and removal of other objects. Callers
+// synchronize use/destruction of the same object; reset invalidates all entries.
 nvn_st_ent *nvn_st_new(void *obj, uint32_t type);
 nvn_st_ent *nvn_st_get(const void *obj, uint32_t type);
 void        nvn_st_del(void *obj, uint32_t type);

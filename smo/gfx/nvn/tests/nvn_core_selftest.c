@@ -3,6 +3,23 @@
 // 所以对象内容是什么、多大都无所谓 —— 这正是不依赖 NVN 结构布局的好处）。
 #include "../nvn_host.h"
 #include "../nvn_state.h"
+#include <pthread.h>
+
+enum { STATE_WORKERS = 4, STATE_OBJECTS = 4096 };
+static uint8_t state_keys[STATE_WORKERS][STATE_OBJECTS];
+static nvn_st_ent *state_entries[STATE_WORKERS][STATE_OBJECTS];
+static void *create_states(void *arg) {
+    unsigned worker = (unsigned)(uintptr_t)arg;
+    for (unsigned i = 0; i < STATE_OBJECTS; i++) {
+        nvn_st_ent *entry = nvn_st_new(&state_keys[worker][i], 42);
+        if (!entry) return (void *)1;
+        entry->v[0] = worker * STATE_OBJECTS + i;
+        entry->v[15] = ~entry->v[0];
+        state_entries[worker][i] = entry;
+        if (nvn_st_get(&state_keys[worker][i], 42) != entry) return (void *)1;
+    }
+    return NULL;
+}
 
 static int fails;
 #define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); if (!_ok) fails++; } while (0)
@@ -190,6 +207,44 @@ int main(void) {
         "texture cannot exceed pool bounds");
     nvn_st_reset();
     CHK(nvn_st_count() == 0, "清空状态表");
+    // Native particle-resource loading exceeded the former 1024-entry limit.
+    // Existing pointers must survive growth and unrelated object destruction.
+    uint8_t anchor_key;
+    nvn_st_ent *anchor = nvn_st_new(&anchor_key, 41);
+    anchor->v[15] = UINT64_MAX;
+    pthread_t workers[STATE_WORKERS];
+    unsigned launched = 0;
+    for (; launched < STATE_WORKERS; launched++)
+        if (pthread_create(&workers[launched], NULL, create_states, (void *)(uintptr_t)launched)) break;
+    CHK(launched == STATE_WORKERS, "launch concurrent state writers");
+    int writers_ok = 1;
+    for (unsigned w = 0; w < launched; w++) {
+        void *result = NULL;
+        if (pthread_join(workers[w], &result) || result) writers_ok = 0;
+    }
+    CHK(writers_ok && nvn_st_count() == 1 + STATE_WORKERS * STATE_OBJECTS,
+        "16384 concurrent creations exceed old limit without lost entries");
+    int entries_ok = 1;
+    for (unsigned w = 0; w < launched; w++) for (unsigned i = 0; i < STATE_OBJECTS; i++) {
+        const nvn_st_ent *entry = nvn_st_get(&state_keys[w][i], 42);
+        uint64_t expected = w * STATE_OBJECTS + i;
+        if (!entry || entry != state_entries[w][i] || entry->v[0] != expected || entry->v[15] != ~expected)
+            entries_ok = 0;
+    }
+    CHK(entries_ok && nvn_st_get(&anchor_key, 41) == anchor && anchor->v[15] == UINT64_MAX,
+        "rehashing preserves all state bytes and retained entry pointers");
+    for (unsigned w = 0; w < launched; w++) for (unsigned i = 0; i < STATE_OBJECTS; i += 2)
+        nvn_st_del(&state_keys[w][i], 42);
+    CHK(nvn_st_count() == 1 + STATE_WORKERS * STATE_OBJECTS / 2
+        && !nvn_st_get(&state_keys[0][0], 42)
+        && nvn_st_get(&state_keys[0][1], 42) == state_entries[0][1]
+        && nvn_st_get(&anchor_key, 41) == anchor, "deletion preserves other entries and pointers");
+    CHK(nvn_st_new(&anchor_key, 43) == anchor && !anchor->v[15]
+        && !nvn_st_get(&anchor_key, 41) && nvn_st_reused() == 1,
+        "type reuse clears all 16 state words");
+    CHK(nvn_st_iter(nvn_st_count(), NULL) == NULL, "enumeration stops at object count");
+    nvn_st_reset();
+    CHK(nvn_st_count() == 0 && !nvn_st_iter(0, NULL), "reset releases expanded state table");
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");
     return fails != 0;
 }

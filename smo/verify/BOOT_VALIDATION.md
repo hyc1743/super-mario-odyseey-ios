@@ -162,3 +162,15 @@ coherent and uses a full ordering fence; instruction invalidation uses Darwin's
 sys_icache_invalidate. Metal resource synchronization is outside this change.
 Force-table consistency and the host-boundary regression pass locally; native
 startup still needs to confirm this path and reach 60 presentation requests.
+
+Run `38944680623` passes the cache boundary and reaches particle initialization.
+The NVN state table fills its fixed 1024 slots; MemoryPool/Buffer creation then
+loses state, BufferGetAddress returns zero and nn::vfx::Primitive writes near
+zero at main+0xb513e8. Replace the fixed table with a growing chained hash index
+and stable heap entries. A map mutex protects concurrent index mutation by guest
+main/resource threads. Growth and deletion no longer move retained entries;
+reinitialization clears all 16 state words (formerly only 12 were cleared).
+Same-object use/destruction remains caller-synchronized. Regression creates
+16,384 objects on four threads, checks every entry and retained pointer, deletes
+half, tests type reuse and resets the expanded table. Core/interface/replay and
+texture regressions pass locally. Native startup validation follows.
