@@ -34,7 +34,7 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 两卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0/.1`（3.2+2.3 GB，4636 文件）（第二十六轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.4.3 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮） |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.0 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -1970,3 +1970,30 @@ CI secret `SMO_PRIVATE_TOKEN` 目前用的是本机 **Git Credential Manager 里
 （scopes: gist / repo / workflow）。能用，但权限偏大，且 GCM 重新登录时可能被轮换 ——
 那天构建会突然 401。换法：建一个 classic PAT（只勾 `repo`），
 `SMO_CI_TOKEN=<PAT> python smo/ios/tools/set_ci_secret.py hyc1743/super-mario-odyssey-ios SMO_PRIVATE_TOKEN`。
+
+## 2.110 真机首跑的第一批问题（都已修，都补了断言）
+
+用户实测：**不放资源能启动；放上资源一打开就闪退**，而且崩后拿不到任何日志。
+两个根因都是「工具悄悄失效」——上真机之前，本机所有测试都是绿的：
+
+1. **日志落盘是假的**：`logbuf.c` 里 `g_file` 只被 `fopen` 打开，`dm_log_emit` 从来没写过它 ——
+   崩溃后 `SMO-log-live.txt` 是 0 字节。现在每行写盘并 `fflush`；`applogic_selftest` 新增断言
+   「`dm_log_set_file` 之后文件里必须有内容」（上一版会 0 字节，能抓住）。
+2. **容器在手机上从没展开**：`prepare_phone_package.py` 打的包是
+   `SMO Resource/RomFS/RomFS.smoa.0|.1`（卷在 `RomFS` 目录里），而展开逻辑只在
+   「目录里没有 `RomFS` 子目录」时才动手 —— 我们自己的包正好被跳过：`RomFS/` 里只有两个卷、
+   一个游戏文件都没有，游戏一读文件就崩。
+   判断挪进 C 的 `smoarc_plan()`（三种布局都认），`smoarc_selftest` 覆盖三种形状 +
+   「只有目录树没有卷 → 不重复展开」。这段以前是**没测试的 ObjC 代码**，正是它出错。
+
+顺带：`smoarc_extract_cb()` 进度回调（5.5 GB 展开每 100 个文件一行）；展开完写 `.smoa-done`
+标记；进游戏前先确认 RomFS 里真有内容（没有就停在明确报错上，而不是崩得莫名其妙）。
+
+## 2.111 版本号与发版口径（v0.5.0）
+
+- **分支推送**：版本号 `0.1.<run 号>`。分支没有版本来源 —— 写死 `0.1.0` 时真机上分不清装的是哪一版，
+  而 git SHA 又不能进 `CFBundleShortVersionString`（只允许数字与点）
+- **tag 推送**：版本号就是 tag。公开仓仍然建 release 记下版本（但内嵌版的成品里含游戏程序，
+  所以**不附产物**）；成品进**私有仓同名 release**，资产名 `SMOMobile-<版本>.ipa`
+- 非 tag 的分支构建：都进私有仓 `build-latest`，资产名带 run 号 + 短 sha（对照哪次提交）
+- **v0.5.0** = 第一条能真机跑的出包链路：公开 runner 免费构建 + 内嵌 + 容器修复 + 真机日志落盘

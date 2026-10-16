@@ -285,16 +285,23 @@ jobs:
           path: smo/ios/out/SMOMobile-shell.ipa
           if-no-files-found: error
       - name: 内嵌版 → 私有仓 release（公开仓只留空壳）
-        # 公开 runner 免费出包，成品只进私有仓：tag `build-latest` 下的 release 资产，
-        # 名字带 run 号与短 sha（每次构建都留得下，也方便对照是哪次提交）。
+        # 公开 runner 免费出包，成品只进私有仓。两种命名的区别：
+        #   tag 推送（v0.5.0）      → 私有仓也建同名 release（v0.5.0），资产叫 SMOMobile-0.5.0.ipa
+        #   分支推送（修 bug 时）   → 都进 build-latest，资产带 run 号与短 sha，方便对照哪次提交
         if: env.SMO_INJECTED == '1' && env.SMO_PRIVATE_TOKEN != ''
-        env:
-          SMO_TAG: build-latest
         run: |
           set -o pipefail
           IPA=smo/ios/out/SMOMobile-shell.ipa
           SHA7=$(echo "${{ github.sha }}" | cut -c1-7)
-          NAME="SMOMobile-embed-r${{ github.run_number }}-${SHA7}.ipa"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            SMO_TAG="${{ github.ref_name }}"
+            NAME="SMOMobile-${SMO_TAG#v}.ipa"
+            TITLE="内嵌版 ${SMO_TAG}"
+          else
+            SMO_TAG=build-latest
+            NAME="SMOMobile-embed-r${{ github.run_number }}-${SHA7}.ipa"
+            TITLE="内嵌版构建（公开 runner）"
+          fi
           API="https://api.github.com/repos/$PRIVATE_REPO"
           UP="https://uploads.github.com/repos/$PRIVATE_REPO"
           AUTH="Authorization: Bearer $SMO_PRIVATE_TOKEN"
@@ -302,15 +309,27 @@ jobs:
           if [ -z "$REL_ID" ]; then
             echo "建 release $SMO_TAG"
             REL_ID=$(curl -sS -X POST -H "$AUTH" -H "Content-Type: application/json" "$API/releases" \
-              -d "{\"tag_name\":\"$SMO_TAG\",\"name\":\"内嵌版构建（公开 runner）\",\"prerelease\":true,\"body\":\"未签名 IPA，含游戏程序，仅本仓可见。下载 → 自签 → 覆盖安装。\"}" \
+              -d "{\"tag_name\":\"$SMO_TAG\",\"name\":\"$TITLE\",\"prerelease\":true,\"body\":\"未签名 IPA，含游戏程序，仅本仓可见。下载 → 自签 → 覆盖安装。\"}" \
               | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
           fi
           echo "release id = $REL_ID；上传 $NAME（$(wc -c < "$IPA") 字节）"
           curl -sS --fail-with-body -X POST -H "$AUTH" -H "Content-Type: application/octet-stream" \
                --data-binary @"$IPA" "$UP/releases/$REL_ID/assets?name=$NAME" -o /tmp/asset.json
           python3 -c "import json;d=json.load(open('/tmp/asset.json'));print('已上传：',d.get('browser_download_url') or d)"
-      - name: 打 tag 时发 Release
-        # 内嵌版不入公开 release（含游戏程序）—— 它走上面的私有仓上传
+      - name: 打 tag 时发 Release（内嵌版：只记版本，不附产物）
+        # 含游戏程序的包不发公开 release —— 它在上一步传到了私有仓。
+        # 这里仍然建 release：版本历史在公开仓能看全，别人也能知道这一版做过什么。
+        if: startsWith(github.ref, 'refs/tags/') && env.SMO_INJECTED == '1'
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            这一版的成品**自带游戏程序**（内嵌），所以**不放公开产物**：
+            未签名 IPA 在私有仓的 release 里（同一 tag），下载后用自己的证书自签安装。
+
+            本仓仍然不含任何游戏内容：仓库里没有游戏程序、着色器、美术、音频、文本或数据表，
+            公开 artifact 也是空的。构建时由私有仓的输入包临时提供，只在 runner 内存/临时磁盘上出现。
+      - name: 打 tag 时发 Release（空壳版：附 IPA）
         if: startsWith(github.ref, 'refs/tags/') && env.SMO_INJECTED != '1'
         uses: softprops/action-gh-release@v2
         with:
