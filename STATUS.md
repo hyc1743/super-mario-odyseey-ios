@@ -34,7 +34,7 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 两卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0/.1`（3.2+2.3 GB，4636 文件）（第二十六轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.1 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.4 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -2023,3 +2023,31 @@ sdk: DT_INIT +0x24（init_array 103 项）
   地址、PC/LR/FP 与帧链用 `dm_log_raw()`（只调 `write(2)`，异步信号安全）写进 `SMO-log-live.txt`
   —— 真机上「崩了就什么都没有」的时代结束
 - `logbuf` 加 `dm_log_raw()`（O_APPEND 裸 fd）；单测补「裸写也进同一文件」断言
+
+## 2.113 真机第三崩：客体线程环境（TLS/TLR）没建就跑模块构造函数（v0.5.4）
+
+v0.5.2 的崩溃现场（PC/LR/帧链）把范围收到 sdk 代码段内，坏地址是 **0x1f8**。
+反汇编对不上 PC —— 说明现场还缺东西；于是 v0.5.3 又补了 ESR/FAR + 寄存器 + PC 附近指令字。
+
+但 0x1f8 这个数字本身就是答案：`guest_thread_init()` 里有一行
+
+```c
+*(void **)(tlr + 0x1f8) = tlr + TLR_SIZE;      // 当前线程对象（Horizon: tpidrro_el0 + 0x1f8）
+```
+
+客体构造函数第一时间要读「当前线程对象」，而 `guest_thread_init()`（建 x18 / TLS / TLR / 门）
+在 `host_boot()` 里排在 `run_module_inits()` 后面 —— TLR 为空，读 +0x1f8 就是访问地址 0x1f8。
+
+修法：
+- `host_boot()` 顺序改为 keys → load → 主线程登记 → **客体线程环境** → 模块构造函数 → 入口
+  （真实 rtld 也是这个次序：先建线程/TLS，再跑 init_array）
+- `dm_boot_mark(stage)`：1 = 主线程已登记，2 = 客体线程环境已就绪；`run_module_inits()`
+  在 stage < 2 时直接红字说明白（前两轮事故都是它没被满足）
+- v0.5.3 的崩溃现场增强保留（ESR/FAR + 寄存器 + 指令字），下一次任何崩溃都能一次定位
+
+## 2.114 容器展开失败要说清楚原因（v0.5.3）
+
+真机上只看到 `展开结果：-2`，分不清是空间不够还是卷不完整。`smoarc_error()` 现在给出：
+卷打不开 / 卷头不是 SMOA / 读卷中断 / 输出文件打不开（空间？）/ 写文件失败（空间不够）/
+写盘没落稳 / 条目 CRC 不符（卷不完整或拷贝被截断）。同时检查 `fwrite` 与 `fflush/ferror` ——
+磁盘写满不再静默产出半截文件。`smoarc_selftest` 补断言「原因里必须写清楚是 CRC」。

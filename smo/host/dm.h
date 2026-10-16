@@ -126,5 +126,10 @@ void guest_thread_init(void);
 // CLI 宿主与 iOS App 都调它 —— 顺序写两份就会漂移（真机首跑实测：App 里 inits 排在主线程登记前面，必崩）。
 // 成功返回入口函数指针；失败（找不到符号）返回 NULL。
 void *host_boot(const char *dir, const char *const *mods, unsigned nmods, const char *entry);
-void dm_boot_mark_main_thread(void);      // host_boot 在用 svc_thread_main_init 登记之后置位（loader_core.c 用它盯不变量）
+// 引导阶段标记（host_boot 在每一步之后置位；loader_core.c 用它盯「客体代码之前的必要条件」）：
+//   1 = 主线程已登记（svc_thread_main_init）
+//   2 = 客体线程环境已就绪（guest_thread_init：x18 / TLS / TLR / 门）
+// 客体代码（含模块构造函数）必须等到 2。真机第三轮就栽在这：TLS/TLR 没建，sdk 构造函数读
+// tpidrro_el0+0x1f8（当前线程对象）时访问 0x1f8 崩溃。
+void dm_boot_mark(int stage);
 void unimpl_report(void);
