@@ -7,7 +7,7 @@
 #include "hle.h"
 
 // 通用桩：第一次调用打印一行，返回 0（与参考项目对「没有实现的导入」的处理一致）
-static unsigned g_stub_seen[333];
+static unsigned g_stub_seen[335];
 static uint64_t hle_stub_default(const char *what, const char *why, unsigned i) {
     if (!g_stub_seen[i]++) LOG("HLE 桩被调用：%s —— %s", what, why);
     return 0;
@@ -347,6 +347,8 @@ static uint64_t hle_s329(void);
 static uint64_t hle_s330(void);
 static uint64_t hle_s331(void);
 static uint64_t hle_s332(void);
+static uint64_t hle_s333(void);
+static uint64_t hle_s334(void);
 
 static uint64_t hle_s0(void) { return hle_stub_default("_ZN2nn2fs10CreateFileEPKcl", "模块内(服务客户端，仍需接管)；家族 nn::fs；main 引用", 0); }
 static uint64_t hle_s1(void) { return hle_stub_default("_ZN2nn2fs10DeleteFileEPKc", "模块内(服务客户端，仍需接管)；家族 nn::fs；main 引用", 1); }
@@ -681,6 +683,8 @@ static uint64_t hle_s329(void) { return hle_stub_default("nndiagStartup", "宿�
 static uint64_t hle_s330(void) { return hle_stub_default("_ZN2nn3aoc10InitializeEv", "宿主接管 SDK 初始化：追加内容查询由宿主提供，不连接 aoc；家族 nn::sdkinit；sdk 引用", 330); }
 static uint64_t hle_s331(void) { return hle_stub_default("_ZN2nn4pctl10InitializeEv", "宿主接管 SDK 初始化：宿主不连接家长控制服务；家族 nn::sdkinit；sdk 引用", 331); }
 static uint64_t hle_s332(void) { return hle_stub_default("_ZN2nn4diag34InitializeApplicationAbortObserverEv", "宿主接管 SDK 初始化：崩溃由宿主信号处理器记录；家族 nn::sdkinit；sdk 引用", 332); }
+static uint64_t hle_s333(void) { return hle_stub_default("_ZN2nn4diag6detail9AbortImplEPKcS3_S3_i", "宿主接管 SDK 初始化：原始致命中止由宿主记录，避免客体回溯递归中止；家族 nn::sdkinit；sdk 引用", 333); }
+static uint64_t hle_s334(void) { return hle_stub_default("_ZN2nn4diag6detail9AbortImplEPKcS3_S3_iPKNS_6ResultES3_z", "宿主接管 SDK 初始化：宿主记录致命错误码和原始调用栈；家族 nn::sdkinit；sdk 引用", 334); }
 
 const hle_force_ent g_hle_force[] = {
     {"_ZN2nn2fs10CreateFileEPKcl", (void *)(uintptr_t)hle_s0, "模块内(服务客户端，仍需接管)；家族 nn::fs；main 引用"},
@@ -1016,5 +1020,7 @@ const hle_force_ent g_hle_force[] = {
     {"_ZN2nn3aoc10InitializeEv", (void *)(uintptr_t)hle_s330, "宿主接管 SDK 初始化：追加内容查询由宿主提供，不连接 aoc；家族 nn::sdkinit；sdk 引用"},
     {"_ZN2nn4pctl10InitializeEv", (void *)(uintptr_t)hle_s331, "宿主接管 SDK 初始化：宿主不连接家长控制服务；家族 nn::sdkinit；sdk 引用"},
     {"_ZN2nn4diag34InitializeApplicationAbortObserverEv", (void *)(uintptr_t)hle_s332, "宿主接管 SDK 初始化：崩溃由宿主信号处理器记录；家族 nn::sdkinit；sdk 引用"},
+    {"_ZN2nn4diag6detail9AbortImplEPKcS3_S3_i", (void *)(uintptr_t)hle_s333, "宿主接管 SDK 初始化：原始致命中止由宿主记录，避免客体回溯递归中止；家族 nn::sdkinit；sdk 引用"},
+    {"_ZN2nn4diag6detail9AbortImplEPKcS3_S3_iPKNS_6ResultES3_z", (void *)(uintptr_t)hle_s334, "宿主接管 SDK 初始化：宿主记录致命错误码和原始调用栈；家族 nn::sdkinit；sdk 引用"},
 };
-const unsigned g_hle_force_n = 333;
+const unsigned g_hle_force_n = 335;

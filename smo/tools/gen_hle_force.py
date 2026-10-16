@@ -53,6 +53,8 @@ SDK_STARTUP = {
     "_ZN2nn3aoc10InitializeEv": "追加内容查询由宿主提供，不连接 aoc",
     "_ZN2nn4pctl10InitializeEv": "宿主不连接家长控制服务",
     "_ZN2nn4diag34InitializeApplicationAbortObserverEv": "崩溃由宿主信号处理器记录",
+    "_ZN2nn4diag6detail9AbortImplEPKcS3_S3_i": "原始致命中止由宿主记录，避免客体回溯递归中止",
+    "_ZN2nn4diag6detail9AbortImplEPKcS3_S3_iPKNS_6ResultES3_z": "宿主记录致命错误码和原始调用栈",
 }
 
 
