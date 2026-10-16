@@ -436,9 +436,20 @@ uint64_t nvn_TextureInitialize(uint64_t obj, uint64_t builder, uint64_t a2, uint
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *b = need(ARG_OBJ(builder), NVN_T_TEXB, "TextureInitialize(builder)");
     uint64_t size = texture_size(b);
-    if (!size) return NVN_FALSE;
+    if (!size) {
+        NVN_LOG("NVN_TEXTURE_INIT_FAILED object=%p reason=layout format=%llu target=%llu size=%llux%llux%llu levels=%llu",
+            ARG_OBJ(obj),(unsigned long long)b->v[5],(unsigned long long)b->v[7],
+            (unsigned long long)b->v[1],(unsigned long long)b->v[2],(unsigned long long)b->v[3],(unsigned long long)b->v[4]);
+        return NVN_FALSE;
+    }
     nvn_st_ent *p = need(ARG_OBJ(b->v[9]), NVN_T_POOL, "TextureInitialize(pool)");
-    if (!p || b->v[10] > p->v[POOL_SIZE] || size > p->v[POOL_SIZE] - b->v[10]) return NVN_FALSE;
+    if (!p || b->v[10] > p->v[POOL_SIZE] || size > p->v[POOL_SIZE] - b->v[10]) {
+        NVN_LOG("NVN_TEXTURE_INIT_FAILED object=%p reason=storage format=%llu target=%llu size=%llux%llux%llu levels=%llu bytes=%llu offset=%llu pool_bytes=%llu",
+            ARG_OBJ(obj),(unsigned long long)b->v[5],(unsigned long long)b->v[7],
+            (unsigned long long)b->v[1],(unsigned long long)b->v[2],(unsigned long long)b->v[3],(unsigned long long)b->v[4],
+            (unsigned long long)size,(unsigned long long)b->v[10],(unsigned long long)(p?p->v[POOL_SIZE]:0));
+        return NVN_FALSE;
+    }
     nvn_st_ent *t = nvn_st_new(ARG_OBJ(obj), NVN_T_TEX);
     if (!t) return NVN_FALSE;
     memcpy(t->v, b->v, sizeof t->v);
@@ -697,7 +708,7 @@ uint64_t nvn_ProgramSetShaders(uint64_t prog, uint64_t count, uint64_t stages, u
         NVN_LOG("ProgramSetShaders stages=%d first_data=%#llx", n,
                 (unsigned long long)e->v[NVN_PROG_STAGE_BASE]);
     }
-    if (g_shader_sets<=3 && nvn_shader_count()) {
+    if (g_shader_sets<=24 && nvn_shader_count()) {
         for (int i=0;i<n;++i) {
             uint64_t address=e->v[NVN_PROG_STAGE_BASE+2*i];
             nvn_shader_match match;
