@@ -64,11 +64,11 @@ static void RunHost(void) {
     NSURL *docs2 = [fm2 URLForDirectory:NSDocumentDirectory inDomain:NSUserDomainMask
                       appropriateForURL:nil create:NO error:nil];
     if (docs2) {
-        char vols[8][1024], target[1024], base[1024];
-        unsigned nvols = smoarc_plan(docs2.path.UTF8String, vols, 8, target, sizeof target,
+        char vols[24][1024], target[1024], base[1024];   // 卷上限 24：小卷（512 MB/1 GB）也够用
+        unsigned nvols = smoarc_plan(docs2.path.UTF8String, vols, 24, target, sizeof target,
                                      base, sizeof base);
         if (nvols) {
-            const char *volp[8];
+            const char *volp[24];
             for (unsigned i = 0; i < nvols; i++) volp[i] = vols[i];
             NSString *targetS = [NSString stringWithUTF8String:target];
             // 标记放在 RomFS 的**父目录**：三种形状下 target 都是「.../RomFS」，父目录即包装目录。

@@ -14,7 +14,9 @@
 用法：
     prepare_phone_package.py [--rewrite work/rewrite] [--out out/smo-phone-package]
                              [--romfs work/game/RomFS]     # 给了就硬拷 RomFS（慢）
-                             [--pack-romfs]                # 不拷几千个小文件，打成 RomFS.smoa.0/.1 两卷
+                             [--pack-romfs]                # 不拷几千个小文件，打成 RomFS.smoa.0/.1… 若干卷
+                             [--vol-mb 1024]               # 每卷上限（默认 1 GB：单个大文件在某些
+                                                           #   拷贝路径上会坏/被截断，实测 3.2 GB 就是）
                                                            # （App 首次启动自动展开，拷手机只有两个文件）
                              [--no-dylib]                  # 跳过 Guest.framework
                              [--guest-zip <路径>]           # 额外把 Guest.framework 压成 zip 并打印 sha256
@@ -36,6 +38,11 @@ def main():
     no_dylib = False
     argv = sys.argv[1:]
     pack_romfs = "--pack-romfs" in argv
+    vol_mb = 1024                                   # 每卷上限（MB）。1 GB 是踩过坑后的默认值：
+                                                    # 3.2 GB 的卷拷进手机后第 1 条 CRC 就不对。
+    for i, a in enumerate(argv):
+        if a == "--vol-mb" and i + 1 < len(argv):
+            vol_mb = int(argv[i + 1])
     for i, a in enumerate(argv):
         if a == "--rewrite" and i + 1 < len(argv):
             rewrite = argv[i + 1]
@@ -98,7 +105,7 @@ def main():
                 full = os.path.join(dp, fn)
                 files.append((os.path.relpath(full, romfs).replace(os.sep, "/"), full))
         files.sort()
-        vol_limit = 3 * 1024 * 1024 * 1024
+        vol_limit = max(1, vol_mb) * 1024 * 1024
         vols = [[]]                     # 每卷的条目列表
         cur = 0
         for rel, full in files:
@@ -120,7 +127,7 @@ def main():
                     vf.write(rel.encode())
                     vf.write(data)
                 vf.write(b"END!")
-        print(f"② RomFS 打成 {len(vols)} 卷 → {romfs_out}（{len(files)} 个文件）")
+        print(f"② RomFS 打成 {len(vols)} 卷（每卷 ≤ {vol_mb} MB）→ {romfs_out}（{len(files)} 个文件）")
     elif romfs and os.path.isdir(romfs):
         if os.path.exists(romfs_out):
             shutil.rmtree(romfs_out)

@@ -33,8 +33,8 @@
 | 内嵌装载（三段签名段 → 连续映像） | ✅ CI 可验 | `dm_embed_map`（vm_alloc/vm_remap）+ `embed_selftest` 分段 1–6（第二十四轮） |
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
-| 资源容器（几千小文件 → 两卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0/.1`（3.2+2.3 GB，4636 文件）（第二十六轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.6 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
+| 资源容器（几千小文件 → 若干卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0…5`（每卷 ≤1 GB，共 4636 文件）（第二十七轮） |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.8 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -2087,3 +2087,22 @@ TLS 不建、`nn::os` 运行时等于没初始化 → 构造函数一用 TLS 就
 `dm_find_tls_allocator_wiring()`（loader_core.c）找齐三件套并调用 setter；
 找不到就红字写明缺哪个符号。`loader_selftest` 加回归断言（合成产物也带这三个符号），
 真实产物上已验证三个符号都能找到。
+
+## 2.116 分卷改成每卷 ≤1 GB（v0.5.8）+ 分卷工具与它的一个教训
+
+用户反馈：卷「直接拷到手机」后第 1 条 CRC 就不符。PC 上的源做了全量校验（卷 0 = 3108 条、
+卷 1 = 1528 条，CRC 全对），所以差异出在拷贝那一段 —— 而 3.2 GB 的单文件在很多拷贝路径上
+本来就不稳（截断、被工具改写、或重名没覆盖）。改成分小卷：
+
+- `prepare_phone_package.py --vol-mb <MB>`（默认 **1024**）：从源 RomFS 打卷时按上限切
+- 新工具 `smo/ios/tools/smoarc_split.py`：对**已有卷**重新分卷（条目顺序与 CRC 原样保留，
+  `--verify` 逐条校验），不依赖源 RomFS 目录
+- App 侧卷上限 8 → **24**（小卷如 512 MB 也够用）；`smoarc_selftest` 补「12 个卷全认出来」断言
+- 展开前打印每个卷的字节数与头 8 字节（v0.5.7 起）：大小不对 = 截断；大小对但头不对 = 内容不同
+
+**教训（写进工具注释）**：`smoarc_split.py` 第一版在写完之前就 `os.remove` 输出目录里的
+`RomFS.smoa.*` —— 而输出目录常常就是输入卷所在目录，于是把 5.5 GB 的输入卷一起删了，只能从源
+`work/game/RomFS` 重打一遍。现在改成**先写 `.part` 临时名、全部成功后再删旧卷改名**。
+
+实测新产物：6 卷（1,073,770,015 / 1,073,340,665 / 1,071,803,782 / 1,044,068,449 /
+1,072,084,835 / 170,236,956 字节），4636 条、CRC 全对。

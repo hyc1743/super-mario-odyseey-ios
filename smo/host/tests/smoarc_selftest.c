@@ -110,6 +110,21 @@ int main(void) {
         CHK(strlen(base) > 0, msg);
     }
     {
+        // 多卷（12 卷）：1 GB 分卷后会有 6 卷，留足余量；上限由调用方给（App 里是 24）
+        SMO_MKDIR("/tmp/smo_plan_many");
+        SMO_MKDIR("/tmp/smo_plan_many/RomFS");
+        for (int v = 0; v < 12; v++) {
+            char p2[512];
+            snprintf(p2, sizeof p2, "/tmp/smo_plan_many/RomFS/RomFS.smoa.%d", v);
+            FILE *f = fopen(p2, "wb");
+            if (f) { fputs("SMOA", f); fclose(f); }
+        }
+        char vols[24][1024], target[1024], base[1024];
+        unsigned n = smoarc_plan("/tmp/smo_plan_many", vols, 24, target, sizeof target, base, sizeof base);
+        CHK(n == 12, "12 个卷能全部认出来（App 里上限 24）");
+        CHK(strstr(vols[11], "RomFS.smoa.11") != NULL, "第 12 个卷的路径正确");
+    }
+    {
         // 只有展开好的目录树、没有卷（smoarc_test/out 是上面展开出来的）→ 0，不该重复展开
         char vols[8][1024], target[1024], base[1024];
         CHK(smoarc_plan("/tmp/smoarc_test/out", vols, 8, target, sizeof target, base, sizeof base) == 0,
