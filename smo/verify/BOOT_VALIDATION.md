@@ -195,3 +195,14 @@ loads/stores support cross-thread delivery. Regression verifies polling, bounded
 timeout, persistent completion and a concurrent signal. Long waits now log
 NVN_FENCE_WAIT, captured explicitly in startup result.json. This diagnostic does
 not report a stall as a crash or bypass GPU completion. No new IPA is released.
+
+Final verification run `38945870815` (commit `5e54236`): Linux tests pass; ARM64
+macOS startup survives the full 30-second window without fatal errors. The
+result explicitly reports fence_wait_observed=true and presented_60_frames=false.
+LLDB confirms main-thread SyncWait with timeout UINT64_MAX, and the new
+NVN_FENCE_WAIT diagnostic identifies the unsignaled fence. The packaging gate
+fails as intended; no IPA was built/released. Remaining work is the real guest
+NVN command submission -> Metal execution -> completion/fence bridge, followed
+by window acquisition/presentation and rendering verification. No unconditional
+fence signal or dummy rendered frame was added. iOS hardware behavior and host
+speaker output remain unverified.
