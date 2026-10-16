@@ -10,10 +10,7 @@
 
 以后每次更新：重跑本命令 → 自签 → **覆盖安装**（手机上的游戏资源保留，不用重拷）。
 
-用法：make_installable.py [输出目录（默认 out）] [--smb-root \192.168.1.4\Files\SMO] [--resources]
-  --smb-root：出完 IPA 后自动复制到 <root>/ipa/；若 <root>/gamedata/ 还不存在，
-              顺带把手机资源包复制过去（以后重跑默认复用上次记住的路径）
-  --resources：即使 gamedata 已存在也强制重拷资源（资源固定，平时不用）
+用法：make_installable.py [输出目录（默认 out）]
 """
 import json
 import os
@@ -27,22 +24,7 @@ RELEASE_API = "https://api.github.com/repos/hyc1743/super-mario-odyssey-ios/rele
 
 def main():
     argv = sys.argv[1:]
-    out = os.path.join(ROOT, "out")
-    smb = None
-    force_res = False
-    for i, a in enumerate(argv):
-        if a == "--smb-root" and i + 1 < len(argv):
-            smb = argv[i + 1]
-        elif a == "--resources":
-            force_res = True
-        elif not a.startswith("--") and i == 0:
-            out = a
-    # 记住上次的 smb 路径（本地工作流：重跑一条命令即可）
-    cfg = os.path.join(ROOT, "out", "smb_root.cfg")
-    if not smb and os.path.exists(cfg):
-        smb = open(cfg, encoding="utf-8").read().strip()
-    if smb:
-        open(cfg, "w", encoding="utf-8", newline=chr(10)).write(smb)
+    out = sys.argv[1] if (len(argv) > 0 and not argv[0].startswith("--")) else os.path.join(ROOT, "out")
     os.makedirs(out, exist_ok=True)
 
     # 1) 最新 release 的壳 IPA
@@ -90,27 +72,6 @@ def main():
                     nz.write(full, base + os.path.relpath(full, fw).replace(os.sep, "/"))
 
     print(f"3. 已注入 Guest.framework → {dst}（{os.path.getsize(dst)} 字节）")
-
-    # 4) 复制到 SMB（可选）
-    if smb:
-        import shutil
-        ipadir = os.path.join(smb, "ipa")
-        os.makedirs(ipadir, exist_ok=True)
-        shutil.copy2(dst, os.path.join(ipadir, os.path.basename(dst)))
-        print(f"4. IPA → {ipadir}")
-        gamedata = os.path.join(smb, "gamedata")
-        src = os.path.join(ROOT, "out", "smo-phone-package", "②复制到手机")
-        if force_res or not os.path.exists(gamedata):
-            if os.path.isdir(src):
-                print(f"4. 资源 → {gamedata}（5.2 GB，视网络速度需几分钟到十几分钟）")
-                if os.path.exists(gamedata):
-                    shutil.rmtree(gamedata)
-                shutil.copytree(src, gamedata)
-                print(f"4. 资源复制完成 → {gamedata}")
-            else:
-                print("4. 本地没有资源包（先跑 prepare_phone_package.py）")
-        else:
-            print("4. gamedata 已存在，跳过资源（--resources 可强制重拷）")
 
     print()
     print("完成：拿这个文件去自签工具签名，覆盖安装即可。")
