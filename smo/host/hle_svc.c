@@ -17,6 +17,12 @@
 #include <time.h>
 #include <unistd.h>
 
+// Stable debugger stop for fatal guest breaks. Optimized svc_dispatch can have
+// inlined breakpoint locations where its argument is unavailable to LLDB.
+__attribute__((noinline, noreturn)) void dm_guest_break_exit(void) {
+    _exit(42);
+}
+
 // ---- 地址空间分区 ----
 #define RESERVE   (5ull << 30)          // 预留 5 GB：前 1 GB（alias + stack）+ 4 GB 堆
 #define ALIAS_SZ  (512ull << 20)
@@ -288,7 +294,7 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
         // 真机上没有调试器时内核会终止进程；这里是宿主，等价做法是明确停下并留下现场
         dm_progress_finish(DM_RUN_FAIL, "游戏运行库主动中止（svcBreak）—— 见日志最后一行");
         dm_log_raw("【中止】进程结束（svcBreak 致命）\n");
-        _exit(42);
+        dm_guest_break_exit();
     }
     case 0x27: {                                          // OutputDebugString(str, len)
         if (regs[0] && regs[1]) LOG("[客体] %.*s", (int)(regs[1] > 512 ? 512 : regs[1]), (const char *)(uintptr_t)regs[0]);

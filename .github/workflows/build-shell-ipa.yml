@@ -296,6 +296,9 @@ jobs:
             smo/host/build.log
             smo/ios/out_step.log
             smo/ios/out/xcodebuild.log
+            work/boot-smoke/guest.log
+            work/boot-smoke/backtrace.log
+            work/boot-smoke/result.json
           if-no-files-found: warn
       - name: 产物摘要
         if: success()

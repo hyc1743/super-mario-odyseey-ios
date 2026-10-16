@@ -77,7 +77,7 @@ def main():
             # svcBreak exits with code 42, so LLDB's crash commands never run.
             # Stop before that exit to retain guest registers and call stacks.
             commands = ["xcrun", "lldb", "-b", "-o", interrupt,
-                        "-o", "breakpoint set -n svc_dispatch -c 'num == 0x26'",
+                        "-o", "breakpoint set -n dm_guest_break_exit",
                         "-o", "run"]
             for flag in ("-o", "-k"):
                 for command in inspect:
@@ -90,6 +90,8 @@ def main():
                 except subprocess.TimeoutExpired:
                     print("Debugger replay timed out; original failed startup remains a failure.")
             trace = (args.output / "backtrace.log").read_text(encoding="utf-8", errors="replace")
+            # Keep debugger setup/condition errors visible too.
+            print("\n".join(trace.splitlines()[:25]))
             start = trace.find("(lldb) thread backtrace")
             lines = trace[start:].splitlines() if start >= 0 else trace.splitlines()[-85:]
             print("\n".join(lines[:140] + (lines[-20:] if len(lines) > 140 else [])))
