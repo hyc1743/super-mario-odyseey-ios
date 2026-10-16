@@ -27,9 +27,14 @@
 | 重放记账 + 管线键 | ✅ 16 断言 | `nvn_replay.c`（不含 Metal，用空后端测） |
 | 纹理块线性布局（尺寸 + 解交错） | ✅ 36 断言 + **真实贴图 123/123 对上** | `nvn_tex.c`（尺寸移植自 deko3d）；`tex_layout_check.py` 对 BNTX 记录逐张核对（第十九轮） |
 | 验证层 `smo/verify/` | ✅ 通过 12 · 跳过 2 | `regress.sh` 一条命令；NVN 不透明性 1012/1706 调用点 0 反例（第十八轮） |
-| **Metal 重放（真调 Metal）** | ❌ | 需 macOS / 真机 |
-| iOS 三段内嵌出包 | 🚧 | 生成 + 拼回校验已做（本机可验）；装载分支与 `-segprot` 待做 |
-| App 壳 + 未签名 IPA | 🚧 CI 需重新验证 | 2026-10-14 起 ubuntu job 的 2 个 C 单测链不上（第十八轮 2.80 已修，待 push 后确认） |
+| 纹理内容核对 | ✅ 1294 张真实贴图 0 不一致 | `tex_content_check.py`：解交错逐字节 + 解码端点逐字节/插值 ≤1（第二十三轮） |
+| **Metal 重放（CI 离屏可验的部分）** | ✅ 清屏 / 着色器管线 / 纹理往返 / 管线缓存 / 合龙点 | `nvn_mtl.m` + `mtl_selftest` + `mtl_replay_selftest`（第二十二～二十五轮） |
+| **Metal 重放（真机呈现）** | ❌ | 需真机：`CAMetalLayer`、GPU 可见内存、性能 |
+| 内嵌装载（三段签名段 → 连续映像） | ✅ CI 可验 | `dm_embed_map`（vm_alloc/vm_remap）+ `embed_selftest` 分段 1–6（第二十四轮） |
+| 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
+| App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
+| 资源容器（几千小文件 → 两卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0/.1`（3.2+2.3 GB，4636 文件）（第二十六轮） |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.4.1 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
 **能不能玩：现在还不能。** 缺的是 Metal 重放那一半与 iOS 内嵌装载分支（两者都需要 macOS / 真机）。
@@ -1861,3 +1866,51 @@ smo_host 编译链接、出未签名 IPA）。
 - guest dylib 壳模式 + 宿主 bootstrap 全部就绪，App 构建绿（CI）
 - 首跑全链条（用户侧）：guest_dylib.py → 放 Frameworks + RomFS + tsv → Sideloadly 签名 → 打开 → 日志滚 → 导出日志发回
 - 发 v0.2.0 release（含导出按钮）
+
+
+---
+
+# 第二十五轮：M1 收尾（App 接入 + 首跑链路）与资源容器
+
+## 2.100 宿主接入 App（CI 编译验证）
+
+`main.m` 的 `RunHost`（后台线程）：`host_thread_keys_create` → `load_modules(rtld/sdk/subsdk0/main)`
+→ `run_module_inits` → `svc_thread_main_init` → `guest_thread_init` → `dm_jump_guest(nnMain)`。
+App 目标编进：宿主全部源（除 main.c）+ 图形层 C 源 + `entry.S`；头路径补 `gfx/nvn`。
+
+**接入 App 踩的坑（按 CI 错误逐个修）**：
+- iPhoneOS SDK **没有 `mach_vm_*`**（`mach/mach_vm.h` 标 unsupported）→ 换 `vm_allocate`/`vm_remap`（旧 API，macOS/iOS 都有，CI 继续验同一路径）
+- Mach-O 弱符号（数据与函数的 weak/weak_import）ld64 都拒 → 改显式宏开关 `SMO_EMBED`
+- ARC 下不能显式 `release`
+- `getsectiondata` 声明在 `mach-o/getsect.h`；`TargetConditionals.h` 要在 `#if` 之前
+- **文件 App 里看不到 App 目录**的真因：缺 `UIFileSharingEnabled` / `LSSupportsOpeningDocumentsInPlace`
+  （v0.3.0 起可见）
+
+## 2.101 壳模式（Guest.framework）：CI 壳 + 本机游戏程序
+
+- `smo/ios/tools/guest_dylib.py`（移植参考项目，MIT）：本机（Windows 可用，纯 Python 写 Mach-O）
+  把改写产物打包成只装三段的 `Guest.framework/Guest`；加了**空 `LC_CODE_SIGNATURE` 槽**
+  （没有它，自签工具在「签前 Mach-O 准备」阶段会拒签 —— 全能签实测报「Guest 单独签名失败」）
+- `dm_image_from_dylib`（loader_apple.c）：iOS 上 `dlopen` 安装包里的 Guest.framework →
+  `getsectiondata` 三段 → `vm_remap` 回连续地址（代码共享签名页 RX、W 写时复制 RW、边界页 RWX）
+- 出包/更新：`make_installable.py` 一条命令（下载公共 release 的壳 → 注入本机 Guest.framework
+  → 出 `SMOMobile-<版本>-可安装.ipa`）；已发 v0.1.0–v0.4.1
+- 备选：私有 fork + `GUEST_URL`/`GUEST_SHA256` 变量让 CI 注入（d2r-mobile-build 同款，未启用）
+
+## 2.102 资源容器：几千个小文件 → 两卷（参考项目 .data 同款思路）
+
+- `smoarc.c/h`：自制容器（`SMOA` 卷头 + 条目 + `END!` 标记 + CRC32，无压缩 —— .szs 本身已 Yaz0 压缩）
+- `smoarc_selftest`：6 条断言（两卷、子目录、逐字节、CRC 破坏报错）
+- `prepare_phone_package.py --pack-romfs`：4636 个文件 → `RomFS.smoa.0/.1`（3.2 GB + 2.3 GB，每卷 ≤3GB）
+- App 首次运行自动展开（含一层包装目录 —— 用户把整个 `SMO Resource` 文件夹拷进手机也认），
+  进度进日志缓冲、屏上可见
+- 手机侧要拷的：`SMO Resource/{ExeFS(9 个小文件), RomFS(2 个大文件)}` —— 从 4645 个文件降到 11 个
+
+## 2.103 日志导出（用户需求）
+
+`main.m`：右下角「导出日志」→ 把「状态 + 游戏文件检测 + 宿主日志」写成
+`SMO-log-<时间>.txt` 与 `SMO-log-latest.txt`（Documents，文件 App 可见）→ 拉起系统分享
+（AirDrop / 邮件 / 存文件）。宿主日志走 `logbuf.c` 的 512 行环形缓冲（`LOG` 宏全量写 stderr + 缓冲）。
+
+**能不能玩：还差两步** —— ① 真机首跑（拿 UNIMPL 日志，按它补初始化服务）② Metal 重放的真实呈现
+（`CAMetalLayer` + GPU 可见内存）。出包与资源链路已经通到「一条命令 + 覆盖安装」。
