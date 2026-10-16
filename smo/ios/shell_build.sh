@@ -79,7 +79,7 @@ LOG="$OUT/xcodebuild.log"
 EMBED_SRC="$ROOT/smo/ios/Sources/Embedded.S"
 if ls "$ROOT/work/rewrite/"*.patched.bin >/dev/null 2>&1; then
   echo "== 三段内嵌：把改写产物编进壳 =="
-  "$PY" "$ROOT/smo/ios/tools/gen_embed.py" "$ROOT/work/rewrite" "$EMBED_SRC" rtld sdk subsdk0 main | tee "$OUT/embed_flags.txt"
+  "$PY" "$ROOT/smo/ios/tools/gen_embed.py" "$ROOT/work/rewrite" "$EMBED_SRC" sdk subsdk0 main | tee "$OUT/embed_flags.txt"
   "$PY" "$ROOT/smo/ios/tools/check_embed.py" "$EMBED_SRC"
   echo "   链接参数（待接进 Xcode）：$(tail -1 "$OUT/embed_flags.txt")"
 else

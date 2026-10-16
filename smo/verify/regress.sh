@@ -59,6 +59,9 @@ run "工具链自检（Yaz0 / SARC / NSO 头 / 改写器端到端）" \
 run "NVN 不透明性检查器的自检（确认它能抓到反例）" \
     "$PY" smo/verify/nvn_opaque_selftest.py
 
+run "三段切分检查器的自检（边界页有重定位必须拒绝出包）" \
+    "$PY" smo/ios/tools/x0_layout_selftest.py
+
 # 生成器的名字一致性：抓过两次手写错误（见 STATUS.md 2.47），值得每次跑
 run "NVN 表生成器一致性" \
     "$PY" smo/tools/gen_nvn.py --check
@@ -118,8 +121,14 @@ if [ -f work/rewrite/sdk.patched.bin ]; then
   run "动态等价性：sdk 的 cntpct 站点（Unicorn）" \
       "$PY" smo/tools/equiv_check.py sdk --kind cntpct
 
-  run "动态等价性：rtld 的 svc 站点（Unicorn）" \
+  # rtld 不装（宿主扮演它），但改写器照样处理它 —— 这一项验的是改写器本身，所以留着
+  run "动态等价性：rtld 的 svc 站点（Unicorn；验改写器，rtld 本身不装）" \
       "$PY" smo/tools/equiv_check.py rtld --kind svc
+
+  # 三段切分：x0 向上取整，边界页归代码段（只读+执行）。要装的三个模块边界页里必须 0 条
+  # 重定位（iOS 上没有 RWX 页）；rtld 那 32 条正是它不装的原因。出包脚本也做同一检查。
+  run "三段切分：要装的模块边界页里没有重定位（iOS 无 RWX）" \
+      "$PY" smo/ios/tools/x0_layout.py work/rewrite sdk subsdk0 main
 else
   skip "改写产物相关（结构自检 / x18 / 动态等价）" \
        "缺 work/rewrite/sdk.patched.bin —— 先跑 patch_nso.py"

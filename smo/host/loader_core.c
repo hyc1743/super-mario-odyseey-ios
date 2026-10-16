@@ -220,13 +220,20 @@ void relocate(module_t *m) {
     const Elf64_Rela *tabs[2] = {(const Elf64_Rela *)(m->base + rela), (const Elf64_Rela *)(m->base + jmprel)};
     uint64_t sizes[2] = {relasz, pltsz};
     int cnt[3] = {0}, hle = 0;
+    const uint64_t x0_end = (m->text_end + 0x3FFF) & ~(uint64_t)0x3FFF;
     for (int t = 0; t < 2; t++)
         for (uint64_t i = 0; i < sizes[t] / sizeof(Elf64_Rela); i++) {
             const Elf64_Rela *r = &tabs[t][i];
             uint64_t *where = (uint64_t *)(m->base + r->r_offset);
             unsigned type = ELF64_R_TYPE(r->r_info), si = ELF64_R_SYM(r->r_info);
+            // 代码段的终点是 text_end **向上**取整到 16K（边界页归代码段、只读+执行，见 loader_apple.c）。
+            // 落在这里面的重定位写不进去：macOS 上写只读页当场 SIGBUS，iOS 上同样。所以在写之前
+            // 就报清楚 —— 出包时 x0_layout.py 已经拒过一次，这里是装载时的第二道。
+            // 这条检查对 RELATIVE 也要做（原来只对符号类做，RELATIVE 先 continue 了，rtld 的 13 条
+            // RELATIVE 正好全在边界页里，就这样漏过去）。
+            if (r->r_offset < x0_end) die("%s: 重定位落在代码段（%#llx < %#llx）——这个模块不能按三段装（rtld 就是）",
+                                          m->name, (unsigned long long)r->r_offset, (unsigned long long)x0_end);
             if (type == R_AARCH64_RELATIVE) { *where = (uint64_t)(uintptr_t)m->base + (uint64_t)r->r_addend; cnt[0]++; continue; }
-            if (r->r_offset < m->text_end) die("%s: 重定位落在代码区（%#llx）——产物不对", m->name, (unsigned long long)r->r_offset);
             const Elf64_Sym *s = &m->symtab[si];
             const char *nm = m->strtab + s->st_name;
             // 解析顺序与参考项目一致：
@@ -302,8 +309,8 @@ void load_modules(const char *dir, const char *const *names, int n) {
         }
         m->size = n_bytes;
         read_layout(m, dir);
-        // 保护两段代码区：text 与补丁区。中间的 ro+data（含键页）保持可写，
-        // 装载器还要往里面写重定位与键页。边界页由 dm_code_protect 自己处理（RWX）。
+        // 保护两段代码区：text（向上取整到整页）与补丁区。中间的 ro 余部 + data（含键页）
+        // 保持可写，装载器还要往里面写重定位与键页。没有 RWX 页。
         dm_code_protect(m->base, m->text_end);
         dm_code_protect(m->base + m->patch_off, m->size - m->patch_off);
         parse_dynamic(m);

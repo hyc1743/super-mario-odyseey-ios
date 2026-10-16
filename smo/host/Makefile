@@ -132,7 +132,7 @@ equiv: ../tools/equiv_check.py
 	$(PY) ../tools/equiv_check.py rtld --limit 10
 
 run: smo_host
-	./smo_host work/rewrite rtld sdk subsdk0 main --list
+	./smo_host work/rewrite sdk subsdk0 main --list
 
 clean:
 	rm -f smo_host embed_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest

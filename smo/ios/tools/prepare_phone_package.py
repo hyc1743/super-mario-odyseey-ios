@@ -46,7 +46,7 @@ def main():
         if a == "--no-dylib":
             no_dylib = True
 
-    need = ["rtld", "sdk", "subsdk0", "main"]
+    need = ["sdk", "subsdk0", "main"]          # 不含 rtld：宿主扮演它（x0_layout.py）
     missing = [n for n in need
                if not (os.path.exists(os.path.join(rewrite, n + ".fixups.tsv"))
                        and os.path.exists(os.path.join(rewrite, n + ".gates.tsv")))]

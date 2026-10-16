@@ -4,13 +4,18 @@
 // 两条路线（参考项目两条都有，本项目先落 macOS 这条，iOS 那条留好接口与命名约定）：
 //
 //   ① **开发/CI（macOS）**：匿名映射 + 立即封代码区。
-//      16 KB 页（Apple Silicon）：[0, text_end) 与补丁区设为只读+执行，此后对代码区的任何写入
-//      当场崩；中间（ro 与 data 同页，只能一起）可写。
+//      16 KB 页（Apple Silicon）：[0, 圆整16K(text_end)) 与补丁区设为只读+执行，此后对代码区的
+//      任何写入当场崩；中间（ro 余部 + data）可写。
 //
 //   ② **iOS 真机**：**不许运行时生成/修改代码**，所以映像在出包时就拆成三段内嵌进签名段：
-//        __TEXT,__dm<模块名>x0   原始代码（不含补丁区）        → RX
-//        __img,__DM<模块名>W     ro + data（可写的那部分）      → RW
+//        __TEXT,__dm<模块名>x0   [0, 圆整16K(text_end))        → RX（含 ro 首页的一部分，只读）
+//        __img,__DM<模块名>W     ro 余部 + data（可写的那部分）  → RW
 //        __TEXT,__dm<模块名>x1   补丁区                        → RX
+//
+// **两条路线都没有 RWX 页**。text_end 不页对齐时，代码尾与 ro 开头同在一页，这一页归代码段
+// （只读+执行）—— 前提是那一页里没有重定位要写，出包时由 smo/ios/tools/x0_layout.py 逐条核对，
+// 装载时 relocate() 再核一遍。早先这一页是「归 W + mprotect 成 RWX」：macOS 上能跑，
+// iOS 上普通 App 拿不到 RWX，于是 .text 末尾那几 KB 代码在真机上不可执行（第二十六轮）。
 //      装载器用带 FIXED|OVERWRITE 的 vm_remap 把三段重映射到同一个基址的原相对位置上，
 //      于是运行时布局与 patched.bin 逐字节相同（PC 相对寻址、补丁区跳转、宿主「基址+原偏移」全不用改）。
 //      出包脚本是 smo/ios/tools/gen_embed.py，CI 上用合成产物验（tests/embed_selftest.c）。
@@ -68,10 +73,7 @@ void *dm_embed_map(const dm_embed_mod *e) {
     for (int i = 0; i < 3; i++) {
         if (!parts[i].sz) continue;
         vm_address_t dst = (vm_address_t)(base + parts[i].off);
-        vm_prot_t cur = 0, maxp = 0;
-        // W 段的 max 给 RWX：TEXT_END 不页对齐时，代码尾与缝隙同页（见 gen_embed.py），
-        // 那一页既要有 X（代码尾）又要有 W（缝隙里的重定位槽）。
-        maxp = (i == 1) ? (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE) : parts[i].prot;
+        vm_prot_t cur = 0, maxp = parts[i].prot;      // 三段各自的最终权限；没有 RWX
         // vm_remap（旧 API）：macOS 与 iOS 都有；mach_vm_* 是 macOS 专用，
         // iPhoneOS SDK 里 mach/mach_vm.h 直接标 unsupported（CI 上真挂过）。
         kr = vm_remap(mach_task_self(), &dst, parts[i].sz, 0,
@@ -84,11 +86,6 @@ void *dm_embed_map(const dm_embed_mod *e) {
                 (unsigned long long)(base + parts[i].off), parts[i].sz);
             return NULL;
         }
-    }
-    // 边界页（代码尾 + 缝隙共享的那一页）需要 RWX
-    if (e->text_end & (PAGE - 1)) {
-        if (mprotect((void *)(base + e->x0_sz), PAGE, PROT_READ | PROT_WRITE | PROT_EXEC))
-            LOG("%s: 边界页 RWX 设置失败（mprotect）", e->name);
     }
     LOG("%s: 内嵌映像已就位 基址 %p（三段映射 %zu + %zu + %zu 字节）",
         e->name, (void *)(uintptr_t)base, e->x0_sz, e->w_sz, e->x1_sz);
@@ -132,14 +129,14 @@ void *dm_image_from_dylib(const char *name, size_t *size) {
     if (vm_allocate(mach_task_self(), &base, total, VM_FLAGS_ANYWHERE) != KERN_SUCCESS) return NULL;
     struct part { const uint8_t *s; size_t z; boolean_t cp; vm_prot_t p; } parts[3] = {
         { x0, z0, FALSE, VM_PROT_READ | VM_PROT_EXECUTE },
-        { w,  zw, TRUE,  VM_PROT_READ | VM_PROT_WRITE },          // 边界页 RWX 由 dm_code_protect 处理
+        { w,  zw, TRUE,  VM_PROT_READ | VM_PROT_WRITE },
         { x1, z1, FALSE, VM_PROT_READ | VM_PROT_EXECUTE },
     };
     size_t off = 0;
     for (int i = 0; i < 3; i++) {
         vm_address_t dst = (vm_address_t)(base + off);
         vm_prot_t cur = 0;
-        vm_prot_t maxp = (i == 1) ? (VM_PROT_READ | VM_PROT_WRITE | VM_PROT_EXECUTE) : parts[i].p;
+        vm_prot_t maxp = parts[i].p;                  // 没有 RWX：边界页已在出包时归给 x0
         if (vm_remap(mach_task_self(), &dst, parts[i].z, 0, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
                      mach_task_self(), (vm_address_t)(uintptr_t)parts[i].s,
                      parts[i].cp, &cur, &maxp, VM_INHERIT_NONE) != KERN_SUCCESS)
@@ -168,12 +165,11 @@ void *dm_image_alloc(size_t size) {
 }
 
 void dm_code_protect(void *p, size_t n) {
-    size_t a = (size_t)n & ~(size_t)(PAGE - 1);          // 只封整页
+    // 向上取整：代码尾所在的那一页整页设 RX（与 iOS 三段切法同一边界，见文件头）。
+    // 早先是「向下取整 + 边界页 RWX」，而且那条 mprotect 写成了 p 而不是 p + 向下取整 ——
+    // 改的是第一页、不是边界页，于是 macOS 上边界页其实一直是 RW、不可执行。
+    size_t a = (n + PAGE - 1) & ~(size_t)(PAGE - 1);
     if (a && mprotect(p, a, PROT_READ | PROT_EXEC)) die("代码区设 RX 失败（MAP_JIT？）");
-    // TEXT_END 不页对齐时，代码尾与「缝隙」（ro/data 的开头）同页：
-    // 那一页必须 RWX —— 代码尾要执行，缝隙里可能有重定位槽要写（实测 rtld 就是）。
-    if (n & (PAGE - 1))
-        if (mprotect(p, PAGE, PROT_READ | PROT_WRITE | PROT_EXEC)) die("边界页设 RWX 失败");
 }
 
 void dm_ro_protect(void *p, size_t n) {

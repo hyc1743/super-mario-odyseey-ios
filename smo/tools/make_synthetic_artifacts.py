@@ -80,7 +80,10 @@ def build_module(name, exports, imports, extra_relocs=()):
     strtab_off = take(len(strtab))
     rela = take(len(relocs) * 24)
     jmprel = take(0)                            # 本例把 JUMP_SLOT 也放进同一张表
-    data_off = take(len(data), 0x40)
+    # data（重定位写的地方）从下一个 16K 页起 —— 与真实模块一致（四个 NSO 的 DATA_OFF 都页对齐，
+    # 而且都在「圆整16K(TEXT_END)」之后）。原来紧跟在 rela 后面，落在第一页里：那一页现在归代码段
+    # （只读+执行，见 smo/ios/tools/x0_layout.py），重定位写不进去 —— 合成产物得先长得像真的。
+    data_off = take(len(data), 0x4000)
     img_size = (off + 0xFFF) & ~0xFFF
 
     img = bytearray(img_size)

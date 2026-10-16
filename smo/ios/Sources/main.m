@@ -56,8 +56,10 @@ static void RunHost(void) {
     }
     LOG("== SMO 宿主（App 内）：从 %s 装载 ==", ep);
     host_thread_keys_create();
-    static const char *names[] = { "rtld", "sdk", "subsdk0", "main" };
-    load_modules(ep, names, 4);
+    // 不装 rtld：宿主自己扮演 rtld（映射/重定位/DT_INIT 都在 loader_core.c），而 rtld 的 32 条重定位
+    // 落在代码段边界页里，按三段装不了（smo/ios/tools/x0_layout.py）。参考项目同样只装游戏模块。
+    static const char *names[] = { "sdk", "subsdk0", "main" };
+    load_modules(ep, names, 3);
     run_module_inits();
     uint32_t h = svc_thread_main_init();
     LOG("主线程句柄 %#x", h);

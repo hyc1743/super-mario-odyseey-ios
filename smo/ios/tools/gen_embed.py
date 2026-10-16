@@ -4,9 +4,12 @@
 
 派生自参考项目 d2r-mobile 的 dm/ios/tools/gen_embed.py（MIT），契约不变：
 
-    __TEXT,__dm<名>x0   原代码 [0, 圆整16K(TEXT_END))            → RX
-    __DM<名>W,__img     ro 余部 + data + bss [圆整16K(TEXT_END), PATCH_OFF)  → RW
+    __TEXT,__dm<名>x0   原代码 [0, 圆整16K(TEXT_END))            → RX（含 ro 首页的一部分，只读）
+    __DM<名>W,__img     ro 余部 + data + bss [圆整16K(TEXT_END), PATCH_OFF)  → RW（重定位只落这里）
     __TEXT,__dm<名>x1   补丁区 [PATCH_OFF, 圆整16K(文件尾))       → RX
+
+x0 的切点是 TEXT_END **向上**取整（见 x0_layout.py）：边界页归代码段，所以那一页里不能有重定位
+要写。出包时逐条核对，有就拒绝出包 —— iOS 上没有 RWX 页可用，这个问题不能留到真机。
 
 为什么拆三段（两条硬约束一起满足）：
   · 苹果只允许**一个**带执行权限的段（ITMS-90999），所以两段代码都必须落在 __TEXT 里；
@@ -23,6 +26,9 @@ PC 相对寻址、补丁区的相对跳转、宿主「基址 + 原偏移」的�
 import hashlib
 import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from x0_layout import check_x0, x0_end                              # noqa: E402
 
 PG = 0x4000
 
@@ -63,10 +69,14 @@ def main():
         binp = os.path.abspath(os.path.join(out, f"{n}.patched.bin")).replace(chr(92), "/")
         sz = os.path.getsize(binp)
         img = open(binp, "rb").read()
-        # x0 的尾必须向下取整：代码尾与「TEXT_END 到页边界的缝隙」共享同一页，
-        # 而缝隙里可能有数据与重定位槽（实测 rtld 的 30 条重定位全在缝隙里）——
-        # 把整页给 W（边界页 RWX），写它才不 SIGBUS。
-        a = (te // PG) * PG          # 向下：x0 只到整页边界
+        # x0 向上取整：代码尾与 ro 开头同页时，这一页归代码段（RX）。
+        # 早先是向下取整 + 把边界页 mprotect 成 RWX —— macOS 上能跑，iOS 上必失败，
+        # 于是 .text 末尾那几 KB 代码在真机上不可执行（第二十六轮）。
+        why = check_x0(n, img, te)
+        if why:
+            print(f"🔴 {why}")
+            return 2
+        a = x0_end(te)
         end = r16(sz)
 
         # 这些断言是「三段能拼回原映像」的前提，错一条就会在真机上以难以定位的方式崩

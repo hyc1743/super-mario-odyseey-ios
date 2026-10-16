@@ -57,9 +57,18 @@ jobs:
       - name: 检查 nvn.h 抽出的枚举与头一致（Metal 翻译要用这些数值）
         run: python3 smo/gfx/nvn_enum.py --check 2>&1 | tee -a /tmp/selftests.log
       - name: 三段内嵌出包：生成 + 校验（拼回原映像）
+        # pipefail：原来没有，`| tee` 会吞掉 gen_embed 的退出码 —— 出包脚本拒绝了也照样绿
         run: |
+          set -o pipefail
           python3 smo/ios/tools/gen_embed.py work/synthetic work/embed_syn.S sdk main 2>&1 | tee -a /tmp/selftests.log
           python3 smo/ios/tools/check_embed.py work/embed_syn.S 2>&1 | tee -a /tmp/selftests.log
+      - name: 三段切分：边界页归代码段，有重定位的模块必须被拒（iOS 没有 RWX 页）
+        # 合成产物的 data 已挪到 16K 之后（与真实模块一致），应当通过；
+        # 再造一个「data 紧跟代码、落在边界页里」的反例，出包脚本必须拒绝 —— 检查能报错才算检查。
+        run: |
+          set -o pipefail
+          python3 smo/ios/tools/x0_layout.py work/synthetic sdk main 2>&1 | tee -a /tmp/selftests.log
+          python3 smo/ios/tools/x0_layout_selftest.py 2>&1 | tee -a /tmp/selftests.log
       - name: 图形入口必须在接管清单里（否则游戏拿不到任何 NVN 函数）
         run: |
           if ! grep -q 'nvnBootstrapLoader' smo/host/hle_force_gen.c; then

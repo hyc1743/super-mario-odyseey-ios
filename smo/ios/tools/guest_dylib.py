@@ -12,13 +12,17 @@ App 启动后装载器 dlopen 它、按节名把三段 vm_remap 回连续地址�
 （__TEXT,__dm<模块>x0 / __DM<模块>W,__img / __TEXT,__dm<模块>x1），所以装载器不需要两套逻辑。
 
 用法：guest_dylib.py <产物目录(work/rewrite)> <输出目录> <模块名...>
-      例：python smo/ios/tools/guest_dylib.py work/rewrite out rtld sdk subsdk0 main
+      例：python smo/ios/tools/guest_dylib.py work/rewrite out sdk subsdk0 main
+      （不含 rtld：它的 32 条重定位落在代码段边界页，宿主自己扮演 rtld，见 x0_layout.py）
 产出：<输出目录>/Guest.framework/Guest 与 Info.plist
 """
 import hashlib
 import os
 import struct
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from x0_layout import check_x0, x0_end                              # noqa: E402
 
 PG = 0x4000
 MIN_IOS = 26 << 16          # 与工程的最低系统版本一致（ios/project.yml）
@@ -59,7 +63,11 @@ def build(out, names):
         te, po = int(hdr['TEXT_END'], 16), int(hdr['PATCH_OFF'], 16)
         img = open(os.path.join(out, n + '.patched.bin'), 'rb').read()
         sz = len(img)
-        a = (te // PG) * PG       # 向下取整：代码尾与缝隙同页（rtld 的 30 条重定位全在缝隙里，见 STATUS）
+        # x0 向上取整，边界页归代码段（RX）；与 gen_embed.py 同一切法，同一检查（x0_layout.py）
+        why = check_x0(n, img, te)
+        if why:
+            sys.exit('🔴 ' + why)
+        a = x0_end(te)
         end = r16(sz)
         assert po % PG == 0 and a <= po <= end, (n, hex(te), hex(po), hex(sz))
         def cut(lo, hi):

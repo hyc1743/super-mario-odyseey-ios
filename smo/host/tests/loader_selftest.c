@@ -2,10 +2,10 @@
 //
 // 平台三件事用最朴素的实现：映像 = malloc、段权限 = 空实现、键号 = 假槽号。
 // 检查项（全部是对真实产物的断言，不是「应该能跑」）：
-//   1. 四个模块的 fixups 表头都能解析（段边界、键页、8 个槽号）
+//   1. 三个模块的 fixups 表头都能解析（段边界、键页、8 个槽号）—— 不装 rtld，见 x0_layout.py
 //   2. 动态段与符号表能解析，符号数合理
-//   3. 重定位全部有归宿；且没有任何一条落在代码区（写了就崩）
-//   4. 门表：main 0 / sdk 135 / subsdk0 0 / rtld 4
+//   3. 重定位全部有归宿；且没有任何一条落在代码段（含边界页，向上取整到 16K —— 写了就崩）
+//   4. 门表：main 0 / sdk 135 / subsdk0 0
 //   5. 键页装完后每一项都是「实际键号 × 8」且非 0
 //   6. 符号哈希表与线性扫描**逐条一致**（参考项目 DM_SYMCHECK 的做法）
 #include "../dm.h"
@@ -45,10 +45,10 @@ void gate_register(uint64_t ret_addr, const char *kind, int arg, uint64_t orig) 
 
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : "work/rewrite";
-    // 模块名从命令行给：CI 上用合成产物（sdk main），本机用真实的四个
-    static const char *def[] = {"rtld", "sdk", "subsdk0", "main"};
+    // 模块名从命令行给：CI 上用合成产物（sdk main），本机用真实的三个（不装 rtld）
+    static const char *def[] = {"sdk", "subsdk0", "main"};
     const char **mods = def;
-    int nmods = 4;
+    int nmods = 3;
     if (argc > 2) { mods = (const char **)&argv[2]; nmods = argc - 2; }
     load_modules(dir, mods, nmods);
     printf("\n== 各模块 ==\n");
@@ -71,17 +71,22 @@ int main(int argc, char **argv) {
     CHK(g_nmod == nmods, "命令行给的模块都装载成功");
     CHK(g_gates_seen == dm_gate_count(), "门登记次数与门表一致");
     CHK(dm_gate_count() > 0, "至少登记了一个宿主门");
-    // 真实产物（四个模块）的门数是个已知事实，跑真实集时才断言它
-    if (g_nmod == 4 && !strcmp(g_mod[3].name, "main")) {
-        CHK(dm_gate_count() == 139, "真实产物：宿主门合计 139（main 0 + sdk 135 + subsdk0 0 + rtld 4）");
+    // 真实产物（三个模块）的门数是个已知事实，跑真实集时才断言它
+    if (g_nmod == 3 && !strcmp(g_mod[2].name, "main")) {
+        CHK(dm_gate_count() == 135, "真实产物：宿主门合计 135（main 0 + sdk 135 + subsdk0 0；不装 rtld）");
     }
-    // **重要架构点**：这里统计的「交宿主解析」只有 20–60 个名字，不是全部工作面。
+    // **重要架构点**：这里统计的「交宿主解析」只有十几个名字，不是全部工作面。
     // 服务层那 412 个函数（nn::fs / nn::hid / nn::audio …）**被 sdk 模块导出**，所以走的是
     // 跨模块解析、根本到不了这里 —— 它们必须靠 dm_hle_force()（HLE_FORCE）接管。
-    // 断言下面的数字是为了跟 smo/tools/import_graph.py 的独立结果对上（main 12、subsdk0 4）。
-    if (g_nmod == 4 && !strcmp(g_mod[3].name, "main")) {
-        CHK(g_import_uniq >= 20 && g_import_uniq <= 60,
-            "真实产物：交宿主 import 名字数落在 20–60（服务层 412 个走 HLE_FORCE，不在此列）");
+    //
+    // 精确值 13 与 smo/tools/import_graph.py 的独立结果对得上：「由谁导出」为 `-` 的
+    // main 12 / sdk 5 / subsdk0 4 = 21 条，去掉三个模块之间重名的 8 个 = 13 个不同名字。
+    // 原来是「20–60」的宽松区间，装 rtld 时是 25 —— 多出来的 12 个全是 rtld 的链接器
+    // 段标记（__got_start / __rela_dyn_end / __tdata_align_abs …，import_graph 里 16 条）。
+    // 改成精确值：区间太宽时，少装一个模块这种变化它也照样放过。
+    if (g_nmod == 3 && !strcmp(g_mod[2].name, "main")) {
+        CHK(g_import_uniq == 13,
+            "真实产物：交宿主 import 13 个不同名字（= import_graph 的 21 条去重；服务层走 HLE_FORCE）");
     }
     CHK(g_imports >= g_import_uniq, "调用次数不少于名字数");
     printf("\n%s\n", bad ? "有断言不通过" : "全部通过");

@@ -2,7 +2,7 @@
 // 派生自参考项目 d2r-mobile 的 dm/host/main.c（MIT）。
 //
 // 用法：
-//   smo_host [模块目录] [模块名…]                 默认 rtld sdk subsdk0 main，进 nnMain
+//   smo_host [模块目录] [模块名…]                 默认 sdk subsdk0 main，进 nnMain（不装 rtld，见下）
 //   smo_host <目录> <模块…> --entry <符号名>      进指定的符号（自检用：合成客体放一个入口）
 //   smo_host <目录> <模块…> --list                只装载并打印统计，不进客体代码
 //
@@ -20,9 +20,11 @@ extern void dm_jump_guest(void *arg, void *fn);
 // dm_thread_returned 由 hle_thread.c 提供（客体线程入口返回 = 违反 Horizon 语义）
 int main(int argc, char **argv) {
     const char *dir = argc > 1 ? argv[1] : "work/rewrite";
-    static const char *defmods[] = {"rtld", "sdk", "subsdk0", "main"};
+    // 不装 rtld：宿主自己扮演 rtld（映射/重定位/DT_INIT 都在 loader_core.c），而 rtld 的 32 条重定位
+    // 落在代码段边界页里，按三段装不了（smo/ios/tools/x0_layout.py）。参考项目同样只装游戏模块。
+    static const char *defmods[] = {"sdk", "subsdk0", "main"};
     const char **mods = defmods;
-    int nmods = 4, list_only = 0;
+    int nmods = 3, list_only = 0;
     const char *entry = "nnMain";
 
     // 参数：目录之后到第一个 -- 选项之间是模块名
