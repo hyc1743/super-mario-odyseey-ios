@@ -118,3 +118,10 @@ SHA256 `ac42f9abba8b94f4462f0e0a71808ffe78efa2591482b9d0032ff3705e70b330`。
 复查 CI 日志另发现 Linux C 单测的 make 失败被 tee 的成功退出掩盖；该步骤补上
 pipefail，并修正已暴露的两个忽略返回值编译错误（CreateFile 截断失败正确返回错误；
 测试目录清理失败明确终止）。后续 Linux 结果必须真实通过。
+
+运行 `38942696378` 的 Linux 整套自检真正通过，含之前被 tee 掩盖的 SMOA CRC
+错误诊断路径：其 snprintf 在偏移后的指针上错误传入整个数组长度，触发 glibc
+FORTIFY 中止，已改为实际剩余容量。原生启动再次通过音频，停在世界地图数据构造；
+新增缺失文件跟踪确认 `content:/ObjectData/Texture2dMap.szs` 不在测试输入中。
+私有包追加该真实资源，更新到 `527b041e45f7a9d584432287e7862a4d0f1760aa`，
+84,968,352 字节，SHA256 `05419cd018e530bba47a5df4ff58ebc70a7042cf8dbda30ef871bf5678ca2551`。

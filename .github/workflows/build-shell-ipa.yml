@@ -253,12 +253,12 @@ jobs:
           if [ -n "${SMO_PRIVATE_TOKEN:-}" ]; then
             curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
               -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-romfs.zip?ref=0124cc558c9026a0fa3eaf2697fc880e5e05ca4b" \
+              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-romfs.zip?ref=527b041e45f7a9d584432287e7862a4d0f1760aa" \
               -o /tmp/boot-romfs.zip
             python3 - <<'PY'
           import hashlib, zipfile
           path = '/tmp/boot-romfs.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'ac42f9abba8b94f4462f0e0a71808ffe78efa2591482b9d0032ff3705e70b330'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '05419cd018e530bba47a5df4ff58ebc70a7042cf8dbda30ef871bf5678ca2551'
           with zipfile.ZipFile(path) as archive:
               archive.extractall('/tmp/smo-boot-romfs')
           PY
