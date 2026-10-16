@@ -55,3 +55,16 @@ Metal 绘制或可玩性；呈现请求也不代表画面正确。需要资源�
 - 同时修正计时：计数器门与 GetSystemTick 原先用纳秒乘 192/10，快了 1000 倍，
   且各用不同起点。现在共享单调时钟，按每秒 19,200,000 tick 换算；
   自检验证确定的秒数及两个读取接口的共同时间轴。
+- 运行 `38936490291` 验证了加强后的完整诊断链路：进入 nnMain、线程启动、
+  30 秒存活，但没有 60 次呈现请求，正确阻止 IPA 打包；LLDB 定时暂停成功，
+  主线程在 nanosleep，客体回溯返回 LayoutSystem 构造的 main+0x8ba35c。
+  静态导入与调用点确认 main+0x8bab38 查询 GetSharedFontLoadState，
+  +0x8bab3c 比较返回值是否为 1，否则跳回睡眠重试。当前通用桩始终返回 0。
+  这是明确的启动阻塞，不能把进程存活报告成启动成功。
+
+当前未完成项：共享字体服务需要真实字体数据及匹配的地址、大小和加载状态。
+RomFS FontData 中现有文件是 BFFNT，不能直接当成系统共享字体传入。
+不得只把状态改为 1，然后把 GetSharedFontAddress / GetSharedFontSize 的零值留给游戏。
+对照参考项目还发现后续需修正的 NVN 语义：MemoryPoolGetBufferAddress 仍是返回 0 的记录桩；
+ProgramSetShaders 的第二参数是阶段数、第三参数是 shaderData 数组，现有实现误作控制段大小和地址。
+这些尚未实现；当前没有发布新的版本标签，也未验证画面或可玩性。
