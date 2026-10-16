@@ -25,6 +25,7 @@
 // 真实 rtld 也是这个次序：先把线程/TLS 建起来，再跑 init_array。
 #include "dm.h"
 #include "hle_thread.h"
+#include "logbuf.h"     // dm_progress_*：App 首屏的步骤/进度条
 
 // ---- SDK 运行时初始化的每一步（符号从客体取，缺了就红字报出来，不让它悄悄跳过）----
 // 顺序照参考项目逐条抄的 nn::init::Start：它在真机上跑通了，而顺序错了的后果我们连吃两轮
