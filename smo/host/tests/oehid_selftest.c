@@ -95,6 +95,12 @@ int main(void) {
     CHK(operf() == 0, "掌机下性能模式 = 正常(0)");
     CHK(ofoc() == 1, "默认前台(1)");
     CHK(olang() == 1, "默认语言 = en-US(1)");
+    uint64_t (*make_lang)(int) = (void *)dm_hle_force_lookup("_ZN2nn8settings12LanguageCode4MakeENS0_8LanguageE");
+    int (*equal_lang)(const char *, const char *) = (void *)dm_hle_force_lookup("_ZN2nn8settingseqERKNS0_12LanguageCodeES3_");
+    uint64_t english = make_lang(1), japanese = make_lang(0);
+    CHK(memcmp(&english, "en-US\0\0\0", 8) == 0, "LanguageCode::Make returns the 8-byte code for localized resource lookup");
+    CHK(equal_lang((const char *)&english, "en-US") && !equal_lang((const char *)&english, (const char *)&japanese),
+        "language code equality distinguishes language folders");
     uint32_t m = 0;
     CHK(opop(&m) == 0, "初始通知队列为空");
     dm_oe_set_opmode(1);

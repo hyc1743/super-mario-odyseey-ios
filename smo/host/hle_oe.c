@@ -50,6 +50,20 @@ void dm_oe_set_language(uint64_t lang) { g_lang = lang; }
 static int h_GetOpMode(void) { return g_opmode; }
 static int h_GetPerfMode(void) { return g_opmode == OPMODE_DOCKED ? PERF_BOOST : PERF_NORMAL; }
 static uint64_t h_GetLang(void) { return g_lang; }
+// LanguageCode is an 8-byte value returned in x0 (SDK Make at +0x15b740).
+// These helpers must not be generic zero-returning service stubs: the game uses
+// them to select LocalizedData/<language> before loading layout/font resources.
+static uint64_t h_MakeLanguageCode(int language) {
+    static const char *const codes[] = {
+        "ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru",
+        "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR"
+    };
+    uint64_t value = 0;
+    if (language >= 0 && (unsigned)language < SMO_ARRAY_LEN(codes))
+        memcpy(&value, codes[language], strlen(codes[language]));
+    return value;
+}
+static int h_LanguageCodeEqual(const char *a, const char *b) { return !strncmp(a, b, 8); }
 static int h_GetFocus(void) { return g_focus; }
 static void h_SetFocusHandling(int mode) { (void)mode; }
 static int h_IsInactivityExt(void) { return g_inactivity_extended; }
@@ -69,6 +83,8 @@ static uint64_t h_GetDisplayVersion(void *out) {                            // �
 static void h_GetPseudoDeviceId(void *uuid) { if (uuid) memset(uuid, 0x5A, 16); }
 
 static const hle_impl_ent g_oe_impl[] = {
+    {"_ZN2nn8settings12LanguageCode4MakeENS0_8LanguageE", (void *)h_MakeLanguageCode, "settings；语言代码值"},
+    {"_ZN2nn8settingseqERKNS0_12LanguageCodeES3_", (void *)h_LanguageCodeEqual, "settings；比较语言代码"},
     {"_ZN2nn2oe10InitializeEv", (void *)h_GetOpMode, "oe；初始化，宿主无事可做"},
     {"_ZN2nn2oe16GetOperationModeEv", (void *)h_GetOpMode, "oe；运行模式（掌机/主机）"},
     {"_ZN2nn2oe18GetPerformanceModeEv", (void *)h_GetPerfMode, "oe；性能模式与运行模式一致"},

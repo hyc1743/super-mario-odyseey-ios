@@ -16,7 +16,8 @@ python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded --romfs /path/
 输出所有线程回溯、关键寄存器和三个游戏模块的装载基址，可换算实际游戏偏移。
 本地结果写到 `work/boot-smoke/`。不上传游戏二进制或内存转储到公开 artifact。
 
-范围：这是早期启动检查。CI 从私有输入分支下载并校验约 5 MB 的启动资源测试包；
+范围：这是早期启动检查。CI 从固定的私有提交下载并校验约 63 MiB 的启动资源测试包，
+包含 SystemData、LocalizedData、LayoutData、ShaderData、EventData 和 EffectDataBase；
 不带 --romfs 手动运行时使用空目录。没有验证完整资源、iOS 签名和系统差异、
 Metal 绘制或可玩性；30 秒存活也不能排除线程死锁。需要资源的后续路径应补充真实输入
 再验证，不能通过屏蔽错误或伪造接口成功来让构建变绿。
@@ -44,3 +45,6 @@ Metal 绘制或可玩性；30 秒存活也不能排除线程死锁。需要资�
 - 云端运行 `38933610358` 越过控制器更新，推进到 RootTask/GameSystem 初始化。
   最新停点为 main+0x9caae8 `al::Resource::tryGetByml`，调用方为 EffectDataBase 构造；
   为私有测试输入追加真实 EffectDataBase.szs，再验证依赖加载，不伪造资源对象。
+- 云端运行 `38934019465` 越过特效数据库，停在字体初始化调用的
+  main+0xa7d2ec `al::ResourceSystem::createResource`。补充真实本地化、布局和着色器资源，
+  并实现原先返回 0 的 LanguageCode::Make 与语言代码比较，验证目录选择所用的 ABI。
