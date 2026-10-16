@@ -259,7 +259,8 @@ uint64_t nvn_BufferBuilderSetDevice(uint64_t b, uint64_t dev, uint64_t a2, uint6
     return 0;
 }
 
-// nvnBufferBuilderSetStorage(builder, pool, address, size)
+// nvnBufferBuilderSetStorage(builder, pool, byte_offset, size): the third
+// argument is an offset inside the pool, never an absolute CPU address.
 uint64_t nvn_BufferBuilderSetStorage(uint64_t b, uint64_t pool, uint64_t addr, uint64_t size,
                                      uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a4; (void)a5; (void)a6; (void)a7;
@@ -275,8 +276,12 @@ uint64_t nvn_BufferInitialize(uint64_t buf, uint64_t builder, uint64_t a2, uint6
                               uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *b = need(ARG_OBJ(builder), NVN_T_BUFB, "BufferInitialize(builder)");
+    if (!b) return NVN_FALSE;
+    nvn_st_ent *p = need(ARG_OBJ(b->v[BUFB_POOL]), NVN_T_POOL, "BufferInitialize(pool)");
+    if (!p || b->v[BUFB_ADDR] > p->v[POOL_SIZE] ||
+        b->v[BUFB_SIZE] > p->v[POOL_SIZE] - b->v[BUFB_ADDR]) return NVN_FALSE;
     nvn_st_ent *e = nvn_st_new(ARG_OBJ(buf), NVN_T_BUF);
-    if (!b || !e) return NVN_FALSE;
+    if (!e) return NVN_FALSE;
     e->v[BUF_DEV]  = b->v[BUFB_DEV];
     e->v[BUF_POOL] = b->v[BUFB_POOL];
     e->v[BUF_ADDR] = b->v[BUFB_ADDR];
@@ -295,7 +300,14 @@ uint64_t nvn_BufferGetAddress(uint64_t buf, uint64_t a1, uint64_t a2, uint64_t a
                               uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *e = need(ARG_OBJ(buf), NVN_T_BUF, "BufferGetAddress");
-    return e ? e->v[BUF_ADDR] : 0;
+    if (!e) return 0;
+    nvn_st_ent *p = need(ARG_OBJ(e->v[BUF_POOL]), NVN_T_POOL, "BufferGetAddress(pool)");
+    return p && p->v[POOL_STORAGE] ? p->v[POOL_STORAGE] + e->v[BUF_ADDR] : 0;
+}
+
+uint64_t nvn_BufferMap(uint64_t buf, uint64_t a1, uint64_t a2, uint64_t a3,
+                       uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    return nvn_BufferGetAddress(buf, a1, a2, a3, a4, a5, a6, a7);
 }
 
 // ------------------------------------------------------------------ 同步对象

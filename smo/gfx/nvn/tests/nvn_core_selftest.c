@@ -27,6 +27,7 @@ DECL(nvn_BufferBuilderSetDefaults);
 DECL(nvn_BufferBuilderSetStorage);
 DECL(nvn_BufferInitialize);
 DECL(nvn_BufferGetAddress);
+DECL(nvn_BufferMap);
 DECL(nvn_SyncInitialize);
 DECL(nvn_SyncFinalize);
 DECL(nvn_SyncWait);
@@ -92,11 +93,21 @@ int main(void) {
     CHK(nvn_MemoryPoolMap(OBJ(pool), 0, 0, 0, 0, 0, 0, 0) == 0, "Finalize 之后不能再 Map");
 
     printf("== 4. 缓冲：地址来自池 ==\n");
+    nvn_MemoryPoolInitialize(OBJ(pool), OBJ(poolb), 0, 0, 0, 0, 0, 0);
     CHK(nvn_BufferBuilderSetDefaults(OBJ(bufb), 0, 0, 0, 0, 0, 0, 0) == 0, "缓冲 builder 默认值");
-    CHK(nvn_BufferBuilderSetStorage(OBJ(bufb), OBJ(pool), OBJ(storage) + 64, 256, 0, 0, 0, 0) == 0,
+    CHK(nvn_BufferBuilderSetStorage(OBJ(bufb), OBJ(pool), 64, 256, 0, 0, 0, 0) == 0,
         "缓冲 builder 设存储（+64 偏移，256 字节）");
     CHK(nvn_BufferInitialize(OBJ(buf), OBJ(bufb), 0, 0, 0, 0, 0, 0) == 1, "缓冲 Initialize 成功");
     CHK(nvn_BufferGetAddress(OBJ(buf), 0, 0, 0, 0, 0, 0, 0) == OBJ(storage) + 64, "GetAddress 返回 +64");
+    uint64_t mapped = nvn_lookup("nvnBufferMap")(OBJ(buf), 0, 0, 0, 0, 0, 0, 0);
+    CHK(mapped == OBJ(storage) + 64, "BufferMap dispatch returns pool storage plus byte offset");
+    if (mapped) {
+        memset((void *)(uintptr_t)mapped, 0xA7, 256);
+        CHK(storage[63] == 0 && storage[64] == 0xA7 && storage[319] == 0xA7 && storage[320] == 0,
+            "CPU writes through mapped buffer reach only its pool range");
+    }
+    nvn_BufferBuilderSetStorage(OBJ(bufb), OBJ(pool), 4090, 16, 0, 0, 0, 0);
+    CHK(nvn_BufferInitialize(OBJ(bufb), OBJ(bufb), 0, 0, 0, 0, 0, 0) == 0, "reject buffer extending beyond pool");
 
     printf("== 5. 同步对象：超时 / 信号 / 等到后自动复位 ==\n");
     CHK(nvn_SyncInitialize(OBJ(sync), OBJ(dev), 0, 0, 0, 0, 0, 0) == 1, "SyncInitialize 成功");

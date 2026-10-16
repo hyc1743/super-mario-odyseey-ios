@@ -31,7 +31,7 @@ SKIP = {
     "nvnMemoryPoolInitialize", "nvnMemoryPoolFinalize", "nvnMemoryPoolMap",
     "nvnMemoryPoolGetFlags", "nvnMemoryPoolFlushMappedRange", "nvnMemoryPoolInvalidateMappedRange",
     "nvnBufferBuilderSetDefaults", "nvnBufferBuilderSetDevice", "nvnBufferBuilderSetStorage",
-    "nvnBufferInitialize", "nvnBufferFinalize", "nvnBufferGetAddress",
+    "nvnBufferInitialize", "nvnBufferFinalize", "nvnBufferGetAddress", "nvnBufferMap",
     "nvnSyncInitialize", "nvnSyncFinalize", "nvnSyncWait",
     "nvnSamplerBuilderSetDefaults", "nvnSamplerBuilderSetDevice",
     "nvnSamplerBuilderSetMinMagFilter", "nvnSamplerBuilderSetWrapMode",

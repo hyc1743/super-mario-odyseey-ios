@@ -53,9 +53,14 @@ def main():
         (args.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)
         # Host text logs contain names/addresses, never guest bytes or memory dumps.
-        print("\n".join(data.splitlines()[-55:]), flush=True)
+        print("\n".join(data.splitlines()[:45] + data.splitlines()[-55:]), flush=True)
         if code is not None and code != 0:
-            commands = ["xcrun", "lldb", "-b", "-o", "run", "-o", "thread backtrace all", "--", executable]
+            commands = ["xcrun", "lldb", "-b", "-o", "run",
+                        "-k", "thread backtrace all", "-k", "register read pc x21 x8",
+                        "-k", "expression -f x -- (unsigned long long)g_mod[0].base",
+                        "-k", "expression -f x -- (unsigned long long)g_mod[1].base",
+                        "-k", "expression -f x -- (unsigned long long)g_mod[2].base",
+                        "--", executable]
             with (args.output / "backtrace.log").open("wb") as output:
                 try:
                     subprocess.run(commands, env=env, stdout=output, stderr=subprocess.STDOUT,
