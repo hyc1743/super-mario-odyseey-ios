@@ -13,6 +13,7 @@
 #include "nvn_tex.h"
 #include "nvn_gpu.h"
 #include "nvn_shader.h"
+#include "nvn_resources.h"
 #include <time.h>
 
 // 宿主侧睡眠：轮询等待用。mingw 有 usleep，其他平台用 nanosleep。
@@ -454,6 +455,7 @@ uint64_t nvn_TextureInitialize(uint64_t obj, uint64_t builder, uint64_t a2, uint
     if (!t) return NVN_FALSE;
     memcpy(t->v, b->v, sizeof t->v);
     t->v[15] = nvn_st_resource_serial();
+    nvn_resources_stamp(ARG_OBJ(obj),NVN_T_TEX);
     return NVN_TRUE;
 }
 uint64_t nvn_TextureFinalize(uint64_t obj, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -660,6 +662,7 @@ uint64_t nvn_SamplerInitialize(uint64_t s, uint64_t builder, uint64_t a2, uint64
     if (!b || !e) return NVN_FALSE;
     memcpy(e->v,b->v,sizeof e->v);
     e->v[15] = nvn_st_resource_serial();
+    nvn_resources_stamp(ARG_OBJ(s),NVN_T_SAMPLER);
     return NVN_TRUE;
 }
 

@@ -5,10 +5,7 @@
 static void snapshot(nvn_resource_snapshot *out, const void *object, unsigned type) {
     memset(out,0,sizeof *out);
     if (!object) return;
-    nvn_st_ent *s=nvn_st_get(object,type);
-    if (!s) NVN_DIE("missing resource type=%u object=%p",type,object);
-    out->object=(uintptr_t)object;
-    memcpy(out->words,s->v,sizeof out->words);
+    if (!nvn_resources_snapshot(object,type,out)) NVN_DIE("missing resource type=%u object=%p",type,object);
 }
 static void attachment(nvn_attachment *out, const NVNtexture *texture, const NVNtextureView *view) {
     memset(out,0,sizeof *out);

@@ -55,6 +55,12 @@ int main(void) {
 
     nvn_st_ent *t=nvn_st_new(texture,12); t->v[1]=128; t->v[5]=37; t->v[15]=123;
     nvn_st_ent *t2=nvn_st_new(texture2,12); t2->v[1]=64; t2->v[15]=456;
+    unsigned char alias[192];nvn_resource_snapshot alias_snapshot;
+    nvn_resources_stamp(texture,12);memcpy(alias,texture,sizeof alias);
+    assert(nvn_resources_snapshot(alias,12,&alias_snapshot)&&alias_snapshot.object==U(texture)&&alias_snapshot.words[1]==128);
+    t->v[15]++;
+    assert(!nvn_resources_snapshot(alias,12,&alias_snapshot));
+    t->v[15]--;nvn_resources_stamp(texture,12);
     CALL(TexturePoolRegisterTexture,tp,3,texture,&copy,0);
     CALL(TexturePoolRegisterTexture,tp2,3,texture2,NULL,0);
     nvn_resource_snapshot a,b; nvn_view_state view;

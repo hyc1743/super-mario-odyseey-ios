@@ -28,6 +28,9 @@ int nvn_resources_texture(const void *pool, uint32_t id, int image,
                           nvn_resource_snapshot *out, nvn_view_state *view);
 int nvn_resources_sampler(const void *pool, uint32_t id, nvn_resource_snapshot *out);
 int nvn_resources_snapshot(const void *object, uint32_t type, nvn_resource_snapshot *out);
+/* Opaque resource identity survives guest memcpy; owner and serial are checked
+ * against the live state index before following an alias. Uses 24 object bytes. */
+void nvn_resources_stamp(void *object,uint32_t type);
 void nvn_resources_view(const void *object, nvn_view_state *out);
 
 #endif

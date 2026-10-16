@@ -24,10 +24,25 @@ static pthread_mutex_t resource_lock = PTHREAD_MUTEX_INITIALIZER;
 #define PTR(x) ((void *)(uintptr_t)(x))
 #define VIEW(x) ((void *)(uintptr_t)(x))
 
+typedef struct { uint64_t magic,owner,serial; } resource_identity;
+#define RESOURCE_MAGIC UINT64_C(0x534d4f5245530000)
+void nvn_resources_stamp(void *object,uint32_t type) {
+    nvn_st_ent *e=nvn_st_get(object,type);
+    if(e){resource_identity id={RESOURCE_MAGIC|type,(uintptr_t)object,e->v[15]};memcpy(object,&id,sizeof id);}
+}
 int nvn_resources_snapshot(const void *object, uint32_t type, nvn_resource_snapshot *out) {
+    if(!object || !out)return 0;
     nvn_st_ent *e = nvn_st_get(object, type);
-    if (!e || !out) return 0;
-    out->object=(uint64_t)(uintptr_t)object;
+    if(!e && (type==8 || type==10 || type==12)){
+        resource_identity id;memcpy(&id,object,sizeof id);
+        if(id.magic!=(RESOURCE_MAGIC|type) || !id.serial)return 0;
+        e=nvn_st_get((void *)(uintptr_t)id.owner,type);
+        if(!e || e->v[15]!=id.serial)return 0;
+        static unsigned aliases;
+        if(aliases++<8)NVN_LOG("NVN_RESOURCE_ALIAS object=%p owner=%p type=%u serial=%llu",object,e->key,type,(unsigned long long)id.serial);
+    }
+    if (!e) return 0;
+    out->object=(uint64_t)(uintptr_t)e->key;
     memcpy(out->words,e->v,sizeof out->words);
     return 1;
 }
