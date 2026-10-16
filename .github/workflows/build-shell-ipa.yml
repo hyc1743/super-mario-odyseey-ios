@@ -217,7 +217,7 @@ jobs:
             fi
           fi
           python3 smo/ios/tools/embed_inject.py /tmp/embed-input.zip .
-      - name: 构建并打包      - name: 构建并打包
+      - name: 构建并打包
         env:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
           # MARKETING_VERSION（CFBundleShortVersionString 只允许数字与点，脚本里会归化）
