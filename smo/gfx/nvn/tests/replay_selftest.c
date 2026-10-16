@@ -30,15 +30,15 @@ int main(void) {
 
     printf("== 0. 造出设备/程序/控制段（真实的状态层 API）==\n");
     nvn_DeviceBuilderSetDefaults((uint64_t)(uintptr_t)devb, 0, 0, 0, 0, 0, 0, 0);
-    CHK(nvn_DeviceInitialize((uint64_t)(uintptr_t)dev, (uint64_t)(uintptr_t)devb, 0, 0, 0, 0, 0, 0) == 0,
+    CHK(nvn_DeviceInitialize((uint64_t)(uintptr_t)dev, (uint64_t)(uintptr_t)devb, 0, 0, 0, 0, 0, 0) == 1,
         "设备初始化");
-    CHK(nvn_ProgramInitialize((uint64_t)(uintptr_t)prog, (uint64_t)(uintptr_t)dev, 0, 0, 0, 0, 0, 0) == 0,
+    CHK(nvn_ProgramInitialize((uint64_t)(uintptr_t)prog, (uint64_t)(uintptr_t)dev, 0, 0, 0, 0, 0, 0) == 1,
         "程序初始化");
     // 控制段按游戏归档槽布局造：marker@+0 / SPH+码@+0x30
     *(uint32_t *)ctrl = 0x12345678u;
     for (unsigned i = 0; i < sizeof blob; i++) ctrl[0x30 + i] = blob[i];
     CHK(nvn_ProgramSetShaders((uint64_t)(uintptr_t)prog, sizeof ctrl, (uint64_t)(uintptr_t)ctrl,
-                              0, 0, 0, 0, 0) == 0, "SetShaders（控制段已记下）");
+                              0, 0, 0, 0, 0) == 1, "SetShaders（控制段已记下）");
 
     printf("== 1. 空记录：什么都不该发生 ==\n");
     nvn_replay_reset();

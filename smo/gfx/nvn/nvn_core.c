@@ -106,14 +106,14 @@ uint64_t nvn_DeviceInitialize(uint64_t dev, uint64_t builder, uint64_t a2, uint6
                               uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *d = nvn_st_new(ARG_OBJ(dev), NVN_T_DEVICE);
-    if (!d) return 1;                                   // NVN 失败返回非 0
+    if (!d) return NVN_FALSE;                                   // NVNboolean: false on failure
     nvn_st_ent *b = nvn_st_get(ARG_OBJ(builder), NVN_T_DEVB);
     d->v[0] = b ? b->v[DEVB_FLAGS] : 0;                 // 0 号位存设备标志
     d->v[1] = 0;                                        // 1 号位：纹理句柄计数
     d->v[2] = 0;                                        // 2 号位：texel-fetch 句柄计数
     d->v[3] = 0;                                        // 3 号位：image 句柄计数
     NVN_LOG("设备已初始化（%p，标志 0x%llx）", ARG_OBJ(dev), (unsigned long long)d->v[0]);
-    return 0;
+    return NVN_TRUE;
 }
 
 uint64_t nvn_DeviceFinalize(uint64_t dev, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -123,14 +123,17 @@ uint64_t nvn_DeviceFinalize(uint64_t dev, uint64_t a1, uint64_t a2, uint64_t a3,
     return 0;
 }
 
-// 设备属性查询。**出参宽度按 int（4 字节）写**：NVN 的 C 接口对 GetInteger 用 int*。
-// 这条是推测（不是实测），所以每次都打日志；真机上如果发现它被调用，就要按调用点核实宽度。
+// Device properties adapted from d2r-mobile (MIT; third_party/d2r-mobile.LICENSE).
+// SMO main+0x731358 requires major 53, minor >=13. These are API compatibility
+// values, independent of the host GPU. All outputs are signed 32-bit integers.
+#include "nvn_device_info.inc"
 uint64_t nvn_DeviceGetInteger(uint64_t dev, uint64_t pname, uint64_t out, uint64_t a3,
                               uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
-    (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-    if (!need(ARG_OBJ(dev), NVN_T_DEVICE, "DeviceGetInteger")) return 1;
-    NVN_LOG("DeviceGetInteger(pname=%u) → 先回 0（宽度按 int 猜的，见注释）", ARG_U32(pname));
-    if (out) *(uint32_t *)(uintptr_t)out = 0;
+    (void)dev; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    uint32_t index = ARG_U32(pname);
+    int value = index < sizeof g_devinfo / sizeof g_devinfo[0] ? g_devinfo[index] : 0;
+    if (out) *(int32_t *)(uintptr_t)out = value;
+    NVN_LOG("DeviceGetInteger(%u) = %d", index, value);
     return 0;
 }
 
@@ -189,13 +192,13 @@ uint64_t nvn_MemoryPoolInitialize(uint64_t pool, uint64_t builder, uint64_t a2, 
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *b = need(ARG_OBJ(builder), NVN_T_POOLB, "MemoryPoolInitialize(builder)");
     nvn_st_ent *p = nvn_st_new(ARG_OBJ(pool), NVN_T_POOL);
-    if (!b || !p) return 1;
+    if (!b || !p) return NVN_FALSE;
     p->v[POOL_DEV]     = b->v[POOLB_DEV];
     p->v[POOL_STORAGE] = b->v[POOLB_STORAGE];
     p->v[POOL_SIZE]    = b->v[POOLB_SIZE];
     p->v[POOL_FLAGS]   = b->v[POOLB_FLAGS];
     p->v[POOL_MAPPED]  = 0;
-    return 0;
+    return NVN_TRUE;
 }
 
 uint64_t nvn_MemoryPoolFinalize(uint64_t pool, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -273,12 +276,12 @@ uint64_t nvn_BufferInitialize(uint64_t buf, uint64_t builder, uint64_t a2, uint6
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *b = need(ARG_OBJ(builder), NVN_T_BUFB, "BufferInitialize(builder)");
     nvn_st_ent *e = nvn_st_new(ARG_OBJ(buf), NVN_T_BUF);
-    if (!b || !e) return 1;
+    if (!b || !e) return NVN_FALSE;
     e->v[BUF_DEV]  = b->v[BUFB_DEV];
     e->v[BUF_POOL] = b->v[BUFB_POOL];
     e->v[BUF_ADDR] = b->v[BUFB_ADDR];
     e->v[BUF_SIZE] = b->v[BUFB_SIZE];
-    return 0;
+    return NVN_TRUE;
 }
 
 uint64_t nvn_BufferFinalize(uint64_t buf, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -300,10 +303,10 @@ uint64_t nvn_SyncInitialize(uint64_t sync, uint64_t dev, uint64_t a2, uint64_t a
                             uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *e = nvn_st_new(ARG_OBJ(sync), NVN_T_SYNC);
-    if (!e) return 1;
+    if (!e) return NVN_FALSE;
     e->v[SYNC_DEV] = (uint64_t)(uintptr_t)ARG_OBJ(dev);
     e->v[SYNC_SIGNALED] = 0;
-    return 0;
+    return NVN_TRUE;
 }
 
 uint64_t nvn_SyncFinalize(uint64_t sync, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -389,9 +392,9 @@ uint64_t nvn_SamplerInitialize(uint64_t s, uint64_t builder, uint64_t a2, uint64
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *b = nvn_st_get(ARG_OBJ(builder), NVN_T_SAMPLERB);
     nvn_st_ent *e = nvn_st_new(ARG_OBJ(s), NVN_T_SAMPLER);
-    if (!b || !e) return 1;
+    if (!b || !e) return NVN_FALSE;
     for (unsigned i = 0; i < 12; i++) e->v[i] = b->v[i];
-    return 0;
+    return NVN_TRUE;
 }
 
 uint64_t nvn_SamplerFinalize(uint64_t s, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -407,9 +410,9 @@ uint64_t nvn_ProgramInitialize(uint64_t prog, uint64_t dev, uint64_t a2, uint64_
                                uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *e = nvn_st_new(ARG_OBJ(prog), NVN_T_PROG);
-    if (!e) return 1;
+    if (!e) return NVN_FALSE;
     e->v[PROG_DEV] = (uint64_t)(uintptr_t)ARG_OBJ(dev);
-    return 0;
+    return NVN_TRUE;
 }
 
 uint64_t nvn_ProgramFinalize(uint64_t prog, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -427,7 +430,7 @@ uint64_t nvn_ProgramSetShaders(uint64_t prog, uint64_t size, uint64_t ctrl, uint
                                uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *e = need(ARG_OBJ(prog), NVN_T_PROG, "ProgramSetShaders");
-    if (!e) return 1;
+    if (!e) return NVN_FALSE;
     e->v[PROG_CTRL]   = ctrl;
     e->v[PROG_CTRLSZ] = size;
     g_shader_sets++;
@@ -441,7 +444,7 @@ uint64_t nvn_ProgramSetShaders(uint64_t prog, uint64_t size, uint64_t ctrl, uint
                 p ? p[8] : 0, p ? p[9] : 0, p ? p[10] : 0, p ? p[11] : 0,
                 p ? p[12] : 0, p ? p[13] : 0, p ? p[14] : 0, p ? p[15] : 0);
     }
-    return 0;
+    return NVN_TRUE;
 }
 
 unsigned nvn_shader_sets(void) { return g_shader_sets; }

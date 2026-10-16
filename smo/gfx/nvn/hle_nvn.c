@@ -9,6 +9,19 @@
 // 统一签名：所有 NVN 函数都按 (a0..a7) → u64 收，理由见 nvn_host.h。参数按真实签名解释的工作
 // 留给各函数自己的实现；在只有记录桩的阶段，参数原样进记录。
 #include "nvn_host.h"
+#include <stdarg.h>
+
+static void (*g_log_handler)(const char *);
+void nvn_set_log_handler(void (*handler)(const char *)) { g_log_handler = handler; }
+void nvn_host_log(const char *fmt, ...) {
+    char message[1024];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(message, sizeof message, fmt, args);
+    va_end(args);
+    if (g_log_handler) g_log_handler(message);
+    else fprintf(stderr, "[nvn] %s\n", message);
+}
 
 // ---------------------------------------------------------------- 命令记录（Metal 重放的接缝）
 // 现在只记不重放：一条记录 = 函数名指针 + 8 个参数。重放层接上后从这里取。

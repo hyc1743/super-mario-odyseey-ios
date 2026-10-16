@@ -13,7 +13,9 @@ static const hle_impl_ent g_nvn_impl[] = {
       "唯一的图形 import：按名字返回实现（469 项表）" },
 };
 
+static void nvn_log_to_app(const char *message) { LOG("[nvn] %s", message); }
 static void __attribute__((constructor)) nvn_reg(void) {
+    nvn_set_log_handler(nvn_log_to_app);
     hle_impl_register(g_nvn_impl, sizeof g_nvn_impl / sizeof g_nvn_impl[0]);
 }
 

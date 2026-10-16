@@ -2352,3 +2352,40 @@ Windows 检查页权限调用与账本；全部平台强制模拟 16 KiB 宿主�
 HIPC 自检增加 4 个初始化入口确实解析为真实现的检查，工具自检覆盖本地引用计数、fs 开关
 与 SDK 内部初始化入口。Windows 快速回归 7/7 通过（含 15 个 C 自检）。
 IPA 和真机结果另按云端构建及用户测试记录。
+
+## 2.126 v0.6.9 进入 nnMain 后 SIGSEGV：NVN 成功值及设备属性错误（v0.6.10）
+
+2026-10-17 用户上传日志：上轮物理映射及 SDK 初始化已通过，全部模块构造函数已执行，
+进入 `nnMain` 后崩在 main+`0x775c00`（`agl::driver::NVNMgr` 构造函数），
+指令 `ldr x9,[x8,#0x30]`，x8=0、FAR=`0x30`。GOT 回溯到
+`sead::Graphics::sInstance`（main+`0x24741f8`），说明图形对象尚未建立。
+
+用本地 LLVM 读取调用链和 PLT/GOT（不是 REA 反编译结果）：
+`GameFrameworkNx::initializeGraphicsSystem` 在 main+`0x731314` 检查
+`nvnDeviceInitialize` 返回值低字节，0 表示失败；随后 main+`0x731358` 要求
+DeviceGetInteger 的 API major=53、minor>=13。宿主此前恰好成功返回 0、所有属性填 0，
+使该函数提前退出；之后 AGL 仍然创建 NVNMgr 并解引用空单例。旧 C 自检也把成功值写反。
+
+修复：
+
+- 将已有 Device / MemoryPool / Buffer / Sync / Sampler / Program 的 Initialize，
+  以及 ProgramSetShaders 的 NVNboolean 改为成功 1、失败 0；void/枚举接口不混用此约定。
+- DeviceGetInteger 输出 int32，提供 API 53.13 及参考项目的设备限制表；支持不带设备的查询。
+  表来源 d2r-mobile `dm/gfx/nvn/hle_nvn.c`（MIT，已有许可）；这些是兼容值，不是 iPhone 硬件报告。
+- 参照 `dm/gfx/hle_vi.c` 实现全部 6 个被导入的显示接口，输出有效的 display/layer/native
+  标识；Vsync 使用 SDK CreateSystemEvent 和宿主 60 Hz 节拍，可被客体 WaitSynchronization 等待。
+  尚未与平台呈现节拍关联，宿主窗口标识也尚不是 CAMetalLayer。
+- App 检查资源目录后，实际设置 SMO_ROMFS/SMO_SAVE/SMO_TEMP 并建立可写目录。
+  旧日志已经找到 `Documents/SMO Resource/RomFS`，但文件服务仍报环境变量未设置，
+  `content` 挂载因此失败；现将发现的同一条路径传给文件服务。
+- NVN 日志接到 App 环形日志与持久日志中，避免关键初始化记录仅出现在被截断的 stderr。
+
+验证：新增 vi_selftest 覆盖输出参数、错误输入、重复绑定、多事件与后续节拍真实等待。
+SDK 的事件布局由测试替身提供，内核句柄/等待使用实际 hle_thread.c；fs 自检增加 content 挂载读取。
+修正旧 NVN 单测并增加实际 API 版本条件、4 字节输出边界、全局查询、无效初始化失败检查。
+另新增可选 `smo/verify/nvn_boot_replay.py`，用 Unicorn 执行本地 main+`0x731270..0x7313c4`
+和原生 nvnLoadCProcs，对接实际宿主 C 动态库，仅替代设备内存分配：旧版本进入 rejected，
+修复后进入 passed。回放仍记录 3 个当前未注册的扩展函数；这段验证不覆盖后续初始化或渲染，
+不能据此宣称完整游戏或真机启动成功。
+
+Windows 快速回归 7/7 通过（含新增 vi_selftest，共 16 个 C 自检）。

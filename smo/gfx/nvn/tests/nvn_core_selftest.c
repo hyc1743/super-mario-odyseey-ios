@@ -13,6 +13,7 @@ DECL(nvn_DeviceBuilderSetDefaults);
 DECL(nvn_DeviceBuilderSetFlags);
 DECL(nvn_DeviceInitialize);
 DECL(nvn_DeviceFinalize);
+DECL(nvn_DeviceGetInteger);
 DECL(nvn_DeviceGetProcAddress);
 DECL(nvn_MemoryPoolBuilderSetDefaults);
 DECL(nvn_MemoryPoolBuilderSetDevice);
@@ -52,10 +53,20 @@ int main(void) {
     printf("== 1. 设备：builder → Initialize ==\n");
     CHK(nvn_DeviceBuilderSetDefaults(OBJ(devb), 0, 0, 0, 0, 0, 0, 0) == 0, "BuilderSetDefaults 成功");
     CHK(nvn_DeviceBuilderSetFlags(OBJ(devb), 0x2, 0, 0, 0, 0, 0, 0) == 0, "BuilderSetFlags 成功");
-    CHK(nvn_DeviceInitialize(OBJ(dev), OBJ(devb), 0, 0, 0, 0, 0, 0) == 0, "DeviceInitialize 成功");
+    CHK(nvn_DeviceInitialize(OBJ(dev), OBJ(devb), 0, 0, 0, 0, 0, 0) == 1, "DeviceInitialize 成功");
     CHK(nvn_st_count() == 2, "状态表里此刻 2 个对象（builder + device）");
     const nvn_st_ent *de = nvn_st_get(dev, 1 /* NVN_T_DEVICE */);
     CHK(de && de->v[0] == 0x2, "设备记住了 builder 里的标志 0x2");
+    // Actual game guards: main+0x731314 tests the low byte for true;
+    // main+0x731358 requires API major 53 and minor >=13 before Graphics exists.
+    struct { int value; uint32_t guard; } prop = {-1, 0x1234abcd};
+    nvn_DeviceGetInteger(OBJ(dev), 0, OBJ(&prop.value), 0, 0, 0, 0, 0);
+    CHK(prop.value == 53 && prop.guard == 0x1234abcd, "game API major guard passes; property writes exactly 4 bytes");
+    nvn_DeviceGetInteger(OBJ(dev), 1, OBJ(&prop.value), 0, 0, 0, 0, 0);
+    CHK(prop.value >= 13, "game API minor guard passes");
+    nvn_DeviceGetInteger(0, 3, OBJ(&prop.value), 0, 0, 0, 0, 0);
+    CHK(prop.value > 0, "global device limits can be queried without a device");
+    CHK(nvn_DeviceInitialize(0, OBJ(devb), 0, 0, 0, 0, 0, 0) == 0, "invalid initialization returns NVN_FALSE");
 
     printf("== 2. 关键路径：GetProcAddress 拿到的必须是【我们】的实现 ==\n");
     uint64_t got = nvn_DeviceGetProcAddress(OBJ(dev), OBJ("nvnMemoryPoolMap"), 0, 0, 0, 0, 0, 0);
@@ -72,7 +83,7 @@ int main(void) {
     CHK(nvn_MemoryPoolBuilderSetStorage(OBJ(poolb), OBJ(storage), sizeof storage, 0, 0, 0, 0, 0) == 0,
         "池 builder 设存储");
     CHK(nvn_MemoryPoolBuilderSetFlags(OBJ(poolb), 1, 0, 0, 0, 0, 0, 0) == 0, "池 builder 设标志 1");
-    CHK(nvn_MemoryPoolInitialize(OBJ(pool), OBJ(poolb), 0, 0, 0, 0, 0, 0) == 0, "池 Initialize 成功");
+    CHK(nvn_MemoryPoolInitialize(OBJ(pool), OBJ(poolb), 0, 0, 0, 0, 0, 0) == 1, "池 Initialize 成功");
     CHK(nvn_MemoryPoolMap(OBJ(pool), 0, 0, 0, 0, 0, 0, 0) == OBJ(storage),
         "Map 返回的地址就是客体给的存储地址（客体原生执行，地址通用，不需要拷贝）");
     CHK(nvn_MemoryPoolGetFlags(OBJ(pool), 0, 0, 0, 0, 0, 0, 0) == 1, "GetFlags 拿回 1");
@@ -84,11 +95,11 @@ int main(void) {
     CHK(nvn_BufferBuilderSetDefaults(OBJ(bufb), 0, 0, 0, 0, 0, 0, 0) == 0, "缓冲 builder 默认值");
     CHK(nvn_BufferBuilderSetStorage(OBJ(bufb), OBJ(pool), OBJ(storage) + 64, 256, 0, 0, 0, 0) == 0,
         "缓冲 builder 设存储（+64 偏移，256 字节）");
-    CHK(nvn_BufferInitialize(OBJ(buf), OBJ(bufb), 0, 0, 0, 0, 0, 0) == 0, "缓冲 Initialize 成功");
+    CHK(nvn_BufferInitialize(OBJ(buf), OBJ(bufb), 0, 0, 0, 0, 0, 0) == 1, "缓冲 Initialize 成功");
     CHK(nvn_BufferGetAddress(OBJ(buf), 0, 0, 0, 0, 0, 0, 0) == OBJ(storage) + 64, "GetAddress 返回 +64");
 
     printf("== 5. 同步对象：超时 / 信号 / 等到后自动复位 ==\n");
-    CHK(nvn_SyncInitialize(OBJ(sync), OBJ(dev), 0, 0, 0, 0, 0, 0) == 0, "SyncInitialize 成功");
+    CHK(nvn_SyncInitialize(OBJ(sync), OBJ(dev), 0, 0, 0, 0, 0, 0) == 1, "SyncInitialize 成功");
     CHK(nvn_SyncWait(OBJ(sync), 1000000ull, 0, 0, 0, 0, 0, 0) != 0, "没人信号时等待超时（1ms）");
     nvn_sync_signal(sync);
     CHK(nvn_SyncWait(OBJ(sync), 0, 0, 0, 0, 0, 0, 0) == 0, "信号之后等待立即成功");
@@ -102,7 +113,7 @@ int main(void) {
     CHK(nvn_SamplerBuilderSetWrapMode(OBJ(sampb), 4, 0, 0, 0, 0, 0, 0) == 0, "设环绕 4");
     CHK(nvn_SamplerBuilderSetMaxAnisotropy(OBJ(sampb), 8, 0, 0, 0, 0, 0, 0) == 0, "设各向异性 8");
     CHK(nvn_SamplerBuilderSetLodBias(OBJ(sampb), 1.5f, 0, 0, 0, 0, 0, 0) == 0, "设 LOD 偏移 1.5f");
-    CHK(nvn_SamplerInitialize(OBJ(samp), OBJ(sampb), 0, 0, 0, 0, 0, 0) == 0, "采样器 Initialize 成功");
+    CHK(nvn_SamplerInitialize(OBJ(samp), OBJ(sampb), 0, 0, 0, 0, 0, 0) == 1, "采样器 Initialize 成功");
     const nvn_st_ent *se = nvn_st_get(samp, 8 /* NVN_T_SAMPLER */);
     CHK(se != NULL, "采样器对象在状态表里");
     if (se) {
@@ -118,8 +129,8 @@ int main(void) {
     printf("== 8. 程序：控制段被记下来（Metal 重放层要按它查已译着色器）==\n");
     static uint8_t ctrl[64];
     for (unsigned i = 0; i < sizeof ctrl; i++) ctrl[i] = (uint8_t)(i * 7);
-    CHK(nvn_ProgramInitialize(OBJ(prog), OBJ(dev), 0, 0, 0, 0, 0, 0) == 0, "ProgramInitialize 成功");
-    CHK(nvn_ProgramSetShaders(OBJ(prog), sizeof ctrl, OBJ(ctrl), 0, 0, 0, 0, 0) == 0, "SetShaders 成功");
+    CHK(nvn_ProgramInitialize(OBJ(prog), OBJ(dev), 0, 0, 0, 0, 0, 0) == 1, "ProgramInitialize 成功");
+    CHK(nvn_ProgramSetShaders(OBJ(prog), sizeof ctrl, OBJ(ctrl), 0, 0, 0, 0, 0) == 1, "SetShaders 成功");
     const nvn_st_ent *pe = nvn_st_get(prog, 10 /* NVN_T_PROG */);
     CHK(pe && pe->v[1] == OBJ(ctrl) && pe->v[2] == sizeof ctrl, "控制段指针与大小都记下了");
 

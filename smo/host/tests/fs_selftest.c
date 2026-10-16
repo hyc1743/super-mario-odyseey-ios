@@ -101,6 +101,11 @@ int main(void) {
     CHK(((uint32_t (*)(size_t *))GET("_ZN2nn2fs22QueryMountRomCacheSizeEPm"))(&cache) == 0 && cache > 0,
         "QueryMountRomCacheSize 返回非 0 缓存");
     CHK(((fn_mount)GET("_ZN2nn2fs8MountRomEPKcPvm"))("rom", NULL, 0) == 0, "挂载 rom（只读）");
+    CHK(((fn_mount)GET("_ZN2nn2fs8MountRomEPKcPvm"))("content", NULL, 0) == 0, "挂载游戏实际使用的 content 名称");
+    uint64_t content_file = 0;
+    CHK(((fn_open)GET("_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci"))(&content_file, "content:/System/Version.txt", 1) == 0,
+        "content 挂载能打开 SMO_ROMFS 中的资源");
+    if (content_file) ((fn_close)GET("_ZN2nn2fs9CloseFileENS0_10FileHandleE"))(content_file);
     CHK(((uint32_t (*)(const char *))GET("_ZN2nn2fs21MountTemporaryStorageEPKc"))("temp") == 0, "挂载 temp");
     CHK(((fn_mountsave)GET("_ZN2nn2fs13MountSaveDataEPKcRKNS_7account3UidE"))("save", NULL) == 0, "挂载存档（事务式）");
     (void)r;

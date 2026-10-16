@@ -173,6 +173,23 @@ static void RunHost(void) {
                            sortedArrayUsingSelector:@selector(compare:)];
             for (NSString *e in es) LOG("   · %s", e.UTF8String);
         }
+        // Discovery and fs HLE must use the same directory, including wrapped
+        // layouts such as Documents/SMO Resource/RomFS.
+        NSString *save = [docs.path stringByAppendingPathComponent:@"SMOSaves"];
+        NSString *temp = [NSTemporaryDirectory() stringByAppendingPathComponent:@"SMO"];
+        NSError *pathError = nil;
+        if (![fm createDirectoryAtPath:save withIntermediateDirectories:YES attributes:nil error:&pathError] ||
+            ![fm createDirectoryAtPath:temp withIntermediateDirectories:YES attributes:nil error:&pathError]) {
+            LOG("无法建立存档或临时目录：%s", pathError.localizedDescription.UTF8String);
+            dm_progress_finish(DM_RUN_FAIL, "无法建立游戏数据目录");
+            return;
+        }
+        if (setenv("SMO_ROMFS", rp, 1) || setenv("SMO_SAVE", save.fileSystemRepresentation, 1) ||
+            setenv("SMO_TEMP", temp.fileSystemRepresentation, 1)) {
+            dm_progress_finish(DM_RUN_FAIL, "无法设置游戏资源路径");
+            return;
+        }
+        LOG("文件服务已接入 RomFS：%s", rp);
     }
     LOG("== SMO 宿主（App 内）：从 %s 装载 ==", ep);
     // 不装 rtld：宿主自己扮演 rtld（映射/重定位/DT_INIT 都在 loader_core.c），而 rtld 的 32 条重定位

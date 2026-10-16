@@ -14,8 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NVN_LOG(...) do { fprintf(stderr, "[nvn] " __VA_ARGS__); fputc('\n', stderr); } while (0)
+void nvn_host_log(const char *fmt, ...);
+void nvn_set_log_handler(void (*handler)(const char *));
+#define NVN_LOG(...) nvn_host_log(__VA_ARGS__)
 #define NVN_DIE(...) do { NVN_LOG("FATAL " __VA_ARGS__); abort(); } while (0)
+
+enum { NVN_FALSE = 0, NVN_TRUE = 1 }; // NVNboolean is not an nn::Result.
 
 typedef uint64_t (*nvn_fn)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 typedef struct { const char *name; nvn_fn fn; } nvn_ent;
