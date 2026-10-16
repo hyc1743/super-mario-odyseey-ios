@@ -71,8 +71,6 @@ void nvn_host_sleep_us(unsigned us) {
 #define SYNC_DEV        0
 #define SYNC_SIGNALED   1
 #define PROG_DEV        0
-#define PROG_CTRL       1
-#define PROG_CTRLSZ     2
 
 // ------------------------------------------------------------------ 辅助
 #define ARG_OBJ(a)   ((void *)(uintptr_t)(a))
@@ -236,6 +234,13 @@ uint64_t nvn_MemoryPoolGetFlags(uint64_t pool, uint64_t a1, uint64_t a2, uint64_
     (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *p = need(ARG_OBJ(pool), NVN_T_POOL, "MemoryPoolGetFlags");
     return p ? p->v[POOL_FLAGS] : 0;
+}
+
+uint64_t nvn_MemoryPoolGetBufferAddress(uint64_t pool, uint64_t a1, uint64_t a2, uint64_t a3,
+                                       uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
+    (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    nvn_st_ent *p = need(ARG_OBJ(pool), NVN_T_POOL, "MemoryPoolGetBufferAddress");
+    return p ? p->v[POOL_STORAGE] : 0;
 }
 
 // 主机与 GPU 的一致性操作：客体内存就是宿主内存，所以这里是空操作（不是"没实现"）。
@@ -566,27 +571,23 @@ uint64_t nvn_ProgramFinalize(uint64_t prog, uint64_t a1, uint64_t a2, uint64_t a
     return 0;
 }
 
-// nvnProgramSetShaders(program, controlSize, control)：
-// 控制段就是 Maxwell 着色器 blob（我们的离线翻译链吃的东西，见 STATUS.md 第七轮）。
-// 这里先把控制段记下来并打印键信息（大小 + 头 16 字节），Metal 重放层接上后按它查 18470 个已译着色器。
+// nvnProgramSetShaders(program, int count, const NVNshaderData *stages).
+// Copy the descriptors: the caller's temporary array may disappear on return.
 static unsigned g_shader_sets;
-uint64_t nvn_ProgramSetShaders(uint64_t prog, uint64_t size, uint64_t ctrl, uint64_t a3,
+uint64_t nvn_ProgramSetShaders(uint64_t prog, uint64_t count, uint64_t stages, uint64_t a3,
                                uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *e = need(ARG_OBJ(prog), NVN_T_PROG, "ProgramSetShaders");
     if (!e) return NVN_FALSE;
-    e->v[PROG_CTRL]   = ctrl;
-    e->v[PROG_CTRLSZ] = size;
+    int n = (int32_t)count;
+    if (n < 0 || n > 6 || (n && !stages)) return NVN_FALSE;
+    e->v[NVN_PROG_NSTAGES] = (uint64_t)n;
+    memset(&e->v[NVN_PROG_STAGE_BASE], 0, 6 * sizeof(nvn_shader_data));
+    if (n) memcpy(&e->v[NVN_PROG_STAGE_BASE], ARG_OBJ(stages), (size_t)n * sizeof(nvn_shader_data));
     g_shader_sets++;
     if (g_shader_sets <= 3) {
-        const uint8_t *p = (const uint8_t *)(uintptr_t)ctrl;
-        NVN_LOG("ProgramSetShaders：控制段 %llu 字节，头 16 字节 %02x%02x%02x%02x %02x%02x%02x%02x "
-                "%02x%02x%02x%02x %02x%02x%02x%02x",
-                (unsigned long long)size,
-                p ? p[0] : 0, p ? p[1] : 0, p ? p[2] : 0, p ? p[3] : 0,
-                p ? p[4] : 0, p ? p[5] : 0, p ? p[6] : 0, p ? p[7] : 0,
-                p ? p[8] : 0, p ? p[9] : 0, p ? p[10] : 0, p ? p[11] : 0,
-                p ? p[12] : 0, p ? p[13] : 0, p ? p[14] : 0, p ? p[15] : 0);
+        NVN_LOG("ProgramSetShaders stages=%d first_data=%#llx", n,
+                (unsigned long long)e->v[NVN_PROG_STAGE_BASE]);
     }
     return NVN_TRUE;
 }

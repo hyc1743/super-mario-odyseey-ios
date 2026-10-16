@@ -37,7 +37,8 @@ int main(void) {
     // 控制段按游戏归档槽布局造：marker@+0 / SPH+码@+0x30
     *(uint32_t *)ctrl = 0x12345678u;
     for (unsigned i = 0; i < sizeof blob; i++) ctrl[0x30 + i] = blob[i];
-    CHK(nvn_ProgramSetShaders((uint64_t)(uintptr_t)prog, sizeof ctrl, (uint64_t)(uintptr_t)ctrl,
+    nvn_shader_data stage = {(uint64_t)(uintptr_t)blob, ctrl};
+    CHK(nvn_ProgramSetShaders((uint64_t)(uintptr_t)prog, 1, (uint64_t)(uintptr_t)&stage,
                               0, 0, 0, 0, 0) == 1, "SetShaders（控制段已记下）");
 
     printf("== 1. 空记录：什么都不该发生 ==\n");

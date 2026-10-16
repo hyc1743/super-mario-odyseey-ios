@@ -10,8 +10,13 @@ typedef struct {
     uint32_t type;
     uint8_t  used;
     uint8_t  pad[3];
-    uint64_t v[12];
+    uint64_t v[16];
 } nvn_st_ent;
+
+// Program state: device at v[0], count at v[1], six copied data/control pairs.
+enum { NVN_PROG_NSTAGES = 1, NVN_PROG_STAGE_BASE = 2 };
+typedef struct { uint64_t data; const void *control; } nvn_shader_data;
+_Static_assert(sizeof(nvn_shader_data) == 16, "NVNshaderData ABI");
 
 nvn_st_ent *nvn_st_new(void *obj, uint32_t type);
 nvn_st_ent *nvn_st_get(const void *obj, uint32_t type);

@@ -33,7 +33,8 @@ int main(void) {
     nvn_ProgramInitialize(OBJ(prog), OBJ(dev), 0, 0, 0, 0, 0, 0);
     *(uint32_t *)ctrl = 0x12345678u;
     memcpy(ctrl + 0x30, blob, sizeof blob);
-    nvn_ProgramSetShaders(OBJ(prog), sizeof ctrl, OBJ(ctrl), 0, 0, 0, 0, 0);
+    nvn_shader_data stage = {OBJ(blob), ctrl};
+    nvn_ProgramSetShaders(OBJ(prog), 1, OBJ(&stage), 0, 0, 0, 0, 0);
 
     nvn_replay_reset();
     call("nvnCommandBufferInitialize", OBJ(cmdbuf), OBJ(dev), 0);

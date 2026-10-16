@@ -62,9 +62,18 @@ Metal 绘制或可玩性；呈现请求也不代表画面正确。需要资源�
   +0x8bab3c 比较返回值是否为 1，否则跳回睡眠重试。当前通用桩始终返回 0。
   这是明确的启动阻塞，不能把进程存活报告成启动成功。
 
-当前未完成项：共享字体服务需要真实字体数据及匹配的地址、大小和加载状态。
-RomFS FontData 中现有文件是 BFFNT，不能直接当成系统共享字体传入。
-不得只把状态改为 1，然后把 GetSharedFontAddress / GetSharedFontSize 的零值留给游戏。
-对照参考项目还发现后续需修正的 NVN 语义：MemoryPoolGetBufferAddress 仍是返回 0 的记录桩；
-ProgramSetShaders 的第二参数是阶段数、第三参数是 shaderData 数组，现有实现误作控制段大小和地址。
-这些尚未实现；当前没有发布新的版本标签，也未验证画面或可玩性。
+共享字体后续实现：`hle_pl.c` 从 `SMO_FONT_DIR` 加载实际的未加密 TTF/OTF，
+验证 SFNT 表范围，通过才报告已加载；返回的地址和文件大小在进程生命周期内保持有效。
+`pl_selftest` 覆盖缺失文件、损坏文件、越界字体表、非法类型及缓存生命周期；
+另用实际 6 个字体文件验证三个服务接口。`font/fontll` 的解码与排版保留 SDK 原实现，
+避免对纯本地字体引擎的 24 个函数错误接管。
+
+用户选择先使用开源字体验证启动。`prepare_shared_fonts.py` 下载固定提交的 Noto CJK 和
+Noto Sans Symbols 2，逐文件校验 SHA256，并随 App 附带 OFL 许可证及来源清单。
+这不保证 Nintendo 专用字形与原版一致。文件名依次为 `standard.ttf`、`simplified.ttf`、
+`simplified-extension.ttf`、`traditional.ttf`、`korean.ttf`、`symbols.ttf`；后缀不限制 SFNT
+内部使用 TrueType 还是 OpenType/CFF。宿主可自行设置 `SMO_FONT_DIR`，iOS 使用包内 SharedFonts。
+
+同时实现 MemoryPoolGetBufferAddress 的真实存储地址；ProgramSetShaders 按阶段数复制
+最多 6 个 shaderData 描述符，而非把数组当有长度的控制段。回放层不再扫描没有长度证据的
+control 指针，着色器控制结构的完整翻译仍未完成。尚未验证画面或可玩性。

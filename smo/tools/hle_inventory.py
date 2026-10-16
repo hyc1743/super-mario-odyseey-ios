@@ -35,7 +35,7 @@ SERVICE_FAMILIES = {
     # 运行环境 / 账号 / 设置
     "oe", "account", "settings", "pctl", "npns", "friends", "prepo", "bcat", "news", "notification",
     # 音频 / 图像 / 字体 / 解码
-    "audio", "audren", "codec", "image", "font", "fontll", "web", "nvjpg", "capsrv",
+    "audio", "audren", "codec", "image", "web", "nvjpg", "capsrv",
     # 网络
     "socket", "ssl", "nifm", "ldn", "bsd", "http", "dns",
     # 安全 / 系统信息
@@ -48,7 +48,9 @@ SERVICE_FAMILIES = {
 # 这些是**本地库**（纯计算，跑在内核调用之上）：可以原样执行
 # lmem 是在调用方提供的内存上管理 ExpHeap / FrameHeap 的本地库。
 # v0.6.6 把它误归为服务并强制接到返回 0 的桩，SDK 初始化随即空指针崩溃。
-LOCAL_LIBRARIES = {"os", "util", "diag", "mem", "lmem", "search", "nnex", "libc", "rtld", "gfx", "ro", "profiler"}
+# font/fontll decode and rasterize caller-provided bytes locally. Only pl
+# obtains shared font bytes from a system service. Keep the SDK font engine.
+LOCAL_LIBRARIES = {"os", "util", "diag", "mem", "lmem", "search", "nnex", "libc", "rtld", "gfx", "ro", "profiler", "font", "fontll"}
 
 # sf 中的缓冲区 getter / 序列化不是远端服务：必须使用 SDK 的实际 TLS 和布局。
 # v0.6.7 在 sdk+0x12a2a8 向 GetMessageBufferOnTls 的空桩返回值写消息头而崩溃。

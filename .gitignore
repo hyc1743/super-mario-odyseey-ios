@@ -68,3 +68,6 @@ smo/ios/Sources/Embedded.*
 
 # 游戏程序输入包（只提交进你的私有仓；公开仓永远不该有这个目录）
 input/
+
+# Pinned OFL fonts are fetched and verified by prepare_shared_fonts.py.
+smo/ios/Resources/SharedFonts/

@@ -240,6 +240,13 @@ def test_hle_policy():
                       for r in inventory))
     check("HIPC 传输仍由宿主接管",
           "_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm" in forced)
+    for row in inventory:
+        if len(row) == 5 and row[2] in ("font", "fontll") and row[3] == "sdk":
+            check("SDK font decoder/rasterizer remains local: " + row[1],
+                  hle_inventory.verdict(row[1], ["sdk"]) == ("模块内", row[2])
+                  and row[4] == "模块内" and row[1] not in forced)
+    check("shared font resource service still intercepted",
+          "_ZN2nn2pl22GetSharedFontLoadStateENS0_14SharedFontTypeE" in forced)
     for sym in hle_inventory.LOCAL_SDK_FLAGS:
         check("SDK 本地 fs 开关保留：" + sym,
               hle_inventory.verdict(sym, ["sdk"]) == ("模块内", "fs") and sym not in forced)

@@ -61,6 +61,8 @@ python3 tools/gen_icon.py
 
 rm -rf Gen "$OUT"
 mkdir -p Gen "$OUT"
+"$PY" "$ROOT/smo/tools/prepare_shared_fonts.py" "$ROOT/smo/ios/Resources/SharedFonts"
+
 # 在当前目录生成工程（**不是** Gen/）：xcodegen 把 --project 指定的目录当作相对基准，
 # 若生成到 Gen/，project.yml 里的 info.path(Sources/Resources) 都会被拼成 Gen/Gen/Info.plist、
 # Gen/Sources 之类 —— CI 上就是这么报的：Build input file cannot be found: .../Gen/Gen/Info.plist

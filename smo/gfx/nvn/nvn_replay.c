@@ -118,18 +118,18 @@ int nvn_replay_call(const char *name, const uint64_t *a) {
             // 管线键：状态哈希 + 当前 program 的着色器键（Metal 层按它缓存 MTLRenderPipelineState）
             uint64_t k = g_state_hash;
             nvn_st_ent *pp = nvn_st_get((void *)(uintptr_t)g_cur_program, 10);
-            if (pp && pp->v[1]) {
-                const nvn_shader_ent *se2 = nvn_shader_find_control((const uint8_t *)(uintptr_t)pp->v[1], (size_t)pp->v[2]);
-                uint64_t sk = se2 ? se2->key : 0;
-                mix(&k, &sk, 8);
+            if (pp && pp->v[NVN_PROG_NSTAGES]) {
+                // Descriptors carry GPU addresses and opaque control pointers,
+                // not a bounded shader blob. Never scan them as arbitrary bytes.
+                mix(&k, &pp->v[NVN_PROG_NSTAGES], sizeof(uint64_t));
+                mix(&k, &pp->v[NVN_PROG_STAGE_BASE], (size_t)pp->v[NVN_PROG_NSTAGES] * sizeof(nvn_shader_data));
             }
             mix(&k, &it->program, 8);
             if (g_plan_n < PLAN_MAX) g_keys[g_plan_n - 1] = k;
             // 程序的着色器阶段：从状态表里 program 记下的控制段查索引（SetShaders 时记的）
             nvn_st_ent *pe = nvn_st_get((void *)(uintptr_t)g_cur_program, 10);
-            if (pe && pe->v[1]) {
-                const nvn_shader_ent *se = nvn_shader_find_control((const uint8_t *)(uintptr_t)pe->v[1], (size_t)pe->v[2]);
-                it->stage_hint = se ? se->stage : 0xFFFF;      // 0xFFFF = 没查到（真机上要报出来）
+            if (pe && pe->v[NVN_PROG_NSTAGES]) {
+                it->stage_hint = 0xFFFF; // Control layout has not yet been decoded.
             } else {
                 it->stage_hint = 0xFFFE;                        // 0xFFFE = 当时还没 SetShaders
             }

@@ -191,6 +191,8 @@ static void RunHost(void) {
         }
         LOG("文件服务已接入 RomFS：%s", rp);
     }
+    NSString *fontDirectory = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"SharedFonts"];
+    setenv("SMO_FONT_DIR", fontDirectory.fileSystemRepresentation, 1);
     LOG("== SMO 宿主（App 内）：从 %s 装载 ==", ep);
     // 不装 rtld：宿主自己扮演 rtld（映射/重定位/DT_INIT 都在 loader_core.c），而 rtld 的 32 条重定位
     // 落在代码段边界页里，按三段装不了（smo/ios/tools/x0_layout.py）。参考项目同样只装游戏模块。

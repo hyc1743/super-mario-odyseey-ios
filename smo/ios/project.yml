@@ -29,6 +29,9 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+        excludes: [SharedFonts]
+      - path: Resources/SharedFonts
+        type: folder
       # 宿主（同一份代码编进 App；不包含 host/main.c —— App 的引导在 main.m 的 RunHost 里）
       - path: ../host/loader_core.c
       - path: ../host/host_boot.c
@@ -42,6 +45,7 @@ targets:
       - path: ../host/hle_sdkinit.c
       - path: ../host/hle_vi.c
       - path: ../host/hle_oe.c
+      - path: ../host/hle_pl.c
       - path: ../host/hle_hid.c
       - path: ../host/hle_force_gen.c
       - path: ../host/hle_nvn_reg.c

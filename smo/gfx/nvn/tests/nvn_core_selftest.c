@@ -88,6 +88,8 @@ int main(void) {
     CHK(nvn_MemoryPoolMap(OBJ(pool), 0, 0, 0, 0, 0, 0, 0) == OBJ(storage),
         "Map 返回的地址就是客体给的存储地址（客体原生执行，地址通用，不需要拷贝）");
     CHK(nvn_MemoryPoolGetFlags(OBJ(pool), 0, 0, 0, 0, 0, 0, 0) == 1, "GetFlags 拿回 1");
+    CHK(nvn_lookup("nvnMemoryPoolGetBufferAddress")(OBJ(pool), 0, 0, 0, 0, 0, 0, 0) == OBJ(storage),
+        "GPU pool address equals backing storage through actual proc lookup");
     CHK(nvn_MemoryPoolMap(OBJ(storage), 0, 0, 0, 0, 0, 0, 0) == 0, "把非池对象当池用 → 返回 0");
     CHK(nvn_MemoryPoolFinalize(OBJ(pool), 0, 0, 0, 0, 0, 0, 0) == 0, "池 Finalize 成功");
     CHK(nvn_MemoryPoolMap(OBJ(pool), 0, 0, 0, 0, 0, 0, 0) == 0, "Finalize 之后不能再 Map");
@@ -141,9 +143,16 @@ int main(void) {
     static uint8_t ctrl[64];
     for (unsigned i = 0; i < sizeof ctrl; i++) ctrl[i] = (uint8_t)(i * 7);
     CHK(nvn_ProgramInitialize(OBJ(prog), OBJ(dev), 0, 0, 0, 0, 0, 0) == 1, "ProgramInitialize 成功");
-    CHK(nvn_ProgramSetShaders(OBJ(prog), sizeof ctrl, OBJ(ctrl), 0, 0, 0, 0, 0) == 1, "SetShaders 成功");
+    nvn_shader_data stages[2] = {{0x12345000, ctrl}, {0x12346000, ctrl + 16}};
+    CHK(nvn_lookup("nvnProgramSetShaders")(OBJ(prog), 2, OBJ(stages), 0, 0, 0, 0, 0) == 1, "SetShaders accepts two NVNshaderData descriptors");
     const nvn_st_ent *pe = nvn_st_get(prog, 10 /* NVN_T_PROG */);
-    CHK(pe && pe->v[1] == OBJ(ctrl) && pe->v[2] == sizeof ctrl, "控制段指针与大小都记下了");
+    stages[0].data = 0;
+    CHK(pe && pe->v[NVN_PROG_NSTAGES] == 2 && pe->v[2] == 0x12345000 && pe->v[3] == OBJ(ctrl)
+        && pe->v[4] == 0x12346000 && pe->v[5] == OBJ(ctrl + 16), "stage descriptors copied before caller array changes");
+    CHK(!nvn_ProgramSetShaders(OBJ(prog), 7, OBJ(stages), 0, 0, 0, 0, 0)
+        && !nvn_ProgramSetShaders(OBJ(prog), UINT32_MAX, OBJ(stages), 0, 0, 0, 0, 0)
+        && !nvn_ProgramSetShaders(OBJ(prog), 1, 0, 0, 0, 0, 0, 0), "reject invalid stage count or null descriptor array");
+    CHK(pe && pe->v[NVN_PROG_NSTAGES] == 2, "failed SetShaders preserves previous program");
 
     printf("== 9. 名字表整体 ==\n");
     unsigned miss = 0;
