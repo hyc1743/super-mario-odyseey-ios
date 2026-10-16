@@ -25,6 +25,20 @@ void *host_boot(const char *dir, const char *const *mods, unsigned nmods, const 
     host_thread_keys_create();
     load_modules(dir, mods, nmods);
 
+    // rtld 的活之一：把 TLS 分配器接上（game 提供 alloc/free，sdk 提供 setter）。
+    // 必须在 run_module_inits **之前** —— sdk 的 __nnmusl_init_dso 第一步就查这个标志，
+    // 为假就直接返回：TLS 不建、SDK 运行时等于没初始化（真机第五崩）。
+    {
+        void *setter = NULL, *alloc = NULL, *dealloc = NULL;
+        char why[160] = {0};
+        if (dm_find_tls_allocator_wiring(&setter, &alloc, &dealloc, why, sizeof why)) {
+            ((void (*)(void *, void *))setter)(alloc, dealloc);
+            LOG("TLS 分配器已接上（alloc %p / free %p；setter %p）", alloc, dealloc, setter);
+        } else {
+            LOG("【红】TLS 分配器没接上（%s）—— SDK 的 DSO 初始化会直接返回，构造函数用 TLS 就会崩", why);
+        }
+    }
+
     // 主线程登记（句柄之后交给 SDK 的 nn::os；真机上 SDK 会拿它当主线程）—— **必须早于 run_module_inits**
     uint32_t main_h = svc_thread_main_init();
     dm_boot_mark(1);

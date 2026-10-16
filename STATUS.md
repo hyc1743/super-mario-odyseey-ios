@@ -34,7 +34,7 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 两卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0/.1`（3.2+2.3 GB，4636 文件）（第二十六轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.4 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.6 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -2051,3 +2051,39 @@ v0.5.2 的崩溃现场（PC/LR/帧链）把范围收到 sdk 代码段内，坏�
 卷打不开 / 卷头不是 SMOA / 读卷中断 / 输出文件打不开（空间？）/ 写文件失败（空间不够）/
 写盘没落稳 / 条目 CRC 不符（卷不完整或拷贝被截断）。同时检查 `fwrite` 与 `fflush/ferror` ——
 磁盘写满不再静默产出半截文件。`smoarc_selftest` 补断言「原因里必须写清楚是 CRC」。
+
+## 2.115 真机第四/第五崩：rtld 的两件活（v0.5.5 / v0.5.6）
+
+v0.5.4 加的崩溃现场（ESR/FAR + 寄存器 + PC 附近指令字）让这两次都在一轮内定位：
+PC 的指令字与本地映像**逐字节一致**，于是能直接读出崩溃代码在哪个函数、哪条指令、哪个寄存器是坏值。
+
+### 第四崩（v0.5.5）：rtld 链接器符号被绑成宿主桩地址
+
+`_init` 第一步调 `__nnmusl_init_dso`，其中四个参数是 rtld 提供的链接器符号
+`__rel_dyn_start/end`、`__rel_plt_start/end`（模块自己的 .rela.dyn / .rela.plt 边界）。
+sdk/subsdk0/main 各导入这四个，而我们没实现 → 被登记成宿主桩地址。
+修：装载器按模块解析这 8 个名字（`__rel_*` 与 `__rela_*`），指向该模块的 DT_RELA / DT_JMPREL 及末尾；
+`loader_selftest` 加回归断言（合成产物也带上这四个符号）。
+
+### 第五崩（v0.5.6，真凶）：TLS 分配器没接上，SDK 的 DSO 初始化整段被跳过
+
+现场一致：崩在 `ThreadManager::SetZeroToAllThreadsTlsSafe`（遍历线程链表，头是 0），
+`g_OsResourceManagerStorage`（bss）从没被构造。顺着 init_array 看清了次序：
+崩溃的是**数组第 1 项**（`0x45ba4`，要 `nn::os` 的 TLS 槽），而第 0 项没起这个作用。
+
+再往下挖 `__nnmusl_init_dso` 的**第一句**：
+
+```c
+if (!nn::os::MemoryAllocatorForThreadLocalInitialized()) return;    // 标志位在 0x92c7f8
+```
+
+而标志位由 `nn::os::SetMemoryAllocatorForThreadLocal(alloc, free)` 设置，两个分配器函数是
+**main 模块导出的** `nn::init::detail::DefaultAllocatorForThreadLocal` /
+`DefaultDeallocatorForThreadLocal`。**真实 rtld 的职责**：装载完模块、跑模块初始化之前，
+把它们接给 `nn::os`。我们扮演 rtld 却漏了这一步 → 检查为假 → DSO 初始化直接返回 →
+TLS 不建、`nn::os` 运行时等于没初始化 → 构造函数一用 TLS 就崩。
+
+修：`host_boot()` 在装载之后、模块初始化之前调
+`dm_find_tls_allocator_wiring()`（loader_core.c）找齐三件套并调用 setter；
+找不到就红字写明缺哪个符号。`loader_selftest` 加回归断言（合成产物也带这三个符号），
+真实产物上已验证三个符号都能找到。

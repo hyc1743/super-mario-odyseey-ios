@@ -132,4 +132,7 @@ void *host_boot(const char *dir, const char *const *mods, unsigned nmods, const 
 // 客体代码（含模块构造函数）必须等到 2。真机第三轮就栽在这：TLS/TLR 没建，sdk 构造函数读
 // tpidrro_el0+0x1f8（当前线程对象）时访问 0x1f8 崩溃。
 void dm_boot_mark(int stage);
+// 找齐「TLS 分配器接续」三件套（sdk 的 setter + main 的两个分配器函数）；找不到返回 0（why 写原因）
+int dm_find_tls_allocator_wiring(void **out_setter, void **out_alloc, void **out_dealloc,
+                                 char *why, size_t why_n);
 void unimpl_report(void);

@@ -99,6 +99,16 @@ int main(int argc, char **argv) {
                 if (!strcmp(g_imp[i], ls[k])) leaked = 1;
         CHK(!leaked, "rtld 链接器符号没走宿主 import（模块自己提供重定位表边界）");
     }
+    // **回归断言**：TLS 分配器接续必须能找齐三件套。
+    // 真机第五崩：sdk 的 __nnmusl_init_dso 第一句查「TLS 分配器初始化了吗」，没接上就直接返回，
+    // 于是 TLS 不建、SDK 运行时等于没初始化，构造函数一用 TLS 就崩在空链表上。
+    {
+        void *s = NULL, *a = NULL, *d = NULL;
+        char why[160] = {0};
+        CHK(dm_find_tls_allocator_wiring(&s, &a, &d, why, sizeof why) == 1,
+            "TLS 分配器接续三件套能找到（sdk 的 setter + main 的两个分配器）");
+        CHK(s && a && d && s != a, "三件套地址都不同（setter ≠ alloc）");
+    }
     CHK(g_imports >= g_import_uniq, "调用次数不少于名字数");
     printf("\n%s\n", bad ? "有断言不通过" : "全部通过");
     return bad;

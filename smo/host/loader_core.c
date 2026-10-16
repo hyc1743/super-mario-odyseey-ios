@@ -199,6 +199,32 @@ void *guest_sym(const char *name) {
     return NULL;
 }
 
+// rtld 的另一件活：把「线程局部存储（TLS）的分配器」接上。
+// 游戏（main）导出 nn::init::detail::DefaultAllocatorForThreadLocal / ...DefaultDeallocatorForThreadLocal，
+// 真实 rtld 在跑模块初始化**之前**调 nn::os::SetMemoryAllocatorForThreadLocal(alloc, free)。
+// 不接的后果（真机第五崩）：sdk 的 __nnmusl_init_dso 第一句就是
+//   if (!nn::os::MemoryAllocatorForThreadLocalInitialized()) return;
+// 于是 TLS 不建、SDK 运行时（nn::os 资源管理器）等于没初始化，构造函数一用 TLS 就崩在空链表上。
+// 找齐三样东西就算成功；调用方拿到 setter 后自己调（本机自检不执行客体代码，所以拆两步）。
+int dm_find_tls_allocator_wiring(void **out_setter, void **out_alloc, void **out_dealloc,
+                                 char *why, size_t why_n) {
+    static const char *SETTER  = "_ZN2nn2os32SetMemoryAllocatorForThreadLocalEPFPvmmEPFvS1_mE";
+    static const char *ALLOC   = "_ZN2nn4init6detail30DefaultAllocatorForThreadLocalEmm";
+    static const char *DEALLOC = "_ZN2nn4init6detail32DefaultDeallocatorForThreadLocalEPvm";
+    void *s = guest_sym(SETTER), *a = guest_sym(ALLOC), *d = guest_sym(DEALLOC);
+    if (s && a && d) {
+        if (out_setter) *out_setter = s;
+        if (out_alloc) *out_alloc = a;
+        if (out_dealloc) *out_dealloc = d;
+        return 1;
+    }
+    if (why) snprintf(why, why_n, "缺符号：%s%s%s",
+                      s ? "" : "SetMemoryAllocatorForThreadLocal ",
+                      a ? "" : "DefaultAllocatorForThreadLocal ",
+                      d ? "" : "DefaultDeallocatorForThreadLocal");
+    return 0;
+}
+
 module_t *module_of(const void *p) {
     for (int i = 0; i < g_nmod; i++)
         if ((const uint8_t *)p >= g_mod[i].base && (const uint8_t *)p < g_mod[i].base + g_mod[i].size)

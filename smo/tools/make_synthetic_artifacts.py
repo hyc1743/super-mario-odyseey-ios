@@ -144,10 +144,13 @@ def main():
     # 真实产物里 sdk/subsdk0/main 各导入这四个，装载器必须解析成「模块自己的重定位表边界」，
     # 而不是塞给宿主 import（真机第四崩就是它们被绑成宿主桩地址：musl 的 __nnmusl_init_dso
     # 拿这几个参数去做 DSO 初始化，SDK 的运行时等于没初始化）。合成产物里放上，CI 才拦得住回归。
-    write_module(out, "sdk", [f"nn3hid{i}" for i in range(6)] + ["nn2fs4OpenEv"],
+    write_module(out, "sdk", [f"nn3hid{i}" for i in range(6)] + ["nn2fs4OpenEv",
+                              "_ZN2nn2os32SetMemoryAllocatorForThreadLocalEPFPvmmEPFvS1_mE"],
                  ["nnsocketBind", "nnsockX", "__rel_dyn_start", "__rel_dyn_end",
                   "__rel_plt_start", "__rel_plt_end"], ngates=3)
-    write_module(out, "main", [],
+    # main 导出 rtld 要拿来接给 nn::os 的两个线程局部存储分配器（真实产物里就是 main 导出）
+    write_module(out, "main", ["_ZN2nn4init6detail30DefaultAllocatorForThreadLocalEmm",
+                               "_ZN2nn4init6detail32DefaultDeallocatorForThreadLocalEPvm"],
                  ["nn3hid0", "nn2fs4OpenEv", "memcpy", "unknownHostSymbol"], ngates=0)
     print(f"合成产物已写入 {out}")
 
