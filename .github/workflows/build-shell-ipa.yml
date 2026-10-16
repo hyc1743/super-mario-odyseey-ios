@@ -51,7 +51,9 @@ jobs:
       # 两边各有一份会漂移的清单，等于没有一份是准的。现在 Makefile 是唯一来源，
       # 共同依赖写在 GFX_COMMON 里，本机与 CI 跑的是同一条命令。
       - name: C 单测（10 个，走 Makefile 保证与本机一致）
-        run: make -C smo/host test CC=gcc PY=python3 2>&1 | tee -a /tmp/selftests.log
+        run: |
+          set -o pipefail
+          make -C smo/host test CC=gcc PY=python3 2>&1 | tee -a /tmp/selftests.log
       - name: 规范式 BC 参考解码器自检（内容核对的判据必须先证明自己对）
         run: python3 smo/gfx/tools/bc_spec_ref.py --selftest 2>&1 | tee -a /tmp/selftests.log
       - name: 检查 nvn.h 抽出的枚举与头一致（Metal 翻译要用这些数值）
@@ -251,12 +253,12 @@ jobs:
           if [ -n "${SMO_PRIVATE_TOKEN:-}" ]; then
             curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
               -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-romfs.zip?ref=561002efeda1852a3e678b7fa7354554523d303b" \
+              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-romfs.zip?ref=0124cc558c9026a0fa3eaf2697fc880e5e05ca4b" \
               -o /tmp/boot-romfs.zip
             python3 - <<'PY'
           import hashlib, zipfile
           path = '/tmp/boot-romfs.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'e0a9fd912fa70b66a5ae60e0ec8219e40a36dc731116dcf8ca433f4faf0e3cf2'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'ac42f9abba8b94f4462f0e0a71808ffe78efa2591482b9d0032ff3705e70b330'
           with zipfile.ZipFile(path) as archive:
               archive.extractall('/tmp/smo-boot-romfs')
           PY

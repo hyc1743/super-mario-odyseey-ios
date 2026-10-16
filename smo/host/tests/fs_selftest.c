@@ -73,7 +73,8 @@ int main(void) {
 #ifdef __MINGW32__
     { char cmd[700]; snprintf(cmd, sizeof cmd, "rmdir /s /q \"%s\" >NUL 2>NUL", p); system(cmd); }
 #else
-    { char cmd[700]; snprintf(cmd, sizeof cmd, "rm -rf '%s'", p); system(cmd); }
+    { char cmd[700]; snprintf(cmd, sizeof cmd, "rm -rf '%s'", p);
+      if (system(cmd)) { fprintf(stderr, "test directory cleanup failed\n"); return 2; } }
 #endif
     // 顺序要紧：mkdir 不会替你建父目录（Windows 与 Linux 都一样，我第一版就写反了）
     SMO_MKDIR_TEST(p);

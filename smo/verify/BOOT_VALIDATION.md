@@ -105,3 +105,16 @@ CommandListProcessor 执行 CPU 音频命令。宿主提供会话生命周期和
 SDK 调用在已有 TLS 的客体音频线程执行。单测覆盖初始化失败清理、更新错误传播、
 启动/停止/关闭、关闭句柄拒绝访问、预算及手动/自动模式。扬声器输出仍待接入，
 这些单测不代表真实游戏或音频播放已通过，需以随后原生运行结果核实。
+
+运行 `38941913700` 的 macOS 自检通过真实 gate_stack_selftest，启动日志确认
+`AUDIO_RENDERER_OPEN slot=0 bytes=503808 manual=0` 与
+`AUDIO_RENDERER_CPU_FRAME bytes=1692`。游戏已越过音频服务初始化，随后在
+main+0xaa4bec SoundArchiveFile::FileHeader::GetInfoBlockSize 读取声音档案失败。
+私有资源包追加 14 个 SoundData 档案元数据及启动音库文件，固定提交
+`0124cc558c9026a0fa3eaf2697fc880e5e05ca4b`，ZIP 大小 81,004,275 字节，
+SHA256 `ac42f9abba8b94f4462f0e0a71808ffe78efa2591482b9d0032ff3705e70b330`。
+完整 SoundData、关卡与对象资源仍未全部放入云端测试包。
+
+复查 CI 日志另发现 Linux C 单测的 make 失败被 tee 的成功退出掩盖；该步骤补上
+pipefail，并修正已暴露的两个忽略返回值编译错误（CreateFile 截断失败正确返回错误；
+测试目录清理失败明确终止）。后续 Linux 结果必须真实通过。

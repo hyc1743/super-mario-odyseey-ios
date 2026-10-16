@@ -291,7 +291,12 @@ static uint32_t h_CreateFile(const char *path, int64_t sz) {
     RW();
     int fd = open(hp, O_RDWR | O_CREAT | O_EXCL, 0666);
     if (fd < 0) return err_res("create", hp);
-    if (sz > 0) SMO_FTRUNCATE(fd, (long)sz);
+    if (sz > 0 && SMO_FTRUNCATE(fd, (long)sz)) {
+        uint32_t result = err_res("truncate", hp);
+        close(fd);
+        unlink(hp);
+        return result;
+    }
     close(fd);
     return 0;
 }
