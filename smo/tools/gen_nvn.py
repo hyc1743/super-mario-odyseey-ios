@@ -30,6 +30,15 @@ IMPLEMENTED_FAMILIES = [
     "nvnDevice", "nvnMemoryPool", "nvnBuffer", "nvnSync", "nvnWindow",
     "nvnProgram", "nvnTexture", "nvnSampler", "nvnQueue", "nvnEvent",
 ]
+STATE_FAMILIES = ["nvn" + name for name in (
+    "BlendState", "ColorState", "ChannelMaskState", "DepthStencilState",
+    "PolygonState", "VertexAttribState", "VertexStreamState",
+)]
+IMPLEMENTED_FAMILIES += STATE_FAMILIES
+RESOURCE_FAMILIES = ["nvnTextureView", "nvnTexturePool", "nvnSamplerPool"]
+RESOURCE_HANDLES = {"nvnDeviceGet"+suffix for suffix in (
+    "TextureHandle", "TexelFetchHandle", "ImageHandle", "SeparateTextureHandle", "SeparateSamplerHandle",
+)}
 
 # Command APIs are registered individually until the complete family exists.
 COMMAND_IMPLEMENTED = {"nvnCommandBuffer" + suffix for suffix in (
@@ -39,6 +48,14 @@ COMMAND_IMPLEMENTED = {"nvnCommandBuffer" + suffix for suffix in (
     "GetControlMemorySize", "GetControlMemoryUsed", "GetControlMemoryFree",
     "BeginRecording", "EndRecording", "IsRecording", "CallCommands", "CopyCommands",
     "CopyBufferToBuffer", "UpdateUniformBuffer", "ClearBuffer", "Barrier", "SetDebugLabel",
+    "SetRenderTargets", "ClearColor", "ClearDepthStencil", "SetViewports", "SetViewport",
+    "SetScissors", "SetScissor", "SetDepthRanges", "SetDepthRange", "BindBlendState",
+    "BindColorState", "BindChannelMaskState", "BindDepthStencilState", "BindPolygonState",
+    "BindMultisampleState", "BindVertexAttribState", "BindVertexStreamState",
+    "BindVertexBuffer", "BindVertexBuffers", "BindUniformBuffer", "BindUniformBuffers",
+    "BindStorageBuffer", "BindStorageBuffers", "BindProgram", "SetTexturePool", "SetSamplerPool",
+    "BindTexture", "BindTextures", "SetBlendColor", "SetShaderScratchMemory", "ReportCounter",
+    "DrawArrays", "DrawArraysInstanced", "DrawElements", "DrawElementsInstanced", "DrawElementsBaseVertex",
 )}
 QUEUE_IMPLEMENTED = {"nvnQueue" + suffix for suffix in (
     "BuilderSetDefaults", "BuilderSetDevice", "BuilderSetFlags",
@@ -65,7 +82,7 @@ def main():
         if line and not line.startswith("#"):
             names.append(line)
     impl = {n for n in names if any(n.startswith(p) for p in IMPLEMENTED_FAMILIES)} | COMMAND_IMPLEMENTED
-    missing = set()
+    missing = impl - set(names)
     if missing:
         print(f"🔴 IMPLEMENTED 里有 {len(missing)} 个名字不在 names.txt 里：{sorted(missing)[:5]}")
         return 1

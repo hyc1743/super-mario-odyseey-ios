@@ -60,8 +60,12 @@ targets:
       - path: ../gfx/nvn/nvn_state.c
       - path: ../gfx/nvn/nvn_core.c
       - path: ../gfx/nvn/nvn_cmd.c
+      - path: ../gfx/nvn/nvn_cmd_render.c
+      - path: ../gfx/nvn/nvn_resources.c
+      - path: ../gfx/nvn/nvn_render_state.c
       - path: ../gfx/nvn/nvn_gpu.c
       - path: ../gfx/nvn/nvn_metal_runtime.m
+        - path: ../gfx/nvn/nvn_metal_resources.m
       - path: ../gfx/nvn/nvn_shader.c
       - path: ../gfx/nvn/nvn_replay.c
       - path: ../gfx/nvn/nvn_tex.c

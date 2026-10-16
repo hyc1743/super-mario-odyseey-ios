@@ -49,6 +49,9 @@ uint64_t nvn_CommandBufferInitialize(NVNcommandBuffer *c, NVNdevice *d) {
     s->v[C_DEV] = (uintptr_t)d;
     return 1;
 }
+void *nvn_cmd_alloc(void *recorder, uint32_t op, size_t payload_size) {
+    return alloc_record(recorder,op,payload_size);
+}
 void nvn_CommandBufferFinalize(NVNcommandBuffer *c) { nvn_st_del(c, CMD_TYPE); }
 void nvn_CommandBufferSetMemoryCallback(NVNcommandBuffer *c, PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC cb) {
     cmd(c)->v[C_CB] = (uintptr_t)cb;

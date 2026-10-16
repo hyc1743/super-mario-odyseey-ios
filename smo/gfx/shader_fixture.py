@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Build private runtime shader fixtures from existing local translation outputs.
+
+No game data belongs in the public source tree. The ZIP contains the exact-span
+index, MSL, translator resource facts, and SPIRV-Cross reflection. It does not
+claim that Metal compilation or actual guest rendering has been validated.
+Run with smo/env.sh loaded on Windows so spirv-cross can find its runtime DLLs.
+"""
+from concurrent.futures import ThreadPoolExecutor
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import re
+import subprocess
+import zipfile
+
+import shader_index
+
+MSL_FLAGS = ["--msl", "--msl-version", "20300", "--msl-argument-buffers",
+             "--msl-texture-buffer-native"]
+
+
+def metal_arguments(source):
+    """Preserve the compiler's emitted argument IDs, never infer them from bindings."""
+    result = []
+    for declaration, name, array, index in re.findall(
+            r"([^;{}\n]+?)\s+(\w+)(\s*\[[^]]+\])?\s*\[\[id\((\d+)\)\]\]", source):
+        result.append({"name": name, "id": int(index),
+                       "declaration": declaration.strip(), "array": array.strip()})
+    return result
+
+
+def bindings(key, stage, source, metadata):
+    """Join compiler-assigned IDs to guest slots through SPIR-V resource names."""
+    resources = metadata["resources"]
+    reflected = metadata["spirv"]
+    names = {}
+    for category in ("ubos", "ssbos", "textures", "separate_images", "separate_samplers", "images"):
+        for entry in reflected.get(category, []):
+            names[entry["name"]] = (category, entry)
+    arguments, unsupported = [], []
+    for arg in metadata["metal_arguments"]:
+        name = arg["name"]
+        sampler = arg["declaration"] == "sampler"
+        reflected_name = name[:-5] if sampler and name.endswith("Smplr") else name
+        match = names.get(reflected_name)
+        if not match:
+            unsupported.append(arg)
+            continue
+        category, original = match
+        slot = original.get("binding")
+        kind = {"ubos": "cbuf", "ssbos": "sbuf", "images": "image"}.get(category, "texture")
+        family = {"cbuf": "cbufs", "sbuf": "sbufs", "image": "images", "texture": "textures"}[kind]
+        resource = next((r for r in resources.get(family, []) if r["binding"] == slot), None)
+        if original["name"] == "support_buffer":
+            kind, resource = "support", {"binding": slot, "bytes": original.get("block_size", 0)}
+        if resource is None:
+            unsupported.append(arg)
+            continue
+        arguments.append({**resource, "id": arg["id"], "name": name,
+                          "kind": "sampler" if sampler else kind})
+    inputs = reflected.get("inputs", []) if stage == 1 else []
+    # Preserve actual compiler attributes rather than assuming dense locations.
+    attribute_locations = {int(i) for i in re.findall(r"\[\[attribute\((\d+)\)\]\]", source)}
+    inputs = [i for i in inputs if i.get("location") in attribute_locations]
+    return {"version": 1, "key": key, "stage": stage, "entry": "main0",
+            "argument_buffer": 0, "arguments": arguments, "vertex_inputs": inputs,
+            "unsupported_arguments": unsupported}
+
+
+def write_shader(z, row, key, source, metadata):
+    z.writestr(row[2], source)
+    z.writestr(key + ".reflection.json", json.dumps(metadata, sort_keys=True))
+    z.writestr(key + ".bindings.json", json.dumps(bindings(key, row[1], source, metadata), sort_keys=True))
+
+
+def repack(archive, output):
+    """Upgrade an already converted private fixture without rerunning compilers."""
+    temporary = output.with_suffix(output.suffix + ".partial")
+    with zipfile.ZipFile(archive) as old, zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as z:
+        manifest = json.loads(old.read("manifest.json"))
+        z.writestr("shaders.idx", old.read("shaders.idx"))
+        for shader in manifest["shaders"]:
+            key = shader["key"]
+            source = old.read("msl/" + key + ".metal").decode()
+            metadata = json.loads(old.read("reflection/" + key + ".json"))
+            write_shader(z, (None, shader["stage"], key + ".metal"), key, source, metadata)
+        z.writestr("manifest.json", json.dumps(manifest, sort_keys=True))
+    temporary.replace(output)
+    print(f"repacked={len(manifest['shaders'])} zip_bytes={output.stat().st_size} "
+          f"sha256={hashlib.sha256(output.read_bytes()).hexdigest()}")
+
+
+def translate(row, unpack, cross):
+    key = Path(row[2]).stem
+    spv = unpack / "msl" / (key + ".spv")
+    facts = unpack / "msl" / (key + ".res.json")
+    resource = json.loads(facts.read_text(encoding="utf-8"))
+    if resource["key"] != key:
+        raise ValueError("resource reflection key mismatch: " + key)
+    source = subprocess.check_output([cross, str(spv), *MSL_FLAGS]).decode("utf-8")
+    source = source.replace("\r\n", "\n")
+    reflection = json.loads(subprocess.check_output([cross, str(spv), "--reflect"]))
+    metadata = {"resources": resource, "spirv": reflection,
+                "metal_arguments": metal_arguments(source)}
+    return row, key, source, metadata
+
+
+def build(unpack, output, cross, keys=None, jobs=8):
+    rows = shader_index.build(str(unpack))
+    selected = [r for r in rows if keys is None or Path(r[2]).stem in keys]
+    if not selected or keys and len(selected) != len(keys):
+        raise ValueError("requested shader key is absent from exact-span index")
+    unsupported = [{"key": Path(r[2]).stem, "stage": r[1],
+                    "reason": "Metal geometry shaders require separate emulation"}
+                   for r in selected if r[1] == 4]
+    selected = [r for r in selected if r[1] != 4]
+    manifest = {"version": 1, "msl_flags": MSL_FLAGS, "shaders": [], "unsupported": unsupported}
+    output.parent.mkdir(parents=True, exist_ok=True)
+    # Build atomically: a failed conversion must not leave a usable-looking ZIP.
+    temporary = output.with_suffix(output.suffix + ".partial")
+    try:
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+            z.writestr("shaders.idx", shader_index.render(rows))
+            with ThreadPoolExecutor(max_workers=jobs) as workers:
+                converted = workers.map(lambda row: translate(row, unpack, cross), selected)
+                for count, (row, key, source, metadata) in enumerate(converted, 1):
+                    write_shader(z, row, key, source, metadata)
+                    manifest["shaders"].append({"key": key, "span": row[3], "stage": row[1],
+                                                "msl_sha256": hashlib.sha256(source.encode()).hexdigest()})
+                    if count % 1000 == 0:
+                        print(f"converted={count}/{len(selected)}", flush=True)
+            z.writestr("manifest.json", json.dumps(manifest, sort_keys=True))
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    print(f"shaders={len(selected)} unsupported={len(unsupported)} zip_bytes={output.stat().st_size} "
+          f"sha256={hashlib.sha256(output.read_bytes()).hexdigest()}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--unpack", type=Path, default=Path("work/shaders_all"))
+    parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--repack", type=Path, help="upgrade a legacy converted fixture, no translation")
+    parser.add_argument("--spirv-cross", default="spirv-cross")
+    parser.add_argument("--jobs", type=int, default=8)
+    parser.add_argument("--keys", nargs="+", help="optional SHA256-prefix shader keys; default all")
+    args = parser.parse_args()
+    if args.repack:
+        repack(args.repack, args.out)
+        return
+    build(args.unpack, args.out, args.spirv_cross, set(args.keys) if args.keys else None, args.jobs)
+
+
+if __name__ == "__main__":
+    main()

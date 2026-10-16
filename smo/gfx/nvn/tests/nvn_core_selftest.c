@@ -3,6 +3,7 @@
 // 所以对象内容是什么、多大都无所谓 —— 这正是不依赖 NVN 结构布局的好处）。
 #include "../nvn_host.h"
 #include "../nvn_state.h"
+#include "../include/nvn.h"
 #include <pthread.h>
 
 enum { STATE_WORKERS = 4, STATE_OBJECTS = 4096 };
@@ -58,7 +59,7 @@ DECL(nvn_SamplerBuilderSetDefaults);
 DECL(nvn_SamplerBuilderSetDevice);
 DECL(nvn_SamplerBuilderSetMinMagFilter);
 DECL(nvn_SamplerBuilderSetWrapMode);
-DECL(nvn_SamplerBuilderSetMaxAnisotropy);
+uint64_t nvn_SamplerBuilderSetMaxAnisotropy(void *, float);
 DECL(nvn_SamplerInitialize);
 DECL(nvn_SamplerFinalize);
 DECL(nvn_ProgramInitialize);
@@ -69,7 +70,47 @@ void nvn_sync_signal(void *sync);
 
 #define OBJ(x) ((uint64_t)(uintptr_t)(x))
 
+#define API(name, type) ((type)(uintptr_t)nvn_lookup("nvn" #name))
+static void sampler_abi_test(void) {
+    NVNsamplerBuilder builder={0}; NVNsampler sampler={0};
+    uint64_t dev[8]={0};
+    nvn_SamplerBuilderSetDevice(OBJ(&builder),OBJ(dev),0,0,0,0,0,0);
+    nvn_SamplerBuilderSetDefaults(OBJ(&builder),0,0,0,0,0,0,0);
+    nvn_st_ent *s=nvn_st_get(&builder,7 /* sampler builder */);
+    CHK(s && s->v[0]==OBJ(dev),"sampler defaults preserve device");
+    NVNminFilter min; NVNmagFilter mag; NVNwrapMode u,v,w;
+    API(SamplerBuilderGetMinMagFilter,PFNNVNSAMPLERBUILDERGETMINMAGFILTERPROC)(&builder,&min,&mag);
+    API(SamplerBuilderGetWrapMode,PFNNVNSAMPLERBUILDERGETWRAPMODEPROC)(&builder,&u,&v,&w);
+    CHK(min==4 && mag==1 && u==1 && v==1 && w==1,"sampler filter and wrap defaults");
+    float lo=0,hi=0;
+    API(SamplerBuilderGetLodClamp,PFNNVNSAMPLERBUILDERGETLODCLAMPPROC)(&builder,&lo,&hi);
+    CHK(lo==-1000.f && hi==1000.f,"sampler default LOD range");
+    API(SamplerBuilderSetLodClamp,PFNNVNSAMPLERBUILDERSETLODCLAMPPROC)(&builder,-2.5f,6.75f);
+    API(SamplerBuilderSetMaxAnisotropy,PFNNVNSAMPLERBUILDERSETMAXANISOTROPYPROC)(&builder,8.f);
+    API(SamplerBuilderSetMinMagFilter,PFNNVNSAMPLERBUILDERSETMINMAGFILTERPROC)(&builder,3,1);
+    API(SamplerBuilderSetWrapMode,PFNNVNSAMPLERBUILDERSETWRAPMODEPROC)(&builder,1,3,7);
+    API(SamplerBuilderSetCompare,PFNNVNSAMPLERBUILDERSETCOMPAREPROC)(&builder,1,6);
+    float rgba[4]={0.25f,0.5f,0.75f,1.f},out[4]={0};
+    API(SamplerBuilderSetBorderColor,PFNNVNSAMPLERBUILDERSETBORDERCOLORPROC)(&builder,rgba);
+    memset(rgba,0,sizeof rgba);
+    CHK(API(SamplerInitialize,PFNNVNSAMPLERINITIALIZEPROC)(&sampler,&builder),"typed sampler initialization");
+    nvn_SamplerBuilderSetDefaults(OBJ(&builder),0,0,0,0,0,0,0);
+    API(SamplerGetMinMagFilter,PFNNVNSAMPLERGETMINMAGFILTERPROC)(&sampler,&min,&mag);
+    API(SamplerGetWrapMode,PFNNVNSAMPLERGETWRAPMODEPROC)(&sampler,&u,&v,&w);
+    API(SamplerGetLodClamp,PFNNVNSAMPLERGETLODCLAMPPROC)(&sampler,&lo,&hi);
+    CHK(min==3 && mag==1 && u==1 && v==3 && w==7,"sampler retains every filter and wrap argument");
+    CHK(lo==-2.5f && hi==6.75f && API(SamplerGetMaxAnisotropy,PFNNVNSAMPLERGETMAXANISOTROPYPROC)(&sampler)==8.f,"float setter and getter ABI");
+    NVNcompareMode mode; NVNcompareFunc func;
+    API(SamplerGetCompare,PFNNVNSAMPLERGETCOMPAREPROC)(&sampler,&mode,&func);
+    CHK(mode==1 && func==6,"sampler retains compare mode and function");
+    API(SamplerGetBorderColor,PFNNVNSAMPLERGETBORDERCOLORPROC)(&sampler,out);
+    CHK(out[0]==0.25f && out[1]==0.5f && out[2]==0.75f && out[3]==1.f,"border color captured before caller mutation");
+    nvn_SamplerFinalize(OBJ(&sampler),0,0,0,0,0,0,0);
+    nvn_st_del(&builder,7);
+}
+
 int main(void) {
+    sampler_abi_test();
     uint64_t devb[8] = {0}, dev[8] = {0}, poolb[8] = {0}, pool[8] = {0};
     uint64_t bufb[8] = {0}, buf[8] = {0}, sync[8] = {0}, sampb[8] = {0}, samp[8] = {0}, prog[8] = {0};
     static uint8_t storage[4096];
@@ -158,13 +199,13 @@ int main(void) {
     CHK(nvn_SamplerBuilderSetDevice(OBJ(sampb), OBJ(dev), 0, 0, 0, 0, 0, 0) == 0, "采样器 builder 设设备");
     CHK(nvn_SamplerBuilderSetMinMagFilter(OBJ(sampb), 3, 0, 0, 0, 0, 0, 0) == 0, "设过滤 3");
     CHK(nvn_SamplerBuilderSetWrapMode(OBJ(sampb), 4, 0, 0, 0, 0, 0, 0) == 0, "设环绕 4");
-    CHK(nvn_SamplerBuilderSetMaxAnisotropy(OBJ(sampb), 8, 0, 0, 0, 0, 0, 0) == 0, "设各向异性 8");
+    CHK(nvn_SamplerBuilderSetMaxAnisotropy(sampb, 8.f) == 0, "设各向异性 8");
     CHK(nvn_SamplerBuilderSetLodBias(OBJ(sampb), 1.5f, 0, 0, 0, 0, 0, 0) == 0, "设 LOD 偏移 1.5f");
     CHK(nvn_SamplerInitialize(OBJ(samp), OBJ(sampb), 0, 0, 0, 0, 0, 0) == 1, "采样器 Initialize 成功");
     const nvn_st_ent *se = nvn_st_get(samp, 8 /* NVN_T_SAMPLER */);
     CHK(se != NULL, "采样器对象在状态表里");
     if (se) {
-        CHK(se->v[1] == 3 && se->v[2] == 4 && se->v[6] == 8, "过滤/环绕/各向异性都存对了");
+        CHK(se->v[1] == 3 && se->v[2] == 4 && se->v[6] == 0x41000000u, "过滤/环绕/各向异性都存对了");
         CHK(se->v[5] == 0x3FC00000u, "1.5f 的位模式 0x3FC00000 存对了（说明 float 确实从 s0 读到了）");
     }
     CHK(nvn_SamplerFinalize(OBJ(samp), 0, 0, 0, 0, 0, 0, 0) == 0, "采样器 Finalize 成功");

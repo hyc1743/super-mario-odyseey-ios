@@ -221,3 +221,20 @@ The packaging gate now also requires real GPU submission/completion diagnostics
 and 60 GPU-completed frame presentations. QueuePresentTexture request counts
 alone cannot pass. The runtime does not emit that frame-completion marker yet;
 it must be attached to real rendering/presentation in the subsequent work.
+
+Run `38979096537` confirms the real Metal buffer clear/update/copy and fence
+hardware test passes. Actual guest startup now reaches command submission and
+is deliberately rejected for 22 missing render commands. This proves the
+backend's buffer path, not successful game rendering or frame completion.
+
+The next integration records typed render commands with copied resource/view,
+state, binding and draw parameters; implements seven inline render-state
+families and pool-scoped resource descriptors; and adds bounded exact-span
+shader lookup. Sampler defaults preserve the device, and anisotropy/LOD use the
+actual floating-point ABI. Local quick regression passes all seven checks,
+including command/state/resource/shader/core tests. A real Metal resource test
+now checks upload, shared render/sample identity, preserved GPU writes, views,
+object serial reuse and default samplers. It still requires macOS execution.
+The private pinned shader index is loaded during native startup so runtime
+shader matching can be measured. Render execution and presentation remain
+incomplete; no IPA or device-stability claim is made.

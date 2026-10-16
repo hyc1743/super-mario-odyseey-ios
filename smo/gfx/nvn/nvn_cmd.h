@@ -23,4 +23,5 @@ uint64_t nvn_cmd_record_missing(const char *name, const uint64_t args[8]);
  * Returning zero rejects the stream. It never performs GPU work itself. */
 typedef int (*nvn_cmd_visit)(void *context, uint32_t op, const void *payload, size_t size);
 int nvn_cmd_walk(uint64_t handle, nvn_cmd_visit visit, void *context);
+void *nvn_cmd_alloc(void *recorder, uint32_t op, size_t payload_size);
 #endif

@@ -12,6 +12,7 @@
 #include "nvn_state.h"
 #include "nvn_tex.h"
 #include "nvn_gpu.h"
+#include "nvn_shader.h"
 #include <time.h>
 
 // 宿主侧睡眠：轮询等待用。mingw 有 usleep，其他平台用 nanosleep。
@@ -441,6 +442,7 @@ uint64_t nvn_TextureInitialize(uint64_t obj, uint64_t builder, uint64_t a2, uint
     nvn_st_ent *t = nvn_st_new(ARG_OBJ(obj), NVN_T_TEX);
     if (!t) return NVN_FALSE;
     memcpy(t->v, b->v, sizeof t->v);
+    t->v[15] = nvn_st_resource_serial();
     return NVN_TRUE;
 }
 uint64_t nvn_TextureFinalize(uint64_t obj, uint64_t a1, uint64_t a2, uint64_t a3,
@@ -523,11 +525,81 @@ uint64_t name(uint64_t s, uint64_t val, uint64_t a2, uint64_t a3,               
     return 0;                                                                             \
 }
 
-SAMP_FN(nvn_SamplerBuilderSetMinMagFilter, SAMP_MINMAG, ARG_U32(val))
-SAMP_FN(nvn_SamplerBuilderSetWrapMode,     SAMP_WRAPS,  ARG_U32(val))
-SAMP_FN(nvn_SamplerBuilderSetMaxAnisotropy, SAMP_MAXANISO, ARG_I32(val))
-SAMP_FN(nvn_SamplerBuilderSetCompare,      SAMP_COMPARE, ARG_U32(val))
 SAMP_FN(nvn_SamplerBuilderSetReductionFilter, SAMP_REDUCTION, ARG_U32(val))
+
+static uint32_t sampler_float_bits(float value) {
+    uint32_t bits; memcpy(&bits,&value,sizeof bits); return bits;
+}
+uint64_t nvn_SamplerBuilderSetMaxAnisotropy(void *builder,float value) {
+    nvn_st_ent *s=need(builder,NVN_T_SAMPLERB,"SamplerBuilderSetMaxAnisotropy");
+    if (s) s->v[SAMP_MAXANISO]=sampler_float_bits(value);
+    return 0;
+}
+uint64_t nvn_SamplerBuilderSetLodClamp(void *builder,float lo,float hi) {
+    nvn_st_ent *s=need(builder,NVN_T_SAMPLERB,"SamplerBuilderSetLodClamp");
+    if (s) { s->v[13]=sampler_float_bits(lo); s->v[14]=sampler_float_bits(hi); }
+    return 0;
+}
+static void sampler_border(void *builder,const void *value,uint32_t kind) {
+    nvn_st_ent *s=need(builder,NVN_T_SAMPLERB,"SamplerBuilderSetBorderColor");
+    if (!s || !value) return;
+    uint32_t rgba[4]; memcpy(rgba,value,sizeof rgba);
+    for (unsigned i=0;i<4;++i) s->v[SAMP_BORDER+i]=rgba[i];
+    s->v[SAMP_BORDER]|=(uint64_t)kind<<32;
+}
+void nvn_SamplerBuilderSetBorderColor(void *s,const float *rgba) { sampler_border(s,rgba,0); }
+void nvn_SamplerBuilderSetBorderColori(void *s,const int32_t *rgba) { sampler_border(s,rgba,1); }
+void nvn_SamplerBuilderSetBorderColorui(void *s,const uint32_t *rgba) { sampler_border(s,rgba,2); }
+
+/* Getter return types matter: floating results use s0, never the integer result register. */
+#define SAMPLER_GETTERS(prefix, type) \
+void nvn_##prefix##GetMinMagFilter(const void *obj,uint32_t *min,uint32_t *mag) { \
+    nvn_st_ent *s=need((void *)obj,type,#prefix "GetMinMagFilter"); \
+    if(s){if(min)*min=(uint32_t)s->v[1];if(mag)*mag=(uint32_t)(s->v[1]>>32);} } \
+void nvn_##prefix##GetWrapMode(const void *obj,uint32_t *u,uint32_t *v,uint32_t *w) { \
+    nvn_st_ent *s=need((void *)obj,type,#prefix "GetWrapMode"); \
+    if(s){if(u)*u=(uint32_t)s->v[2];if(v)*v=(uint32_t)s->v[3];if(w)*w=(uint32_t)s->v[4];} } \
+void nvn_##prefix##GetCompare(const void *obj,uint32_t *mode,uint32_t *func) { \
+    nvn_st_ent *s=need((void *)obj,type,#prefix "GetCompare"); \
+    if(s){if(mode)*mode=(uint32_t)s->v[7];if(func)*func=(uint32_t)(s->v[7]>>32);} } \
+void nvn_##prefix##GetLodClamp(const void *obj,float *lo,float *hi) { \
+    nvn_st_ent *s=need((void *)obj,type,#prefix "GetLodClamp"); \
+    if(s){uint32_t l=(uint32_t)s->v[13],h=(uint32_t)s->v[14];if(lo)memcpy(lo,&l,4);if(hi)memcpy(hi,&h,4);} } \
+float nvn_##prefix##GetLodBias(const void *obj) { \
+    nvn_st_ent *s=need((void *)obj,type,#prefix "GetLodBias"); \
+    uint32_t bits=s?(uint32_t)s->v[5]:0;float v;memcpy(&v,&bits,4);return v; } \
+float nvn_##prefix##GetMaxAnisotropy(const void *obj) { \
+    nvn_st_ent *s=need((void *)obj,type,#prefix "GetMaxAnisotropy"); \
+    uint32_t bits=s?(uint32_t)s->v[6]:0;float v;memcpy(&v,&bits,4);return v; } \
+uint32_t nvn_##prefix##GetReductionFilter(const void *obj) { \
+    nvn_st_ent *s=need((void *)obj,type,#prefix "GetReductionFilter");return s?(uint32_t)s->v[8]:0; } \
+void nvn_##prefix##GetBorderColor(const void *obj,void *rgba) { \
+    nvn_st_ent *s=need((void *)obj,type,#prefix "GetBorderColor"); \
+    if(s&&rgba){uint32_t v[4];for(unsigned i=0;i<4;++i)v[i]=(uint32_t)s->v[9+i];memcpy(rgba,v,16);} } \
+void nvn_##prefix##GetBorderColori(const void *obj,void *rgba) { nvn_##prefix##GetBorderColor(obj,rgba); } \
+void nvn_##prefix##GetBorderColorui(const void *obj,void *rgba) { nvn_##prefix##GetBorderColor(obj,rgba); }
+SAMPLER_GETTERS(SamplerBuilder,NVN_T_SAMPLERB)
+SAMPLER_GETTERS(Sampler,NVN_T_SAMPLER)
+#undef SAMPLER_GETTERS
+
+uint64_t nvn_SamplerBuilderSetMinMagFilter(void *builder,uint32_t min,uint32_t mag) {
+    nvn_st_ent *s=nvn_st_get(builder,NVN_T_SAMPLERB);
+    if (!s) NVN_DIE("sampler builder not initialized");
+    s->v[SAMP_MINMAG]=min|((uint64_t)mag<<32);
+    return 0;
+}
+uint64_t nvn_SamplerBuilderSetWrapMode(void *builder,uint32_t u,uint32_t v,uint32_t w) {
+    nvn_st_ent *s=nvn_st_get(builder,NVN_T_SAMPLERB);
+    if (!s) NVN_DIE("sampler builder not initialized");
+    s->v[SAMP_WRAPS]=u; s->v[SAMP_WRAPT]=v; s->v[SAMP_WRAPR]=w;
+    return 0;
+}
+uint64_t nvn_SamplerBuilderSetCompare(void *builder,uint32_t mode,uint32_t function) {
+    nvn_st_ent *s=nvn_st_get(builder,NVN_T_SAMPLERB);
+    if (!s) NVN_DIE("sampler builder not initialized");
+    s->v[SAMP_COMPARE]=mode|((uint64_t)function<<32);
+    return 0;
+}
 
 // 注意：这个函数的第二参数是 **float**，按 ABI 走 s0 而**不是** x1。
 // 所以统一 u64 签名对它不成立 —— 必须用真正的 float 形参（表里仍然按统一函数指针存，
@@ -546,7 +618,17 @@ uint64_t nvn_SamplerBuilderSetLodBias(uint64_t s, float bias, uint64_t a2, uint6
 uint64_t nvn_SamplerBuilderSetDefaults(uint64_t s, uint64_t a1, uint64_t a2, uint64_t a3,
                                        uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-    nvn_st_new(ARG_OBJ(s), NVN_T_SAMPLERB);
+    nvn_st_ent *old=nvn_st_get(ARG_OBJ(s),NVN_T_SAMPLERB);
+    uint64_t dev=old?old->v[SAMP_DEV]:0;
+    nvn_st_ent *e=nvn_st_new(ARG_OBJ(s),NVN_T_SAMPLERB);
+    if (!e) return 0;
+    e->v[SAMP_DEV]=dev;
+    e->v[SAMP_MINMAG]=4|((uint64_t)1<<32);
+    e->v[SAMP_WRAPS]=e->v[SAMP_WRAPT]=e->v[SAMP_WRAPR]=1;
+    e->v[SAMP_MAXANISO]=sampler_float_bits(1.f);
+    e->v[SAMP_COMPARE]=(uint64_t)2<<32; /* LESS; comparison disabled. */
+    e->v[13]=sampler_float_bits(-1000.f);
+    e->v[14]=sampler_float_bits(1000.f);
     return 0;
 }
 
@@ -565,7 +647,8 @@ uint64_t nvn_SamplerInitialize(uint64_t s, uint64_t builder, uint64_t a2, uint64
     nvn_st_ent *b = nvn_st_get(ARG_OBJ(builder), NVN_T_SAMPLERB);
     nvn_st_ent *e = nvn_st_new(ARG_OBJ(s), NVN_T_SAMPLER);
     if (!b || !e) return NVN_FALSE;
-    for (unsigned i = 0; i < 12; i++) e->v[i] = b->v[i];
+    memcpy(e->v,b->v,sizeof e->v);
+    e->v[15] = nvn_st_resource_serial();
     return NVN_TRUE;
 }
 
@@ -584,6 +667,7 @@ uint64_t nvn_ProgramInitialize(uint64_t prog, uint64_t dev, uint64_t a2, uint64_
     nvn_st_ent *e = nvn_st_new(ARG_OBJ(prog), NVN_T_PROG);
     if (!e) return NVN_FALSE;
     e->v[PROG_DEV] = (uint64_t)(uintptr_t)ARG_OBJ(dev);
+    e->v[15] = nvn_st_resource_serial();
     return NVN_TRUE;
 }
 
@@ -607,10 +691,21 @@ uint64_t nvn_ProgramSetShaders(uint64_t prog, uint64_t count, uint64_t stages, u
     e->v[NVN_PROG_NSTAGES] = (uint64_t)n;
     memset(&e->v[NVN_PROG_STAGE_BASE], 0, 6 * sizeof(nvn_shader_data));
     if (n) memcpy(&e->v[NVN_PROG_STAGE_BASE], ARG_OBJ(stages), (size_t)n * sizeof(nvn_shader_data));
+    e->v[15] = nvn_st_resource_serial();
     g_shader_sets++;
     if (g_shader_sets <= 3) {
         NVN_LOG("ProgramSetShaders stages=%d first_data=%#llx", n,
                 (unsigned long long)e->v[NVN_PROG_STAGE_BASE]);
+    }
+    if (g_shader_sets<=3 && nvn_shader_count()) {
+        for (int i=0;i<n;++i) {
+            uint64_t address=e->v[NVN_PROG_STAGE_BASE+2*i];
+            nvn_shader_match match;
+            const nvn_shader_ent *shader=nvn_shader_find_gpu(address,&match);
+            NVN_LOG("NVN_SHADER_MATCH hit=%d stage=%u offset=%u code_only=%u bytes=%u candidates=%u matches=%u",
+                    shader!=NULL,shader?shader->stage:UINT16_MAX,match.offset,match.code_only,
+                    match.bytes,match.candidates,match.matches);
+        }
     }
     return NVN_TRUE;
 }

@@ -11,6 +11,10 @@ typedef struct state_node {
 static state_node **buckets;
 static unsigned capacity, count, reused;
 static pthread_mutex_t state_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t resource_serial;
+uint64_t nvn_st_resource_serial(void) {
+    return __atomic_add_fetch(&resource_serial,1,__ATOMIC_RELAXED);
+}
 
 static unsigned st_hash(const void *p, unsigned size) {
     uint64_t h = (uint64_t)(uintptr_t)p;

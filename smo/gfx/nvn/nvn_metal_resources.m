@@ -1,0 +1,266 @@
+/* NVN -> Metal resource bridge. Layout conventions and sampler conversion
+ * adapted from d2r-mobile, Copyright (c) 2026 jhaizhou, MIT.
+ * See third_party/d2r-mobile.LICENSE. Unsupported state fails explicitly. */
+#import "nvn_metal_resources.h"
+#import <Foundation/Foundation.h>
+#include "nvn_host.h"
+#include "nvn_state.h"
+#include "nvn_tex.h"
+#include "nvn_texread.h"
+#include "nvn_bcdec.h"
+#include <math.h>
+#include <pthread.h>
+#include "nvn_format_info.inc"
+
+@interface SMONVNMetalTexture : NSObject
+@property(nonatomic,strong) id<MTLTexture> texture;
+@property(nonatomic,strong) NSMutableDictionary<NSData *,id<MTLTexture>> *views;
+@end
+@implementation SMONVNMetalTexture
+@end
+static NSMutableDictionary<NSData *,SMONVNMetalTexture *> *textures;
+static NSMutableDictionary<NSData *,id<MTLSamplerState>> *samplers;
+static pthread_mutex_t cache_lock=PTHREAD_MUTEX_INITIALIZER;
+
+typedef struct { MTLPixelFormat metal; uint32_t bytes,bw,bh; int compressed,depth; } pixel_info;
+static pixel_info pixel(uint32_t f) {
+    pixel_info p={MTLPixelFormatInvalid,0,1,1,0,0};
+    texture_fmt tf=texture_format((int)f); p.bytes=tf.bpb;
+    uint32_t kind; int bpp;
+    if(nvn_bc_unpacked(f,&kind,&bpp)) {
+        static const MTLPixelFormat unpacked[]={MTLPixelFormatInvalid,MTLPixelFormatR8Unorm,
+            MTLPixelFormatR8Snorm,MTLPixelFormatRG8Unorm,MTLPixelFormatRG8Snorm,
+            MTLPixelFormatRGBA8Unorm,MTLPixelFormatRGBA8Unorm_sRGB,MTLPixelFormatRGBA16Float};
+        p.metal=unpacked[kind];p.bytes=(uint32_t)bpp;p.compressed=1;return p;
+    }
+    if(f>=0x79 && f<=0x94) {
+        static const MTLPixelFormat astc[]={MTLPixelFormatASTC_4x4_LDR,MTLPixelFormatASTC_5x4_LDR,
+            MTLPixelFormatASTC_5x5_LDR,MTLPixelFormatASTC_6x5_LDR,MTLPixelFormatASTC_6x6_LDR,
+            MTLPixelFormatASTC_8x5_LDR,MTLPixelFormatASTC_8x6_LDR,MTLPixelFormatASTC_8x8_LDR,
+            MTLPixelFormatASTC_10x5_LDR,MTLPixelFormatASTC_10x6_LDR,MTLPixelFormatASTC_10x8_LDR,
+            MTLPixelFormatASTC_10x10_LDR,MTLPixelFormatASTC_12x10_LDR,MTLPixelFormatASTC_12x12_LDR,
+            MTLPixelFormatASTC_4x4_sRGB,MTLPixelFormatASTC_5x4_sRGB,MTLPixelFormatASTC_5x5_sRGB,
+            MTLPixelFormatASTC_6x5_sRGB,MTLPixelFormatASTC_6x6_sRGB,MTLPixelFormatASTC_8x5_sRGB,
+            MTLPixelFormatASTC_8x6_sRGB,MTLPixelFormatASTC_8x8_sRGB,MTLPixelFormatASTC_10x5_sRGB,
+            MTLPixelFormatASTC_10x6_sRGB,MTLPixelFormatASTC_10x8_sRGB,MTLPixelFormatASTC_10x10_sRGB,
+            MTLPixelFormatASTC_12x10_sRGB,MTLPixelFormatASTC_12x12_sRGB};
+        p.metal=astc[f-0x79];p.bw=tf.bw;p.bh=tf.bh;p.compressed=2;return p;
+    }
+#define F(n,m) case n:p.metal=MTLPixelFormat##m;break
+    switch(f) {
+    F(1,R8Unorm);F(2,R8Snorm);F(3,R8Uint);F(4,R8Sint);
+    F(5,R16Float);F(6,R16Unorm);F(7,R16Snorm);F(8,R16Uint);F(9,R16Sint);
+    F(10,R32Float);F(11,R32Uint);F(12,R32Sint);
+    F(13,RG8Unorm);F(14,RG8Snorm);F(15,RG8Uint);F(16,RG8Sint);
+    F(17,RG16Float);F(18,RG16Unorm);F(19,RG16Snorm);F(20,RG16Uint);F(21,RG16Sint);
+    F(22,RG32Float);F(23,RG32Uint);F(24,RG32Sint);
+    F(0x25,RGBA8Unorm);F(0x26,RGBA8Snorm);F(0x27,RGBA8Uint);F(0x28,RGBA8Sint);
+    F(0x29,RGBA16Float);F(0x2a,RGBA16Unorm);F(0x2b,RGBA16Snorm);F(0x2c,RGBA16Uint);F(0x2d,RGBA16Sint);
+    F(0x2e,RGBA32Float);F(0x2f,RGBA32Uint);F(0x30,RGBA32Sint);
+    F(0x31,Stencil8);F(0x32,Depth16Unorm);F(0x34,Depth32Float);F(0x36,Depth32Float_Stencil8);
+    F(0x38,RGBA8Unorm_sRGB);F(0x3d,RGB10A2Unorm);F(0x3e,RGB10A2Uint);
+    F(0x3f,RG11B10Float);F(0x40,RGB9E5Float);F(0x9a,BGRA8Unorm);F(0x9c,BGRA8Unorm_sRGB);
+    default:break;
+    }
+#undef F
+    p.depth=f>=0x31&&f<=0x36;return p;
+}
+static int texture_type(uint32_t target,MTLTextureType *out) {
+    switch(target) {
+    case 0:*out=MTLTextureType1D;return 1;
+    case 1:*out=MTLTextureType2D;return 1;
+    case 3:*out=MTLTextureType1DArray;return 1;
+    case 4:*out=MTLTextureType2DArray;return 1;
+    case 5:*out=MTLTextureType2DMultisample;return 1;
+    case 6:*out=MTLTextureType2DMultisampleArray;return 1;
+    case 8:*out=MTLTextureTypeCube;return 1;
+    case 9:*out=MTLTextureTypeCubeArray;return 1;
+    default:return 0; /* 3D/rectangle/buffer require different proven layouts. */
+    }
+}
+static NSData *resource_key(id<MTLDevice> device,const nvn_resource_snapshot *s) {
+    struct { uint64_t device,object,words[16]; } key;
+    key.device=(uintptr_t)(__bridge void *)device;key.object=s->object;
+    memcpy(key.words,s->words,sizeof key.words);
+    return [NSData dataWithBytes:&key length:sizeof key];
+}
+static int layout(const uint64_t *w,nvn_tex_layout *l,uint64_t *layer_stride,uint64_t *storage) {
+    texture_fmt f=texture_format((int)w[5]);
+    if(!f.bpb||!w[1]||!w[2]||!w[3]||!w[4]||w[4]>32||w[1]>16384||w[2]>16384||w[3]>2048)return 0;
+    memset(l,0,sizeof *l);l->width=(uint32_t)w[1];l->height=(uint32_t)w[2];l->depth=1;
+    l->layers=1;l->dims=2;l->mip_levels=(uint32_t)w[4];l->samples_x=l->samples_y=1;
+    l->block_w=f.bw;l->block_h=f.bh;l->bytes_per_block=f.bpb;
+    switch(w[7]) {
+    case 0:l->dims=1;l->height=1;break;
+    case 1:case 5:break;
+    case 3:l->dims=1;l->layers=l->height;l->height=1;break;
+    case 4:case 6:l->layers=(uint32_t)w[3];break;
+    case 8:l->layers=6;break;
+    case 9:l->layers=(uint32_t)w[3]*6;break;
+    default:return 0;
+    }
+    if(w[8]>1) { if(w[8]==2)l->samples_x=2;else if(w[8]==4)l->samples_x=l->samples_y=2;
+        else if(w[8]==8){l->samples_x=4;l->samples_y=2;}else return 0; }
+    l->linear=!!(w[6]&0x10);l->stride=(uint32_t)w[11];
+    if(l->linear) {
+        if(l->mip_levels!=1||w[8]>1)return 0;
+        if(!l->stride) {uint32_t a=w[6]&0x40?128:32;l->stride=(tex_div_ceil(l->width,f.bw)*f.bpb+a-1)&~(a-1);}
+        if(l->stride<tex_div_ceil(l->width,f.bw)*f.bpb)return 0;
+        *layer_stride=(uint64_t)l->stride*tex_div_ceil(l->height,f.bh);
+    } else {
+        if(l->dims==2)l->tile_h_log2=nvn_tex_default_tile_h(l->height,l->samples_y,f.bh);
+        *layer_stride=nvn_tex_level_offset(l,l->mip_levels);
+        if(l->layers>1)*layer_stride=tex_align_layer_size(*layer_stride,l->height,1,f.bh,l->tile_h_log2,0);
+    }
+    uint32_t largest=l->width>l->height?l->width:l->height;
+    unsigned max_levels=1;while(largest>1){largest>>=1;max_levels++;}
+    if(l->mip_levels>max_levels)return 0;
+    if((w[7]==8||w[7]==9)&&l->width!=l->height)return 0;
+    if((w[7]==5||w[7]==6)&&(w[8]<=1||l->mip_levels!=1))return 0;
+    if(w[7]!=5&&w[7]!=6&&w[8]>1)return 0;
+    *storage=*layer_stride*l->layers;
+    return *storage!=0;
+}
+static int upload(id<MTLTexture> tex,const uint64_t *w,pixel_info p,const nvn_tex_layout *l,
+                  const uint8_t *source,uint64_t layer_stride,uint64_t storage) {
+    for(uint32_t layer=0;layer<l->layers;layer++)for(uint32_t level=0;level<l->mip_levels;level++) {
+        nvn_tex_layout mip=*l;mip.width=tex_mip_size(l->width,level);mip.height=tex_mip_size(l->height,level);
+        mip.layers=1;mip.mip_levels=1;
+        mip.tile_h_log2=tex_adjust_tile_size(l->tile_h_log2,8,tex_div_ceil(mip.height,l->block_h));
+        uint64_t offset=(uint64_t)layer*layer_stride+(l->linear?0:nvn_tex_level_offset(l,level));
+        uint64_t row=(uint64_t)tex_div_ceil(mip.width,p.bw)*p.bytes;
+        uint64_t size=row*tex_div_ceil(mip.height,p.bh);
+        if(offset>=storage||size>SIZE_MAX||row>SIZE_MAX)return 0;
+        uint8_t *decoded=malloc((size_t)size);if(!decoded)return 0;
+        int64_t got=nvn_tex_decode(&mip,(uint32_t)w[5],source+offset,(size_t)(storage-offset),decoded,(size_t)size);
+        if(got!=(int64_t)size){free(decoded);return 0;}
+        [tex replaceRegion:MTLRegionMake2D(0,0,mip.width,mip.height) mipmapLevel:level slice:layer
+            withBytes:decoded bytesPerRow:(NSUInteger)row bytesPerImage:(NSUInteger)size];
+        free(decoded);
+    }
+    return 1;
+}
+static id<MTLTexture> texture_view(SMONVNMetalTexture *entry,const nvn_view_state *view) {
+    id<MTLTexture> base=entry.texture;if(!view||!view->flags)return base;
+    nvn_view_state v=*view;
+    if(v.flags&~63u)return nil;
+    NSUInteger level=0,levels=base.mipmapLevelCount,layer=0,layers=base.arrayLength;
+    if(base.textureType==MTLTextureTypeCube||base.textureType==MTLTextureTypeCubeArray)layers*=6;
+    if(v.flags&NVN_VIEW_LEVELS){if(v.base_level<0||v.level_count<=0)return nil;level=v.base_level;levels=v.level_count;}
+    if(v.flags&NVN_VIEW_LAYERS){if(v.base_layer<0||v.layer_count<=0)return nil;layer=v.base_layer;layers=v.layer_count;}
+    NSUInteger available=base.arrayLength;
+    if(base.textureType==MTLTextureTypeCube||base.textureType==MTLTextureTypeCubeArray)available*=6;
+    if(level>=base.mipmapLevelCount||levels>base.mipmapLevelCount-level||layer>=available||layers>available-layer)return nil;
+    MTLPixelFormat format=base.pixelFormat;
+    if(v.flags&NVN_VIEW_FORMAT){pixel_info p=pixel((uint32_t)v.format);if(p.metal==MTLPixelFormatInvalid)return nil;format=p.metal;}
+    if(v.flags&NVN_VIEW_DEPTH_STENCIL){
+        if(v.depth_stencil!=0&&v.depth_stencil!=1)return nil;
+        if(v.depth_stencil==1){if(base.pixelFormat!=MTLPixelFormatDepth32Float_Stencil8)return nil;format=MTLPixelFormatX32_Stencil8;}
+    }
+    MTLTextureType type=base.textureType;
+    if((v.flags&NVN_VIEW_TARGET)&&!texture_type((uint32_t)v.target,&type))return nil;
+    MTLTextureSwizzleChannels sw=MTLTextureSwizzleChannelsMake(MTLTextureSwizzleRed,MTLTextureSwizzleGreen,MTLTextureSwizzleBlue,MTLTextureSwizzleAlpha);
+    if(v.flags&NVN_VIEW_SWIZZLE){
+        static const MTLTextureSwizzle map[]={MTLTextureSwizzleZero,MTLTextureSwizzleOne,MTLTextureSwizzleRed,MTLTextureSwizzleGreen,MTLTextureSwizzleBlue,MTLTextureSwizzleAlpha};
+        for(int i=0;i<4;i++)if(v.swizzle[i]>5)return nil;
+        sw=MTLTextureSwizzleChannelsMake(map[v.swizzle[0]],map[v.swizzle[1]],map[v.swizzle[2]],map[v.swizzle[3]]);
+    }
+    NSData *key=[NSData dataWithBytes:&v length:sizeof v];id<MTLTexture> result=entry.views[key];
+    if(!result){result=[base newTextureViewWithPixelFormat:format textureType:type levels:NSMakeRange(level,levels)
+        slices:NSMakeRange(layer,layers) swizzle:sw];if(result)entry.views[key]=result;}
+    return result;
+}
+id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapshot *s,const nvn_view_state *v,int render_target) {
+    if(!device||!s)return nil;
+    pthread_mutex_lock(&cache_lock);
+    if(!textures)textures=[NSMutableDictionary new];
+    NSData *key=resource_key(device,s);SMONVNMetalTexture *entry=textures[key];
+    if(!entry) {
+        const uint64_t *w=s->words;pixel_info p=pixel((uint32_t)w[5]);MTLTextureType type;
+        nvn_tex_layout l;uint64_t layer_stride=0,storage=0;
+        nvn_st_ent *pool=nvn_st_get((const void *)(uintptr_t)w[9],4);
+        if(p.metal==MTLPixelFormatInvalid||!texture_type((uint32_t)w[7],&type)||
+           !layout(w,&l,&layer_stride,&storage)||!pool||!pool->v[1]||w[10]>pool->v[2]||
+           storage>pool->v[2]-w[10]||pool->v[1]>UINT64_MAX-pool->v[2]||
+           (p.compressed&&render_target)||(p.depth&&!render_target)||
+           (w[8]>1&&(!render_target||![device supportsTextureSampleCount:(NSUInteger)w[8]]))||
+           (p.compressed==2&&(l.dims!=2||![device supportsFamily:MTLGPUFamilyApple1])))goto failure;
+        MTLTextureDescriptor *d=[MTLTextureDescriptor new];d.textureType=type;d.pixelFormat=p.metal;
+        d.width=l.width;d.height=l.height;d.depth=1;d.mipmapLevelCount=l.mip_levels;
+        d.arrayLength=(type==MTLTextureTypeCubeArray)?l.layers/6:(type==MTLTextureTypeCube?1:l.layers);
+        d.sampleCount=w[8]>1?(NSUInteger)w[8]:1;
+        d.storageMode=(p.depth||w[8]>1)?MTLStorageModePrivate:MTLStorageModeShared;
+        d.usage=MTLTextureUsageShaderRead|MTLTextureUsagePixelFormatView;
+        if(!p.compressed)d.usage|=MTLTextureUsageRenderTarget;
+        id<MTLTexture> texture=[device newTextureWithDescriptor:d];if(!texture)goto failure;
+        if(!p.depth&&w[8]<=1&&!upload(texture,w,p,&l,(const uint8_t *)(uintptr_t)(pool->v[1]+w[10]),layer_stride,storage))goto failure;
+        entry=[SMONVNMetalTexture new];entry.texture=texture;entry.views=[NSMutableDictionary new];textures[key]=entry;
+    }
+    {
+        if(render_target&&pixel((uint32_t)s->words[5]).compressed)goto failure;
+        id<MTLTexture> result=texture_view(entry,v);
+        if(!result)goto failure;
+        pthread_mutex_unlock(&cache_lock);return result;
+    }
+failure:
+    NVN_LOG("NVN_METAL_RESOURCE_UNSUPPORTED texture=%#llx serial=%llu format=%llu target=%llu samples=%llu render=%d",
+        (unsigned long long)s->object,(unsigned long long)s->words[15],(unsigned long long)s->words[5],
+        (unsigned long long)s->words[7],(unsigned long long)s->words[8],render_target);
+    pthread_mutex_unlock(&cache_lock);return nil;
+}
+static float float_word(uint64_t w){uint32_t bits=(uint32_t)w;float f;memcpy(&f,&bits,4);return f;}
+static int address_mode(uint64_t value,MTLSamplerAddressMode *out) {
+    switch(value){
+    case 1:*out=MTLSamplerAddressModeRepeat;return 1;
+    case 3:*out=MTLSamplerAddressModeMirrorClampToEdge;return 1;
+    case 5:*out=MTLSamplerAddressModeClampToBorderColor;return 1;
+    case 6:*out=MTLSamplerAddressModeMirrorRepeat;return 1;
+    case 7:*out=MTLSamplerAddressModeClampToEdge;return 1;
+    default:return 0; /* Legacy clamp/mirror-clamp differ at the border. */
+    }
+}
+id<MTLSamplerState> nvn_metal_sampler(id<MTLDevice> device,const nvn_resource_snapshot *s) {
+    if(!device||!s)return nil;pthread_mutex_lock(&cache_lock);
+    if(!samplers)samplers=[NSMutableDictionary new];
+    NSData *key=resource_key(device,s);id<MTLSamplerState> result=samplers[key];
+    if(result){pthread_mutex_unlock(&cache_lock);return result;}
+    const uint64_t *w=s->words;uint32_t min=(uint32_t)w[1],mag=(uint32_t)(w[1]>>32);
+    uint32_t mode=(uint32_t)w[7],func=(uint32_t)(w[7]>>32);
+    float bias=float_word(w[5]),lo=float_word(w[13]),hi=float_word(w[14]),aniso=float_word(w[6]);
+    MTLSamplerAddressMode ws,wt,wr;
+    if(min>5||mag>1||mode>1||(mode&&(func<1||func>8))||w[8]||!isfinite(aniso)||aniso<1||aniso>16||floorf(aniso)!=aniso||
+       !isfinite(bias)||!isfinite(lo)||!isfinite(hi)||hi<lo||
+       !address_mode(w[2],&ws)||!address_mode(w[3],&wt)||!address_mode(w[4],&wr))goto failure;
+    {
+        MTLSamplerDescriptor *d=[MTLSamplerDescriptor new];
+        d.minFilter=(min&1)?MTLSamplerMinMagFilterLinear:MTLSamplerMinMagFilterNearest;
+        d.magFilter=mag?MTLSamplerMinMagFilterLinear:MTLSamplerMinMagFilterNearest;
+        d.mipFilter=min<2?MTLSamplerMipFilterNotMipmapped:(min<4?MTLSamplerMipFilterNearest:MTLSamplerMipFilterLinear);
+        d.sAddressMode=ws;d.tAddressMode=wt;d.rAddressMode=wr;
+        d.maxAnisotropy=(NSUInteger)aniso;d.lodMinClamp=fmaxf(0,lo);d.lodMaxClamp=fmaxf(0,hi);
+        d.compareFunction=mode?(MTLCompareFunction)(func-1):MTLCompareFunctionNever;
+        d.supportArgumentBuffers=YES;
+        if(bias!=0){
+            if(![d respondsToSelector:NSSelectorFromString(@"setLodBias:")])goto failure;
+            [d setValue:@(bias) forKey:@"lodBias"];
+        }
+        if(ws==MTLSamplerAddressModeClampToBorderColor||wt==MTLSamplerAddressModeClampToBorderColor||wr==MTLSamplerAddressModeClampToBorderColor){
+            float r=float_word(w[9]),g=float_word(w[10]),b=float_word(w[11]),a=float_word(w[12]);
+            if(w[9]>>32){r=(float)(uint32_t)w[9];g=(float)(uint32_t)w[10];b=(float)(uint32_t)w[11];a=(float)(uint32_t)w[12];}
+            if(r==0&&g==0&&b==0&&a==0)d.borderColor=MTLSamplerBorderColorTransparentBlack;
+            else if(r==0&&g==0&&b==0&&a==1)d.borderColor=MTLSamplerBorderColorOpaqueBlack;
+            else if(r==1&&g==1&&b==1&&a==1)d.borderColor=MTLSamplerBorderColorOpaqueWhite;
+            else goto failure;
+        }
+        result=[device newSamplerStateWithDescriptor:d];if(!result)goto failure;
+        samplers[key]=result;pthread_mutex_unlock(&cache_lock);return result;
+    }
+failure:
+    NVN_LOG("NVN_METAL_RESOURCE_UNSUPPORTED sampler=%#llx minmag=%#llx wrap=%llu/%llu/%llu reduction=%llu",
+        (unsigned long long)s->object,(unsigned long long)s->words[1],(unsigned long long)s->words[2],
+        (unsigned long long)s->words[3],(unsigned long long)s->words[4],(unsigned long long)s->words[8]);
+    pthread_mutex_unlock(&cache_lock);return nil;
+}
+void nvn_metal_resources_reset(void) {
+    pthread_mutex_lock(&cache_lock);[textures removeAllObjects];[samplers removeAllObjects];pthread_mutex_unlock(&cache_lock);
+}

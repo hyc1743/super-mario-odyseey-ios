@@ -9,11 +9,11 @@ CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
 # CORE = 除 main.c 以外的宿主全部源（自检目标复用；内嵌装载自检也要它）
-CORE = logbuf.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_hipc.c hle_sdkinit.c hle_vi.c hle_oe.c hle_pl.c hle_audio.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+CORE = logbuf.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_hipc.c hle_sdkinit.c hle_vi.c hle_oe.c hle_pl.c hle_audio.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_cmd_render.c ../gfx/nvn/nvn_resources.c ../gfx/nvn/nvn_render_state.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
 HOST_GPU_SRC =
 HOST_GPU_FLAGS =
 ifeq ($(shell uname -s),Darwin)
-HOST_GPU_SRC = ../gfx/nvn/nvn_metal_runtime.m
+HOST_GPU_SRC = ../gfx/nvn/nvn_metal_runtime.m ../gfx/nvn/nvn_metal_resources.m ../gfx/nvn/nvn_texread.c ../gfx/nvn/nvn_bcdec.c
 HOST_GPU_FLAGS = -DSMO_METAL_RUNTIME=1 -fobjc-arc -framework Metal -framework Foundation
 endif
 SRC = $(CORE) main.c $(HOST_GPU_SRC)
@@ -35,7 +35,7 @@ smo_host_embedded: $(SRC) ../ios/Sources/Embedded.S ../ios/Sources/Embedded.c
 # CI 没发现是因为它绕过 Makefile、自己写 gcc 命令行 —— 现在 regress.sh 会跑 `make test`。
 # 结论：这一组文件是相互依赖的整体，就该只写一次。
 GFX_COMMON = ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c \
-             ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+             ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_cmd_render.c ../gfx/nvn/nvn_resources.c ../gfx/nvn/nvn_render_state.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
 
 # NVN 图形层单测：接口层（按名取函数 + 命令记录）
 nvn_iface_selftest: $(GFX_COMMON) ../gfx/nvn/tests/nvn_selftest.c
@@ -51,8 +51,20 @@ cmd_selftest: $(GFX_COMMON) ../gfx/nvn/tests/cmd_selftest.c
 queue_selftest: $(GFX_COMMON) ../gfx/nvn/tests/queue_selftest.c
 	$(CC) $(CFLAGS) $(INC) -o $@ $^
 
+cmd_render_selftest: $(GFX_COMMON) ../gfx/nvn/tests/cmd_render_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
+
+render_state_selftest: ../gfx/nvn/nvn_render_state.c ../gfx/nvn/tests/render_state_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
+
+resources_selftest: ../gfx/nvn/nvn_resources.c ../gfx/nvn/nvn_state.c ../gfx/nvn/tests/resources_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
+
 metal_queue_selftest: $(GFX_COMMON) ../gfx/nvn/nvn_metal_runtime.m ../gfx/nvn/tests/metal_queue_selftest.c
 	$(CC) $(CFLAGS) $(INC) -DSMO_METAL_RUNTIME=1 -fobjc-arc -framework Metal -framework Foundation -o $@ $^
+
+metal_resources_selftest: $(GFX_COMMON) ../gfx/nvn/nvn_metal_resources.m ../gfx/nvn/nvn_texread.c ../gfx/nvn/nvn_bcdec.c ../gfx/nvn/tests/metal_resources_selftest.m
+	$(CC) $(CFLAGS) $(INC) -fobjc-arc -framework Metal -framework Foundation -o $@ $^
 
 # 着色器索引单测（合成自检；真实数据用命令行给索引与 blob）
 shader_selftest: $(GFX_COMMON) ../gfx/nvn/tests/shader_selftest.c
@@ -139,7 +151,7 @@ ifeq ($(UNAME_S),Darwin)
 TEST_EXTRA = embed_selftest gate_stack_selftest
 endif
 
-test: cmd_selftest queue_selftest $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
+test: cmd_selftest queue_selftest cmd_render_selftest render_state_selftest resources_selftest $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
 	./applogic_selftest
 	./smoarc_selftest
 	./loader_selftest $(SYNDIR) sdk main
@@ -155,6 +167,9 @@ test: cmd_selftest queue_selftest $(TEST_EXTRA) applogic_selftest smoarc_selftes
 	./nvn_selftest
 	./cmd_selftest
 	./queue_selftest
+	./cmd_render_selftest
+	./render_state_selftest
+	./resources_selftest
 	./shader_selftest
 	./replay_selftest
 	./tex_selftest

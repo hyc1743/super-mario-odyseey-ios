@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""把离线译好的着色器编成运行时索引：`blob(FNV-1a 64) → stage + MSL 文件名`。
+"""Build a private runtime lookup index from offline SPH+code artifacts.
 
-为什么需要这一层：游戏运行时通过 `nvnProgramSetShaders(program, size, control)` 交来控制段，
-里面是 Maxwell 着色器 blob（SPH 头 0x50 + 机器码）。宿主必须**按同样的算法**算键，才能查到
-第七轮离线译好的那 18470 个着色器。算法就一个：FNV-1a 64 覆盖整个 sph+code。
-
-离线那轮用 sha256 前 16 位当**目录名**（给文件系统用的，见 smo/tools/sharcb.py），
-这里另外算一份 64 位运行期用键 —— 两者不冲突：索引里同时记着这两者。
-
-用法：
-  shader_index.py [--unpack work/shader_unpack] [--out work/shaders.idx] [--check] [--stats]
-产出（文本，便于 diff 与人眼核对）：
-  # 注释
-  <fnv64 十六进制>\t<stage 数字>\t<sha256 前16位>.metal
+The first three TSV columns preserve the legacy exact-blob lookup format:
+  full_hash_hex, stage, msl_filename
+V2 appends:
+  full_size_decimal, full_prefix_hash_hex, code_hash_hex, code_prefix_hash_hex
+Prefix hashes cover min(64, span). Runtime pool lookup validates the exact
+known span after a prefix match; it never derives sizes from unknown control
+pointers. Candidate offsets/layouts still require actual runtime validation.
+The hash uses the established repository FNV-like offset basis for compatibility.
 """
 import os
 import sys
@@ -51,7 +47,8 @@ def build(root: str):
         if stage is None:
             continue
         seen.add(key)
-        rows.append((fnv64(data), stage, key + ".metal"))
+        rows.append((fnv64(data), stage, key + ".metal", len(data),
+                     fnv64(data[:64]), fnv64(data[0x50:]), fnv64(data[0x50:0x90])))
     return rows
 
 
@@ -59,8 +56,9 @@ def render(rows):
     out = ["# 着色器运行期索引：<FNV-1a 64>\t<stage>\t<MSL 文件名>",
            "# 由 smo/gfx/shader_index.py 从 work/shader_unpack/*/code_full.bin 生成",
            "# stage：0=cs 1=vs 2=ts 3=te 4=gs 5=ps（与 Ryujinx ShaderStage 同号）"]
-    for k, stage, msl in sorted(rows):
-        out.append(f"{k:016x}\t{stage}\t{msl}")
+    for k, stage, msl, size, prefix, code_key, code_prefix in sorted(rows):
+        out.append(f"{k:016x}\t{stage}\t{msl}\t{size}\t{prefix:016x}\t{code_key:016x}\t{code_prefix:016x}")
+    out.append("# v2 extra columns: full_size_dec full_prefix64_hex code_key_hex code_prefix64_hex; prefix hashes cover min(64, span)")
     return "\n".join(out) + "\n"
 
 
@@ -90,7 +88,7 @@ def main():
     print(f"已生成 {outp}：{len(rows)} 条着色器")
     if "--stats" in sys.argv:
         import collections
-        c = collections.Counter(s for _, s, _ in rows)
+        c = collections.Counter(row[1] for row in rows)
         names = {0: "cs", 1: "vs", 2: "ts", 3: "te", 4: "gs", 5: "ps"}
         for st, n in sorted(c.items()):
             print(f"  {names.get(st, st)}: {n}")

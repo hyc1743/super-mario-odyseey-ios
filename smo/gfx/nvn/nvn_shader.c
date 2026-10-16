@@ -1,6 +1,7 @@
 // 着色器索引的实现（见 nvn_shader.h 的设计说明）。
 #include "nvn_shader.h"
 #include "nvn_host.h"
+#include "nvn_state.h"
 
 #define SHADER_MAX 65536          // 2 的幂：已译着色器 18470 个，留一倍余量
 #define CTRL_SCAN_MAX (64u * 1024)   // 滑动扫描的尺寸上限
@@ -21,7 +22,7 @@ uint64_t nvn_shader_key(const uint8_t *p, size_t n) {
 
 static unsigned slot_of(uint64_t key) { return (unsigned)(key * 0x9E3779B97F4A7C15ULL >> 40) & (SHADER_MAX - 1); }
 
-static void put(uint64_t key, unsigned stage, const char *msl) {
+static nvn_shader_ent *put(uint64_t key, unsigned stage, const char *msl) {
     unsigned i = slot_of(key);
     for (unsigned k = 0; k < SHADER_MAX; k++) {
         nvn_shader_ent *e = &g_sh[(i + k) % SHADER_MAX];
@@ -32,10 +33,11 @@ static void put(uint64_t key, unsigned stage, const char *msl) {
             for (; msl[j] && j < NVN_SHADER_MSL_MAX - 1; j++) e->msl[j] = msl[j];
             e->msl[j] = 0;
             g_sh_n++;
-            return;
+            return e;
         }
-        if (e->key == key) return;                      // 同键重复：忽略
+        if (e->key == key) return e;                      // 同键重复：忽略
     }
+    return NULL;
 }
 
 static const nvn_shader_ent *find_key(uint64_t key) {
@@ -65,12 +67,23 @@ int nvn_shader_load(const char *path) {
         if (!tab2) continue;
         *tab2 = 0;
         char *msl = tab2 + 1;
+        char *meta = strchr(msl, '\t');
+        if (meta) *meta++ = 0;
         size_t ml = strlen(msl);
         while (ml && (msl[ml - 1] == '\n' || msl[ml - 1] == '\r')) msl[--ml] = 0;
         uint64_t key = strtoull(p, NULL, 16);
         unsigned stage = (unsigned)strtoul(tab1 + 1, NULL, 10);
         if (!key) continue;
-        put(key, stage, msl);
+        nvn_shader_ent *entry = put(key, stage, msl);
+        if (entry && meta) {
+            unsigned bytes = 0;
+            unsigned long long prefix = 0, code_key = 0, code_prefix = 0;
+            if (sscanf(meta, "%u\t%llx\t%llx\t%llx", &bytes,
+                       &prefix, &code_key, &code_prefix) == 4 && bytes >= 0x58) {
+                entry->bytes = bytes; entry->prefix = prefix;
+                entry->code_key = code_key; entry->code_prefix = code_prefix;
+            }
+        }
         n++;
     }
     fclose(f);
@@ -117,11 +130,52 @@ const nvn_shader_ent *nvn_shader_find_control(const uint8_t *ctrl, size_t n) {
     return NULL;
 }
 
+/* Exact span metadata is supplied by shader_index.py. The 64-byte prefix
+ * filters candidates; the entire declared span must match before selection.
+ * Code-only matches can be ambiguous across different SPHs and are rejected. */
+const nvn_shader_ent *nvn_shader_find_gpu(uint64_t address, nvn_shader_match *out) {
+    nvn_shader_match result = {0};
+    const nvn_shader_ent *found = NULL;
+    static const unsigned offsets[] = {0, 0x30};
+    for (unsigned o = 0; o < sizeof offsets / sizeof offsets[0]; ++o) {
+        uint64_t at = address + offsets[o], base, length;
+        if (at < address || !nvn_st_pool_range(at, 8, &base, &length)) continue;
+        const uint8_t *p = (const uint8_t *)(uintptr_t)at;
+        uint64_t available = length - (at - base);
+        uint64_t prefix = available >= 64 ? nvn_shader_key(p, 64) : 0;
+        for (unsigned slot = 0; slot < SHADER_MAX; ++slot) {
+            const nvn_shader_ent *e = &g_sh[slot];
+            if (!e->key || !e->bytes) continue;
+            for (unsigned code_only = 0; code_only < 2; ++code_only) {
+                uint32_t bytes = e->bytes - (code_only ? 0x50 : 0);
+                /* Prefix hashes use min(64, span), so short code is checked
+                 * separately without ever reading beyond the pool. */
+                uint64_t expected = code_only ? e->code_prefix : e->prefix;
+                if (bytes > available) continue;
+                uint64_t actual = bytes < 64 ? nvn_shader_key(p, bytes) : prefix;
+                if (bytes > available || actual != expected) continue;
+                result.candidates++;
+                if (nvn_shader_key(p, bytes) != (code_only ? e->code_key : e->key)) continue;
+                if (found == e) continue;
+                result.matches++;
+                if (!found) {
+                    found = e; result.offset = offsets[o];
+                    result.code_only = code_only; result.bytes = bytes;
+                }
+            }
+        }
+    }
+    if (out) *out = result;
+    if (result.matches != 1) return NULL;
+    g_sh_hits++;
+    return found;
+}
+
 unsigned nvn_shader_count(void) { return g_sh_n; }
 unsigned nvn_shader_hits(void)  { return g_sh_hits; }
 unsigned nvn_shader_collisions(void) { return g_sh_coll; }
 void nvn_shader_reset(void) {
-    for (unsigned i = 0; i < SHADER_MAX; i++) g_sh[i].key = 0;
+    memset(g_sh, 0, sizeof g_sh);
     g_sh_n = 0;
     g_sh_hits = 0;
     g_sh_coll = 0;
