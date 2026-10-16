@@ -190,5 +190,7 @@ void dm_as_protect(void *p, size_t n, int rw) {
     if (mprotect(p, n, rw ? (PROT_READ | PROT_WRITE) : PROT_NONE)) die("dm_as_protect(%p, %#zx, %d) 失败", p, n, rw);
 }
 
+size_t dm_as_page_size(void) { return (size_t)getpagesize(); }
+
 void *dm_host_stack_top(void) { return pthread_get_stackaddr_np(pthread_self()); }
 size_t dm_host_stack_size(void) { return pthread_get_stacksize_np(pthread_self()); }

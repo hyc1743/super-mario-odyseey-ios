@@ -45,6 +45,16 @@ static uint64_t hle_stub_default(const char *what, const char *why, unsigned i) 
 # 宿主接管整个 NVN 接口（469 个函数）就靠它（机制见 STATUS.md 2.46/2.51）。
 EXPLICIT = {"nvnBootstrapLoader"}
 
+# These are SDK-internal relocations, absent from the cross-module import TSV.
+# d2r-mobile takes over service startup at this level rather than connecting to
+# Horizon services. Names below were checked against this SMO SDK's exports/GOT.
+SDK_STARTUP = {
+    "nndiagStartup": "诊断输出由宿主提供，不连接 lm",
+    "_ZN2nn3aoc10InitializeEv": "追加内容查询由宿主提供，不连接 aoc",
+    "_ZN2nn4pctl10InitializeEv": "宿主不连接家长控制服务",
+    "_ZN2nn4diag34InitializeApplicationAbortObserverEv": "崩溃由宿主信号处理器记录",
+}
+
 
 def load_rows():
     rows = []
@@ -62,6 +72,8 @@ def load_rows():
             if (("服务客户端" in what) or what.startswith(("宿主接管", "宿主HLE", "网络"))
                     or fam == "nv" or sym in EXPLICIT):
                 rows.append((mod, sym, fam, prov, what))
+    for sym, why in SDK_STARTUP.items():
+        rows.append(("sdk", sym, "sdkinit", "sdk", "宿主接管 SDK 初始化：" + why))
     # 去重（同一符号可能被多个模块引用；表里只能有一条）
     seen, uniq = set(), []
     for r in rows:

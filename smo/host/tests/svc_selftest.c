@@ -15,8 +15,34 @@ int g_nmod;
 
 // ---- 平台层：本机自检的朴素实现 ----
 static uint8_t *g_reserved;
-void *dm_as_reserve(size_t size) { g_reserved = calloc(1, size); return g_reserved; }
-void dm_as_protect(void *p, size_t n, int rw) { (void)p; (void)n; (void)rw; }
+static unsigned char alias_rw[32768];
+#ifndef _WIN32
+#include <sys/mman.h>
+#endif
+size_t dm_as_page_size(void) { return 0x4000; } // Exercise the iPhone's 16 KiB granularity everywhere.
+void *dm_as_reserve(size_t size) {
+#ifdef _WIN32
+    void *raw = calloc(1, size + 0x4000);
+    g_reserved = (uint8_t *)(((uintptr_t)raw + 0x3fff) & ~(uintptr_t)0x3fff);
+#else
+    void *raw = mmap(NULL, size + 0x4000, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (raw == MAP_FAILED) return NULL;
+    g_reserved = (uint8_t *)(((uintptr_t)raw + 0x3fff) & ~(uintptr_t)0x3fff);
+#endif
+    return g_reserved;
+}
+void dm_as_protect(void *p, size_t n, int rw) {
+    uintptr_t off = (uintptr_t)p - (uintptr_t)g_reserved;
+    if (off < (512ull << 20)) {
+        if ((off | n) & 0x3fff) abort();
+        for (size_t i = off / 0x4000; i < (off + n) / 0x4000; i++) alias_rw[i] = !!rw;
+    }
+#ifndef _WIN32
+    if (mprotect(p, n, rw ? PROT_READ | PROT_WRITE : PROT_NONE)) abort();
+#else
+    (void)n; (void)rw;
+#endif
+}
 static uint8_t g_fake_stack[0x100000];
 void *dm_host_stack_top(void) { return g_fake_stack + sizeof g_fake_stack; }
 size_t dm_host_stack_size(void) { return sizeof g_fake_stack; }
@@ -114,6 +140,35 @@ int main(void) {
         "宿主栈地址回报**整段**栈（SDK 会断言 sp 在区间内，回报一页是错的）");
     call(0x06, (uint64_t)(uintptr_t)mi, 0, (uint64_t)(uintptr_t)g_reserved + (256ull << 20), 0);
     CHK(*(uint32_t *)(mi + 0x10) == 0, "预留块内未用地址回报空闲");
+
+    printf("== 7. Physical memory: 4 KiB guest / 16 KiB host ==\n");
+    uint64_t alias = (uint64_t)(uintptr_t)g_reserved;
+    CHK(call(0x2c, alias, 0x1000, 0, 0) == 0 && alias_rw[0], "physical map opens host page (v0.6.8 crash)");
+    if (alias_rw[0]) { // A missing implementation fails assertions without faulting this test process.
+        memset((void *)alias, 0x5a, 0x1000);
+        CHK(call(0x2c, alias + 0x1000, 0x2000, 0, 0) == 0, "map unaligned host subpages");
+        memset((void *)(alias + 0x1000), 0xa5, 0x2000);
+        call(0x06, (uint64_t)(uintptr_t)mi, 0, alias + 0x2000, 0);
+        CHK(*(uint32_t *)(mi + 0x10) == 5 && *(uint64_t *)mi == alias && *(uint64_t *)(mi + 8) == 0x3000,
+            "QueryMemory merges contiguous physical pages as normal heap memory");
+        CHK(call(0x2d, alias + 0x1000, 0x1000, 0, 0) == 0 && alias_rw[0], "partial unmap preserves live neighbors");
+        CHK(*(uint8_t *)alias == 0x5a && *(uint8_t *)(alias + 0x2000) == 0xa5, "neighbor contents survive unmap");
+        call(0x06, (uint64_t)(uintptr_t)mi, 0, alias + 0x1000, 0);
+        CHK(*(uint32_t *)(mi + 0x10) == 0 && *(uint64_t *)mi == alias + 0x1000 && *(uint64_t *)(mi + 8) == 0x1000,
+            "QueryMemory reports exact 4 KiB hole");
+        CHK(call(0x2c, alias + 0x1000, 0x1000, 0, 0) == 0 && *(uint8_t *)(alias + 0x1000) == 0,
+            "remapped page starts zeroed");
+        CHK(call(0x2c, alias, 0x1000, 0, 0) != 0, "reject overlapping map");
+        CHK(call(0x2d, alias, 0x4000, 0, 0) != 0 && alias_rw[0], "reject unmap containing unmapped page atomically");
+        CHK(call(0x2d, alias, 0x3000, 0, 0) == 0 && !alias_rw[0], "last unmap closes host page");
+        CHK(call(0x2c, alias, 0x1000, 0, 0) == 0 && *(uint8_t *)alias == 0, "fresh map after full unmap is zeroed");
+        call(0x2d, alias, 0x1000, 0, 0);
+    }
+    CHK(call(0x2c, alias + 1, 0x1000, 0, 0) != 0, "reject unaligned address");
+    CHK(call(0x2c, alias, 1, 0, 0) != 0 && call(0x2c, alias, 0, 0, 0) != 0, "reject invalid sizes");
+    CHK(call(0x2c, alias + (512ull << 20) - 0x1000, 0x2000, 0, 0) != 0, "reject crossing alias boundary");
+    CHK(call(0x2c, UINT64_MAX - 0xfff, 0x2000, 0, 0) != 0, "reject address overflow");
+    CHK(call(0x2d, alias, 0x1000, 0, 0) != 0, "reject duplicate unmap");
 
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");
     return fails != 0;

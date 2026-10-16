@@ -56,6 +56,14 @@ LOCAL_SF_SYMBOLS = {
     "_ZN2nn2sf4hipc21GetMessageBufferOnTlsEv",
     "_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor11SetupHeaderEPvmRKNS2_21HipcMessageHeaderInfoE",
     "_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor6SetTagEt",
+    "_ZN2nn2sf4impl6detail22ServiceObjectImplBase211ReleaseImplEv",
+    "_ZN2nn2sf4impl6detail22ServiceObjectImplBase216AddReferenceImplEv",
+}
+
+# SDK-local flags, also preserved by d2r-mobile's hle_sdkinit.c.
+LOCAL_SDK_FLAGS = {
+    "_ZN2nn2fs28SetLocalApplicationAccessLogEb",
+    "_ZN2nn2fs29SetResultHandledByApplicationEb",
 }
 
 
@@ -118,7 +126,7 @@ def load_modules(exefs):
 
 def verdict(sym, provided_by):
     fam = family_of(sym)
-    if sym in LOCAL_SF_SYMBOLS and provided_by:
+    if sym in LOCAL_SF_SYMBOLS | LOCAL_SDK_FLAGS and provided_by:
         return "模块内", fam
     # 非 nn 命名空间：这几个是实测查出来的，列出来因为它们不是「服务客户端」那套
     if fam == "nv":

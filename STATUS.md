@@ -2322,3 +2322,33 @@ x20=0，故障指令 `stp w8,w9,[x20]`，FAR=0。上轮 lmem 空桩调用已经�
 响应：move handle、原始数据长度、SFCO、Result 均正确。这是局部响应兼容性验证，
 尚不代表完整 SDK 启动或真机已通过。REA 打开 ELF 成功，但深度分析后端未配置，
 本轮未使用其反编译结果。
+
+## 2.125 v0.6.8 真机 SIGBUS：物理内存映射缺失（v0.6.9）
+
+2026-10-16 新上传日志显示：HIPC OpenLogger 已返回有效句柄；随后
+`svc 0x2c MapPhysicalMemory(0x7000000000, 0x1000)` 被默认分支伪装为成功。
+SDK 向该地址写入时触发 SIGBUS；PC sdk+`0x6a658`，FAR/x20=`0x7000000000`，
+故障指令 `0xf900028a`。这不是上一轮的空 TLS 指针问题。
+
+重新对照参考项目 d2r-mobile commit `17845634d71341cca1debf43ad79ac25c6a3a97a`：
+
+- `dm/host/hle_svc.c` 实现了 alias 区物理映射/解除映射。本项目补齐这两个 SVC，
+  校验大小、4 KiB 对齐、地址溢出、边界、重复映射与未映射区解除；失败不修改映射。
+- 本实现额外维护 4 KiB 客体页账本，按实际宿主页大小开放权限；解除其中一页时保留
+  同一 16 KiB 宿主页里的其他映射。重新映射的页清零；QueryMemory 报告连续区间与空洞，
+  GetInfo 的已用内存计入物理映射。宿主仍不能隔离同一宿主页内的未映射 4 KiB 子页。
+- `dm/host/hle_sdkinit.c` 在高层接管系统服务初始化。核对本地 SDK 的
+  `nninitInitializeSdkModule`（sdk+`0x68624`）全部 8 个调用的 PLT/GOT 后，
+  对当前 SDK 实际存在的 nndiagStartup、aoc、pctl、diag abort observer 增加明确实现；
+  oe 已有宿主实现。保留原生 os::InitializeVirtualAddressMemory 和两个 fs 本地开关。
+  初始化入口属于 SDK 内部重定位，不在跨模块 import TSV 里，生成器显式追加，避免漏接。
+- 恢复 sf::impl 的本地 AddReferenceImpl / ReleaseImpl，避免引用计数被通用成功桩覆盖。
+  保留上一版 HIPC lm 实现，供其他调用路径使用。接管表 438 → 440，真实现 84 → 88。
+- 参考代码 MIT 许可保存在 `third_party/d2r-mobile.LICENSE`。
+
+验证：新增物理映射回归在修复前 6 项失败；修复后通过，包括部分解除、空洞查询、
+邻页保留、清零、非法参数与边界。非 Windows 的自检使用真实 PROT_NONE/mprotect 映射，
+Windows 检查页权限调用与账本；全部平台强制模拟 16 KiB 宿主页粒度。
+HIPC 自检增加 4 个初始化入口确实解析为真实现的检查，工具自检覆盖本地引用计数、fs 开关
+与 SDK 内部初始化入口。Windows 快速回归 7/7 通过（含 15 个 C 自检）。
+IPA 和真机结果另按云端构建及用户测试记录。

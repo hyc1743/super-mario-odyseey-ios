@@ -88,6 +88,56 @@ int dm_guest_heap_rejects(void)   { return g_heap_rejects; }
 // Horizon 的内存状态码（QueryMemory 用；取自参考项目的实测值）
 enum { MS_FREE = 0, MS_CODE = 3, MS_HEAP = 5, MS_STACK = 0xB };
 
+// Horizon's physical mappings use 4 KiB pages, independently of the host page size.
+// Keep a guest-page ledger: removing a 4 KiB mapping must not protect a still-live
+// neighbor in the same 16 KiB iPhone page. QueryMemory also uses this ledger.
+#define GUEST_PAGE 0x1000ull
+#define ALIAS_PAGES (ALIAS_SZ / GUEST_PAGE)
+static uint8_t g_physical[ALIAS_PAGES];
+static uint64_t g_physical_used;
+
+static uint64_t physical_map(unsigned num, uint64_t addr, uint64_t size) {
+    uint64_t base = (uint64_t)(uintptr_t)g_alias;
+    if (!size || ((addr | size) & (GUEST_PAGE - 1)) || size > ALIAS_SZ ||
+        addr < base || addr - base > ALIAS_SZ - size) return 0xD401;
+    uint64_t first = (addr - base) / GUEST_PAGE, count = size / GUEST_PAGE;
+    int mapping = num == 0x2c;
+    size_t host_page = dm_as_page_size();
+    if (host_page < GUEST_PAGE || (host_page & (host_page - 1)) ||
+        (base & (host_page - 1)) || ALIAS_SZ % host_page)
+        die("unsupported physical mapping host page size: %#zx", host_page);
+    uint64_t per_host = host_page / GUEST_PAGE;
+    uint64_t lo = first / per_host * per_host;
+    uint64_t hi = (first + count + per_host - 1) / per_host * per_host;
+    pthread_mutex_lock(&g_map_lock);
+    for (uint64_t i = first; i < first + count; i++) {
+        if (!!g_physical[i] == mapping) {
+            pthread_mutex_unlock(&g_map_lock);
+            return 0xD401;
+        }
+    }
+    if (mapping) {
+        dm_as_protect(g_alias + lo * GUEST_PAGE, (hi - lo) * GUEST_PAGE, 1);
+        memset((void *)(uintptr_t)addr, 0, size);
+        memset(g_physical + first, 1, count);
+        g_physical_used += size;
+    } else {
+        // Clear while the mapping is writable; future mappings cannot expose old data.
+        memset((void *)(uintptr_t)addr, 0, size);
+        memset(g_physical + first, 0, count);
+        g_physical_used -= size;
+        for (uint64_t p = lo; p < hi; p += per_host) {
+            int live = 0;
+            for (uint64_t i = p; i < p + per_host; i++) live |= g_physical[i];
+            if (!live) dm_as_protect(g_alias + p * GUEST_PAGE, host_page, 0);
+        }
+    }
+    pthread_mutex_unlock(&g_map_lock);
+    LOG("%sPhysicalMemory %#llx +%#llx", mapping ? "Map" : "Unmap",
+        (unsigned long long)addr, (unsigned long long)size);
+    return 0;
+}
+
 int svc_dispatch(unsigned num, uint64_t *regs) {
     mem_init();
     // 每条 svc 都记进日志（前 120 条）：崩在某条 svc 上时，这是唯一能指出「哪一条」的线索。
@@ -152,7 +202,19 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
         uint8_t *a = (uint8_t *)addr;
         uint64_t base, size, state, perm;
         int k;
-        if (a >= g_heap && a < g_heap + g_heap_cur) { base = (uint64_t)(uintptr_t)g_heap; size = g_heap_cur; state = MS_HEAP; perm = 3; }
+        if (addr >= (uint64_t)(uintptr_t)g_alias && addr - (uint64_t)(uintptr_t)g_alias < ALIAS_SZ) {
+            pthread_mutex_lock(&g_map_lock);
+            uint64_t i = (addr - (uint64_t)(uintptr_t)g_alias) / GUEST_PAGE;
+            uint64_t lo = i, hi = i + 1;
+            int mapped = g_physical[i];
+            while (lo && g_physical[lo - 1] == mapped) lo--;
+            while (hi < ALIAS_PAGES && g_physical[hi] == mapped) hi++;
+            base = (uint64_t)(uintptr_t)g_alias + lo * GUEST_PAGE;
+            size = (hi - lo) * GUEST_PAGE;
+            state = mapped ? MS_HEAP : MS_FREE; perm = mapped ? 3 : 0;
+            pthread_mutex_unlock(&g_map_lock);
+        }
+        else if (a >= g_heap && a < g_heap + g_heap_cur) { base = (uint64_t)(uintptr_t)g_heap; size = g_heap_cur; state = MS_HEAP; perm = 3; }
         else if ((k = map_find(addr, 1))) { base = g_map[k - 1].base; size = g_map[k - 1].size; state = g_map[k - 1].state; perm = 3; }
         else if (a >= g_as && a < g_as + RESERVE) {       // 空闲：到相邻映射/堆边界为止
             uint64_t lo = (uint64_t)(uintptr_t)g_as, hi = lo + RESERVE;
@@ -182,6 +244,9 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
         regs[1] = 0;
         return 0;
     }
+    case 0x2c: case 0x2d:
+        regs[0] = physical_map(num, regs[0], regs[1]);
+        return 0;
     // ---- 杂项族（照参考项目 dm/host/hle_svc.c 的实现抄；真机第八轮卡住就是缺这几个）----
     // 为什么必须实现：未实现的 svc 以前既不写 regs[0] 也不报错，SDK 读到的是**栈上的垃圾** ——
     // 真机上 GetInfo(RandomEntropy) 拿到垃圾后 SDK 直接 svcBreak(Panic)（日志停在 svc #38）。
@@ -222,7 +287,11 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
         case 4:  v = (uint64_t)(uintptr_t)g_heap; break;        // HeapAddr
         case 5:  v = g_heap_cap; break;                         // HeapSize
         case 6: case 21: v = dm_app_pool(); break;              // TotalMem / TotalNonSystem
-        case 7: case 22: v = g_heap_cur + image_bytes(); break; // UsedMem / UsedNonSystem
+        case 7: case 22:
+            pthread_mutex_lock(&g_map_lock);
+            v = g_heap_cur + image_bytes() + g_physical_used;
+            pthread_mutex_unlock(&g_map_lock);
+            break; // UsedMem / UsedNonSystem
         case 8:  v = 0; break;                                  // DebuggerAttached
         case 9:  v = 0; break;                                  // ResourceLimit
         case 10: v = 0; break;                                  // IdleTick

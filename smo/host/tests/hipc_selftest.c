@@ -42,6 +42,18 @@ static void *thread_roundtrip(void *arg) {
 }
 
 int main(void) {
+    const char *startup[] = {
+        "nndiagStartup", "_ZN2nn3aoc10InitializeEv", "_ZN2nn4pctl10InitializeEv",
+        "_ZN2nn4diag34InitializeApplicationAbortObserverEv",
+    };
+    for (unsigned i = 0; i < SMO_ARRAY_LEN(startup); i++) {
+        uint64_t fn = dm_hle_force_lookup(startup[i]);
+        int registered = 0;
+        for (unsigned j = 0; j < g_hle_force_n; j++)
+            if (!strcmp(startup[i], g_hle_force[j].name)) registered = fn != (uint64_t)(uintptr_t)g_hle_force[j].fn;
+        CHK(fn && registered, "SDK service startup resolves to host implementation, including internal SDK names");
+        if (fn && registered) ((void (*)(void))(uintptr_t)fn)();
+    }
     connect_service = (connect_fn)(uintptr_t)dm_hle_force_lookup("_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc");
     send_request = (send_fn)(uintptr_t)dm_hle_force_lookup("_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm");
     close_session = (close_fn)(uintptr_t)dm_hle_force_lookup("_ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE");

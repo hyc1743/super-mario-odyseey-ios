@@ -111,6 +111,7 @@ void run_module_inits(void);
 // ---- 平台层的页操作（loader_apple.c：mmap/mprotect；自检里用朴素实现）----
 void *dm_as_reserve(size_t size);            // 预留一段不可访问的客体地址空间
 void dm_as_protect(void *p, size_t n, int rw);   // rw=1 放开读写，0 收回
+size_t dm_as_page_size(void);                 // 宿主页大小（iPhone 通常为 16 KiB）
 void *dm_host_stack_top(void);               // 宿主线程栈（QueryMemory 回报栈用）
 size_t dm_host_stack_size(void);
 // ---- svc 层 ----

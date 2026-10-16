@@ -240,6 +240,11 @@ def test_hle_policy():
                       for r in inventory))
     check("HIPC 传输仍由宿主接管",
           "_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm" in forced)
+    for sym in hle_inventory.LOCAL_SDK_FLAGS:
+        check("SDK 本地 fs 开关保留：" + sym,
+              hle_inventory.verdict(sym, ["sdk"]) == ("模块内", "fs") and sym not in forced)
+    for sym in gen_hle_force.SDK_STARTUP:
+        check("SDK 内部初始化入口明确接管：" + sym, sym in forced and sym in generated)
     # 服务接管仍必须保留，不能通过关闭整个 HLE 表来修复本地库。
     fs = "_ZN2nn2fs12MountRomCacheEPKcPvm"
     check("fs 服务仍需接管", hle_inventory.verdict(fs, ["sdk"])[0]

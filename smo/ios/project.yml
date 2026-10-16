@@ -39,6 +39,7 @@ targets:
       - path: ../host/hle_thread.c
       - path: ../host/hle_fs.c
       - path: ../host/hle_hipc.c
+      - path: ../host/hle_sdkinit.c
       - path: ../host/hle_oe.c
       - path: ../host/hle_hid.c
       - path: ../host/hle_force_gen.c
