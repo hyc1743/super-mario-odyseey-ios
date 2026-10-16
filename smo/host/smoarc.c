@@ -152,8 +152,9 @@ int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
                 int o2 = snprintf(detail, sizeof detail, "%s（读到的前 16 字节:", name);
                 for (size_t i = 0; i < 16 && o2 < (int)sizeof detail - 4; i++)
                     o2 += snprintf(detail + o2, sizeof detail - (size_t)o2, " %02x", head[i]);
-                snprintf(detail + (o2 < (int)sizeof detail - 40 ? o2 : (int)sizeof detail - 40),
-                         sizeof detail, "；实算 %08x / 表里 %08x）", (unsigned)(~c), (unsigned)crc);
+                size_t tail = o2 >= 0 && o2 < (int)sizeof detail - 64 ? (size_t)o2 : sizeof detail - 64;
+                snprintf(detail + tail, sizeof detail - tail,
+                         "；实算 %08x / 表里 %08x）", (unsigned)(~c), (unsigned)crc);
                 return fail(-2, "条目 CRC 不符", detail);
             }
             total += (unsigned)sz;

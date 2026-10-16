@@ -243,12 +243,21 @@ static uint32_t h_Commit(const char *name) {
 static void h_Unmount(const char *name) { (void)name; }   // 挂载表常驻，卸载为空操作
 
 static uint32_t h_OpenFile(uint64_t *out, const char *path, int mode) {
-    HP_EX(path, 0);
+    char hp[2048];
+    int ro = 0;
+    const char *trace = getenv("SMO_TRACE_FS_MISSING");
+    if (!host_path_ex(path, hp, sizeof hp, &ro, 0)) {
+        if (trace && !strcmp(trace, "1")) LOG("FS_OPEN_FAILED path=%s errno=%d", path, errno);
+        return err_res("path", path);
+    }
     int flags;
     if (mode & MODE_WRITE) { RW(); flags = O_RDWR; }
     else flags = O_RDONLY;
     int fd = open(hp, flags);
-    if (fd < 0) return err_res("open", hp);
+    if (fd < 0) {
+        if (trace && !strcmp(trace, "1")) LOG("FS_OPEN_FAILED path=%s errno=%d", path, errno);
+        return err_res("open", hp);
+    }
     int slot = fd & 0xFFFF;
     g_fmode[slot] = (uint8_t)mode;
     g_fro[slot] = (uint8_t)ro;

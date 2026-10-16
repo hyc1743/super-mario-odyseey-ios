@@ -28,6 +28,7 @@ def main():
     if args.romfs and not args.romfs.is_dir():
         parser.error("RomFS fixture directory does not exist")
     env = dict(os.environ)
+    env["SMO_TRACE_FS_MISSING"] = "1"
     with tempfile.TemporaryDirectory(prefix="smo-boot-") as temporary:
         for name in ("romfs", "save", "temp"):
             directory = pathlib.Path(temporary, name)
