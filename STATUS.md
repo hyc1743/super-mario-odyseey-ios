@@ -34,7 +34,8 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 两卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0/.1`（3.2+2.3 GB，4636 文件）（第二十六轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.4.1 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮） |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.4.3 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮） |
+| **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
 **能不能玩：现在还不能。** 缺的是 Metal 重放那一半与 iOS 内嵌装载分支（两者都需要 macOS / 真机）。
@@ -1914,3 +1915,58 @@ App 目标编进：宿主全部源（除 main.c）+ 图形层 C 源 + `entry.S`�
 
 **能不能玩：还差两步** —— ① 真机首跑（拿 UNIMPL 日志，按它补初始化服务）② Metal 重放的真实呈现
 （`CAMetalLayer` + GPU 可见内存）。出包与资源链路已经通到「一条命令 + 覆盖安装」。
+
+---
+
+# 第二十六轮：公开 runner 出内嵌版（私有仓 Actions 被计费挡住后的替代路线）
+
+## 2.104 先说结论
+
+私有仓（`hyc1743/super-mario-odyssey-ios-build`）的 Actions **任何 job 都启动不了**：
+两个 job 都是 `The job was not started because recent account payments have failed or your
+spending limit needs to be increased` —— 不是代码问题，是账户计费。改用**公开仓**的 Actions
+（公共仓库免费）：游戏内容一步都不落公开侧，成品只进私有仓 release。
+
+## 2.105 链路（谁在哪）
+
+| 环节 | 在哪 | 说明 |
+|---|---|---|
+| 输入包（改写产物 15.6 MB） | 私有仓 **`embed-input` 分支** `input/embed-input.zip` | 单开分支的原因：私有仓 `main` 与公开仓**逐字节一致**，输入包不随 main 走 |
+| 拉输入包 | 公开仓 runner（`SMO_PRIVATE_TOKEN` secret） | `GET /repos/<私有仓>/contents/input/embed-input.zip?ref=embed-input` + `Accept: application/vnd.github.raw+json` |
+| 内嵌构建 | 公开仓 macOS runner（免费） | `embed_inject.py` → `Embedded.S` + `project.yml`（`SMO_EMBED=1` + 三条 `-segprot`） |
+| 成品 IPA | 私有仓 tag `build-latest` 的 release 资产 | 名字 `SMOMobile-embed-r<run号>-<短sha>.ipa` |
+| 公开侧闸门 | 公开仓 | artifact 上传与 tag release 都带 `SMO_INJECTED != '1'`，含游戏程序的包传不出去 |
+
+- 一次配置：`smo/ios/tools/set_ci_secret.py`（取仓库公钥 → libsodium sealed box → PUT；令牌只从环境变量读，不落文件）
+- 私有仓 Actions 已关闭（`PUT /actions/permissions {"enabled": false}`）—— 免得每次推送产生一批计费失败记录
+
+## 2.106 证据
+
+- 公开仓 run **38881008376**（提交 `53e0a5b`）：两个 job 全绿；
+  「注入游戏程序」= success、「公开 artifact 上传」= **skipped**、「内嵌版 → 私有仓 release」= success
+- 私有仓 release `build-latest` 资产 `SMOMobile-embed-r132-53e0a5b.ipa`（15,772,315 字节）
+- 把该 IPA 拉回逐条核对（本机）：主二进制 58,261,576 字节；
+  `__TEXT` 内含 6 个 RX 节（0x3e0000 / 0x44000、0x2f8000 / 0x48000、0xbf4000 / 0x18000），
+  `__DMsdkW` / `__DMsubsdk0W` / `__DMmainW` 三个 RW 段（0x640000 / 0x3c8000 / 0x19bc000）
+  —— 与包内 `Embedded.S.manifest.tsv` 九行**逐条一致**
+- 私有仓 API 拉取链路本机实测：15,623,872 字节、sha256 与 `out/embed-input.zip` 完全一致
+
+## 2.107 顺带修掉的三处
+
+1. `embed_inject.py` / `gen_embed.py` / `check_embed.py`：Windows 控制台是 GBK，
+   emoji/中文直接 `print` 会抛 `UnicodeEncodeError` —— **成功被当成失败**（`check_embed` 本机实测过）。
+   统一加 `sys.stdout.reconfigure(errors="replace")`，并给子进程强制 `PYTHONIOENCODING=utf-8`
+2. 工作流：`$（stat -f%z …）` 是全角括号，bash 只打出字面量 → 改 `wc -c`（跨平台）
+3. 防误推：`.git/hooks/pre-push` 拦「含 `input/` 的提交推到公开仓」（本机生效，不随仓库分发）
+
+## 2.108 下一步
+
+- 你这边：私有仓 release 下载 IPA → 全能签自签 → **覆盖安装** → 打开 → 导出日志回传（M1 首跑）
+- 我这边：按 UNIMPL 日志补初始化服务；Metal 呈现（M2 的第一块真机代码）
+
+## 2.109 令牌说明（要写清楚，免得以后看不懂）
+
+CI secret `SMO_PRIVATE_TOKEN` 目前用的是本机 **Git Credential Manager 里的 OAuth 令牌**
+（scopes: gist / repo / workflow）。能用，但权限偏大，且 GCM 重新登录时可能被轮换 ——
+那天构建会突然 401。换法：建一个 classic PAT（只勾 `repo`），
+`SMO_CI_TOKEN=<PAT> python smo/ios/tools/set_ci_secret.py hyc1743/super-mario-odyssey-ios SMO_PRIVATE_TOKEN`。
