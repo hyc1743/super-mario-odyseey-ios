@@ -107,7 +107,15 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
        ![bindings[@"arguments"] isKindOfClass:[NSArray class]] || [bindings[@"unsupported_arguments"] count]){
         NVN_LOG("NVN_METAL_SHADER_MISSING key=%s stage=%u",key.UTF8String,entry->stage);return nil;
     }
-    MTLCompileOptions *options=[MTLCompileOptions new];options.fastMathEnabled=NO;
+    MTLCompileOptions *options=[MTLCompileOptions new];
+    if(@available(macOS 15.0,iOS 18.0,*)){
+        options.mathMode=MTLMathModeSafe;options.mathFloatingPointFunctions=MTLMathFloatingPointFunctionsPrecise;
+    }else{
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        options.fastMathEnabled=NO;
+#pragma clang diagnostic pop
+    }
     id<MTLLibrary> library=[e.device newLibraryWithSource:source options:options error:&error];
     id<MTLFunction> function=[library newFunctionWithName:bindings[@"entry"]];
     if(!function){NVN_LOG("NVN_METAL_SHADER_COMPILE_FAILED key=%s error=%s",key.UTF8String,error.localizedDescription.UTF8String ?: "missing entry");return nil;}
@@ -225,7 +233,8 @@ static int arguments_for(SMOGuestEncoder *e,SMOMetalShader *shader,unsigned stag
             NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,range.address,range.size,&offset);
             if(!buffer)return 0;
             [encoder setBuffer:buffer offset:offset atIndex:aid];
-            [e.render useResource:buffer usage:storage?MTLResourceUsageRead|MTLResourceUsageWrite:MTLResourceUsageRead];
+            [e.render useResource:buffer usage:storage?MTLResourceUsageRead|MTLResourceUsageWrite:MTLResourceUsageRead
+                stages:stage==0?MTLRenderStageVertex:MTLRenderStageFragment];
         }else if([kind isEqualToString:@"texture"] || [kind isEqualToString:@"sampler"]){
             if(slot<0 || slot>=128 || (arg[@"array"] && [arg[@"array"] intValue]!=1))return reject("texture argument array");
             int sampler=[kind isEqualToString:@"sampler"];
@@ -240,7 +249,8 @@ static int arguments_for(SMOGuestEncoder *e,SMOMetalShader *shader,unsigned stag
                 nvn_view_state view;
                 if(!nvn_resources_texture((void *)(uintptr_t)s->texture_pool,(uint32_t)(handle&0xfffff),0,&resource,&view))return reject("unregistered texture descriptor");
                 id<MTLTexture> texture=nvn_metal_texture(e.device,&resource,&view,0);if(!texture)return 0;
-                [encoder setTexture:texture atIndex:aid];[e.render useResource:texture usage:MTLResourceUsageRead];
+                [encoder setTexture:texture atIndex:aid];[e.render useResource:texture usage:MTLResourceUsageRead
+                    stages:stage==0?MTLRenderStageVertex:MTLRenderStageFragment];
             }
         }else return reject("shader support/driver/image argument");
     }
