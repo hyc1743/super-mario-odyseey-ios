@@ -254,13 +254,33 @@ int svc_thread(int num, uint64_t *regs) {
         regs[0] = 0;
         return 1;
     }
-    case 0x0C: regs[0] = 0; return 1;                     // GetThreadPriority：本项目先固定 16
-    case 0x0D: regs[0] = 0; return 1;                     // SetThreadPriority
-    case 0x0E: regs[0] = 0; regs[1] = 0; return 1;        // GetThreadCoreMask
-    case 0x0F: regs[0] = 0; return 1;                     // SetThreadCoreMask
+    // 注意寄存器：带输出的 svc，x0 是用户态留给结果码的（libnx 先把输出指针存栈上），
+    // **句柄在 w1（GetThreadCoreMask 是 w2）**，输出也从 x1 起。真机第九轮：以前这里把句柄当成
+    // 在 x0、优先级又不写回 —— SDK 拿 0x1001（句柄原样留在 x1）当主线程优先级、GetThreadId 报
+    // 坏句柄，nnosInitialize 随即 svcBreak。
+    case 0x0C: {                                          // GetThreadPriority(w1 句柄) → w1 优先级
+        thr_t *t = (uint32_t)regs[1] == H_CUR_THREAD ? cur() : h_peek((uint32_t)regs[1], O_THREAD);
+        regs[0] = t ? 0 : R_BAD_HANDLE;
+        regs[1] = t ? (uint64_t)t->prio : 0;
+        return 1;
+    }
+    case 0x0D: {                                          // SetThreadPriority(w0 句柄, w1 优先级)
+        thr_t *t = (uint32_t)regs[0] == H_CUR_THREAD ? cur() : h_peek((uint32_t)regs[0], O_THREAD);
+        if (t) t->prio = (int)regs[1];
+        regs[0] = t ? 0 : R_BAD_HANDLE;
+        return 1;
+    }
+    case 0x0E: {                                          // GetThreadCoreMask(w2 句柄) → w1 理想核, x2 掩码
+        thr_t *t = (uint32_t)regs[2] == H_CUR_THREAD ? cur() : h_peek((uint32_t)regs[2], O_THREAD);
+        regs[0] = t ? 0 : R_BAD_HANDLE;
+        regs[1] = t && t->core >= 0 ? (uint64_t)t->core : 0;
+        regs[2] = t ? (t->mask ? t->mask : 1) : 0;
+        return 1;
+    }
+    case 0x0F: regs[0] = 0; return 1;                     // SetThreadCoreMask(w0 句柄, w1 核, x2 掩码)
     case 0x10: regs[0] = 0; return 1;                     // GetCurrentProcessorNumber
-    case 0x25: {                                          // GetThreadId(w0 句柄；H_CUR_THREAD = 当前线程)
-        uint32_t h = (uint32_t)regs[0];
+    case 0x25: {                                          // GetThreadId(w1 句柄；H_CUR_THREAD = 当前线程) → x1
+        uint32_t h = (uint32_t)regs[1];
         if (h == H_CUR_THREAD) { regs[0] = 0; regs[1] = cur()->id; return 1; }
         thr_t *t = h_peek(h, O_THREAD);
         regs[0] = t ? 0 : R_BAD_HANDLE;

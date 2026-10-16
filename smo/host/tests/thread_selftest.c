@@ -150,6 +150,21 @@ int main(void) {
     uint32_t main_h = svc_thread_main_init();
     CHK(main_h != 0, "主线程句柄非 0");
 
+    {
+        // 寄存器布局照 libnx：x0 是输出指针（宿主不该读它），句柄在 w1 / w2。
+        // 真机第九轮就栽在「把 x0 当句柄」：GetThreadId 报坏句柄、优先级拿到 0x1001 → svcBreak。
+        uint64_t mh = main_h, out = 0;
+        uint64_t junk = 0x16f8c7c20ull;
+        CHK(svc(0x25, junk, mh, 0, 0, &out) == 0, "GetThreadId：句柄从 w1 取");
+        CHK(out != 0 && out != mh, "GetThreadId：x1 回的是线程 id（不是句柄原样）");
+        CHK(svc(0x25, junk, 0xFFFF8000u, 0, 0, &out) == 0, "GetThreadId：伪句柄「当前线程」也认");
+        CHK(svc(0x0C, junk, mh, 0, 0, &out) == 0 && out <= 63, "GetThreadPriority：w1 句柄 → 0..63 的优先级");
+        uint64_t r[6] = { junk, 0, mh, 0, 0, 0 };
+        CHK(svc_thread(0x0E, r) && r[0] == 0 && r[1] <= 3 && r[2] != 0 && r[2] != mh,
+            "GetThreadCoreMask：w2 句柄 → 核号 + 非零掩码");
+        CHK(svc(0x25, junk, 0x7777, 0, 0, NULL) != 0, "坏句柄照样报错");
+    }
+
     printf("== 1. 事件 + 等待 + 唤醒 ==\n");
     uint64_t hw = 0, hr = 0;
     CHK(svc(0x45, 0, 0, 0, 0, NULL) == 0, "CreateEvent 成功");   // 下面用 out1 拿写端
