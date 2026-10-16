@@ -34,6 +34,18 @@ static void PackProgress(void *user, unsigned done, const char *name) {
     LOG("  容器展开：%u 个文件（%s）", done, name ? name : "");
 }
 
+// 文件头若干字节的十六进制（拷坏时靠它对照：正确的大小与头字节写在 STATUS/说明里）
+static NSString *HexHead(NSString *path, NSUInteger n) {
+    NSFileHandle *h = [NSFileHandle fileHandleForReadingAtPath:path];
+    if (!h) return @"（打不开）";
+    NSData *d = [h readDataOfLength:n];
+    [h closeFile];
+    NSMutableString *s = [NSMutableString string];
+    const uint8_t *b = d.bytes;
+    for (NSUInteger i = 0; i < d.length; i++) [s appendFormat:@"%02x ", b[i]];
+    return s;
+}
+
 static void RunHost(void) {
     NSFileManager *fm = NSFileManager.defaultManager;
     NSURL *docs = [fm URLForDirectory:NSDocumentDirectory inDomain:NSUserDomainMask
@@ -69,6 +81,15 @@ static void RunHost(void) {
                 // 走到这里就必定是「卷在、树没展开」：smoarc_plan 只在确实找到卷时才返回非 0。
                 // 上一版把「目录里有东西」当成「已展开」，用户手机上顶层有一个不相干的条目，
                 // 于是展开被跳过 —— RomFS 里一个游戏文件都没有。判据不能这么松。
+                // 先报每个卷的大小与头字节：拷坏（截断 / 传输过程改了字节 / 拷的是旧文件）时，
+                // 这两项立刻就能对照出来（源：卷 0 = 3218914442 字节，头 53 4d 4f 41 00 02；
+                // 卷 1 = 2286390220 字节，头 53 4d 4f 41 01 02）。
+                for (unsigned i = 0; i < nvols; i++) {
+                    NSString *vp = [NSString stringWithUTF8String:volp[i]];
+                    NSDictionary *at = [fm2 attributesOfItemAtPath:vp error:nil];
+                    LOG("  卷 %u：%llu 字节（源应为 %s），头 %@", i,
+                        [at fileSize], i == 0 ? "3218914442" : "2286390220", HexHead(vp, 8));
+                }
                 [fm2 createDirectoryAtPath:targetS withIntermediateDirectories:YES attributes:nil error:nil];
                 LOG("首次运行：展开 RomFS 容器 %u 卷 → %s（5.5 GB，几分钟；每 100 个文件一行）",
                     nvols, target);
