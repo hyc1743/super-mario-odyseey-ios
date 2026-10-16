@@ -14,6 +14,7 @@ typedef struct {
     uint32_t bytes;               /* Exact offline SPH+code span, zero for legacy rows. */
     uint64_t prefix, code_key, code_prefix;
     uint16_t stage;                 // 0=compute 1=vertex 5=fragment（与 Ryujinx ShaderStage 同号）
+    uint8_t ambiguous;
     char     msl[NVN_SHADER_MSL_MAX];
 } nvn_shader_ent;
 

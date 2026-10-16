@@ -83,6 +83,7 @@ int main(void) {
             assert(pixel[0]==(inside?255:0)&&pixel[1]==0&&pixel[2]==(inside?0:255)&&pixel[3]==255);
         }
         NVNcounterData timestamp;memcpy(&timestamp,memory+page*5+128,sizeof timestamp);assert(timestamp.timestamp>0);
+        assert(API(DeviceGetTimestampInNanoseconds,PFNNVNDEVICEGETTIMESTAMPINNANOSECONDSPROC)(NULL,&timestamp)==timestamp.timestamp);
         C(QueueFinalize,&q,0,0,0,0,0);C(SyncFinalize,&sync,0,0,0,0,0);C(CommandBufferFinalize,&cb,0,0,0,0,0);
         C(TexturePoolFinalize,&tp,0,0,0,0,0);C(SamplerPoolFinalize,&sp,0,0,0,0,0);
         nvn_metal_resources_reset();nvn_shader_reset();nvn_st_reset();free(memory);

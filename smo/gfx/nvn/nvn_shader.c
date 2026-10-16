@@ -35,7 +35,13 @@ static nvn_shader_ent *put(uint64_t key, unsigned stage, const char *msl) {
             g_sh_n++;
             return e;
         }
-        if (e->key == key) return e;                      // 同键重复：忽略
+        if (e->key == key) {
+            if(e->stage!=stage || strcmp(e->msl,msl)){
+                if(!e->ambiguous)g_sh_coll++;
+                e->ambiguous=1;
+            }
+            return e;
+        }
     }
     return NULL;
 }
@@ -94,6 +100,7 @@ int nvn_shader_load(const char *path) {
 const nvn_shader_ent *nvn_shader_find(const uint8_t *p, size_t n) {
     if (!p || n < 0x58) return NULL;
     const nvn_shader_ent *e = find_key(nvn_shader_key(p, n));
+    if (e && e->ambiguous) return NULL;
     if (e) g_sh_hits++;
     return e;
 }
@@ -156,7 +163,8 @@ const nvn_shader_ent *nvn_shader_find_gpu(uint64_t address, nvn_shader_match *ou
                 if (bytes > available || actual != expected) continue;
                 result.candidates++;
                 if (nvn_shader_key(p, bytes) != (code_only ? e->code_key : e->key)) continue;
-                if (found == e) continue;
+                if (e->ambiguous) { result.matches+=2; continue; }
+                if (found && found->stage==e->stage && !strcmp(found->msl,e->msl)) continue;
                 result.matches++;
                 if (!found) {
                     found = e; result.offset = offsets[o];

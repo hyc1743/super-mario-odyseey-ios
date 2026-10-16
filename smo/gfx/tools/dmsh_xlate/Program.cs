@@ -107,7 +107,9 @@ static class SwshXlate
             Console.WriteLine(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ms.ToArray()))[..16].ToLowerInvariant());
             return 0;
         }
-        var jobs = JsonNode.Parse(File.ReadAllText(args[0])).AsArray(); string outDir = args[1]; Directory.CreateDirectory(outDir);
+        bool spansOnly = args.Length == 3 && args[0] == "--spans";
+        var jobs = JsonNode.Parse(File.ReadAllText(args[spansOnly ? 1 : 0])).AsArray();
+        string outDir = args[spansOnly ? 2 : 1]; Directory.CreateDirectory(outDir);
         int ok = 0, bad = 0;
         foreach (JsonObject job in jobs)
         {
@@ -120,11 +122,20 @@ static class SwshXlate
                 // Job debug = false: turn off DebugMode (DebugMode skips the AST optimizer and the output is full of temporaries; semantics unchanged)
                 var flags = (job["debug"] is JsonNode dbg && !(bool)dbg ? 0 : TranslationFlags.DebugMode) | ((string)job["stage"] == "cs" ? TranslationFlags.Compute : 0);
                 var ctx = Translator.CreateContext(0, acc, new TranslationOptions(TargetLanguage.Spirv, TargetApi.Vulkan, flags));
+                if (ctx.Size <= 0 || ctx.Size > code.Length) throw new InvalidDataException("decoded shader span exceeds offline input");
+                if (spansOnly)
+                {
+                    var span = new JsonObject { ["key"] = key, ["span_bytes"] = ctx.Size, ["archive_bytes"] = code.Length };
+                    File.WriteAllText(Path.Combine(outDir, key + ".span.json"), span.ToJsonString());
+                    ok++;
+                    continue;
+                }
                 ShaderProgram p = ctx.Translate();
                 File.WriteAllBytes(Path.Combine(outDir, key + ".spv"), p.BinaryCode);
                 var res = new JsonObject
                 {
                     ["key"] = key, ["stage"] = (string)job["stage"], ["notes"] = new JsonArray(acc.Notes.ConvertAll(n => (JsonNode)n).ToArray()),
+                    ["span_bytes"] = ctx.Size,
                     ["cbufs"] = new JsonArray(), ["sbufs"] = new JsonArray(), ["textures"] = new JsonArray(), ["images"] = new JsonArray(),
                     ["uses_frag_coord"] = p.Info.UsesFragCoord, ["frag_out_map"] = p.Info.FragmentOutputMap,
                 };

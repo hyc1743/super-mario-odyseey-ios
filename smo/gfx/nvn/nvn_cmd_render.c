@@ -117,6 +117,13 @@ void nvn_CommandBufferBindProgram(NVNcommandBuffer *c,const NVNprogram *program,
         nvn_shader_match match;const nvn_shader_ent *entry=nvn_shader_find_gpu(p->resource.words[2+2*i],&match);
         NVN_LOG("NVN_SHADER_BIND_MATCH hit=%d stage=%u offset=%u code_only=%u bytes=%u candidates=%u matches=%u",
             entry!=NULL,entry?entry->stage:UINT16_MAX,match.offset,match.code_only,match.bytes,match.candidates,match.matches);
+        if(!entry)for(int offset=-256;offset<=256;offset+=16){
+            uint64_t address=p->resource.words[2+2*i],at=address+(uint64_t)(int64_t)offset,base,length;
+            if((offset<0&&at>address)||(offset>=0&&at<address)||!nvn_st_pool_range(at,64,&base,&length))continue;
+            NVN_LOG("NVN_SHADER_PROBE offset=%d prefix64=%016llx available=%llu",offset,
+                (unsigned long long)nvn_shader_key((const uint8_t *)(uintptr_t)at,64),
+                (unsigned long long)(length-(at-base)));
+        }
     }
 }
 static void pool(NVNcommandBuffer *c,int kind,const void *object) {

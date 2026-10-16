@@ -238,3 +238,26 @@ object serial reuse and default samplers. It still requires macOS execution.
 The private pinned shader index is loaded during native startup so runtime
 shader matching can be measured. Render execution and presentation remain
 incomplete; no IPA or device-stability claim is made.
+
+Run `38981910244` confirms guest resources are copied: sampler objects resolve
+to their original live owner/serial identities. The typed render-target capture
+now passes; the next rejection is the unimplemented timestamp opcode, not
+missing texture state. Identity tags validate both the owner and generation.
+
+Run `38982729895` passes the real Metal resource and render hardware tests.
+The render test uses independently authored test shaders through the guest
+backend and checks indexed triangles, vertex layout, compiled shaders,
+uniform/texture/sampler argument buffers, scissor-preserved pixels, GPU timestamp
+and fence completion. This is hardware evidence for the implementation, not
+evidence of correct game graphics. Actual guest startup reaches BindProgram:
+one fragment shader resolves exactly (SPH+code at data+0x30); its vertex shader
+does not. The game submission is rejected. No completed game frame is claimed.
+
+The offline decoder now emits each program's reachable instruction span without
+retranslating SPIR-V. All 18,470 shader assets have archive bytes after that
+span. The private fixture retains both archive and decoded exact-span hashes.
+Repeated spans for the same compiled asset count as one candidate; conflicting
+assets with the same binary hash fail explicitly. Two real offline inputs and
+synthetic bounds/ambiguity regressions pass locally. Native validation of the
+expanded index is pending. Shader diagnostics contain only hashes and lengths;
+shader bytes and converted sources remain in the private fixture repository.

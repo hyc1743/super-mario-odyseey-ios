@@ -689,6 +689,7 @@ uint64_t nvn_ProgramInitialize(uint64_t prog, uint64_t dev, uint64_t a2, uint64_
     if (!e) return NVN_FALSE;
     e->v[PROG_DEV] = (uint64_t)(uintptr_t)ARG_OBJ(dev);
     e->v[15] = nvn_st_resource_serial();
+    nvn_resources_stamp(ARG_OBJ(prog),NVN_T_PROG);
     return NVN_TRUE;
 }
 
@@ -713,6 +714,7 @@ uint64_t nvn_ProgramSetShaders(uint64_t prog, uint64_t count, uint64_t stages, u
     memset(&e->v[NVN_PROG_STAGE_BASE], 0, 6 * sizeof(nvn_shader_data));
     if (n) memcpy(&e->v[NVN_PROG_STAGE_BASE], ARG_OBJ(stages), (size_t)n * sizeof(nvn_shader_data));
     e->v[15] = nvn_st_resource_serial();
+    nvn_resources_stamp(ARG_OBJ(prog),NVN_T_PROG);
     g_shader_sets++;
     if (g_shader_sets <= 3) {
         NVN_LOG("ProgramSetShaders stages=%d first_data=%#llx", n,

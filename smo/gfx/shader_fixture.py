@@ -75,16 +75,18 @@ def write_shader(z, row, key, source, metadata):
     z.writestr(key + ".bindings.json", json.dumps(bindings(key, row[1], source, metadata), sort_keys=True))
 
 
-def repack(archive, output):
+def repack(archive, output, index=None):
     """Upgrade an already converted private fixture without rerunning compilers."""
     temporary = output.with_suffix(output.suffix + ".partial")
     with zipfile.ZipFile(archive) as old, zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as z:
         manifest = json.loads(old.read("manifest.json"))
-        z.writestr("shaders.idx", old.read("shaders.idx"))
+        names = set(old.namelist())
+        z.writestr("shaders.idx", index.read_bytes() if index else old.read("shaders.idx"))
         for shader in manifest["shaders"]:
             key = shader["key"]
-            source = old.read("msl/" + key + ".metal").decode()
-            metadata = json.loads(old.read("reflection/" + key + ".json"))
+            flat = key + ".metal" in names
+            source = old.read(key + ".metal" if flat else "msl/" + key + ".metal").decode()
+            metadata = json.loads(old.read(key + ".reflection.json" if flat else "reflection/" + key + ".json"))
             write_shader(z, (None, shader["stage"], key + ".metal"), key, source, metadata)
         z.writestr("manifest.json", json.dumps(manifest, sort_keys=True))
     temporary.replace(output)
@@ -144,12 +146,13 @@ def main():
     parser.add_argument("--unpack", type=Path, default=Path("work/shaders_all"))
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--repack", type=Path, help="upgrade a legacy converted fixture, no translation")
+    parser.add_argument("--index", type=Path, help="replace the exact-span index while repacking")
     parser.add_argument("--spirv-cross", default="spirv-cross")
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--keys", nargs="+", help="optional SHA256-prefix shader keys; default all")
     args = parser.parse_args()
     if args.repack:
-        repack(args.repack, args.out)
+        repack(args.repack, args.out, args.index)
         return
     build(args.unpack, args.out, args.spirv_cross, set(args.keys) if args.keys else None, args.jobs)
 

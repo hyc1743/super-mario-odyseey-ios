@@ -289,12 +289,12 @@ jobs:
             BOOT_ARGS=(--romfs /tmp/smo-boot-romfs)
             curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
               -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-shaders.zip?ref=bd7600d44df2a8e659d334c5a8560c163b59b290" \
+              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-shaders.zip?ref=0842e29a4aba5f066949a822877168ce677251ea" \
               -o /tmp/boot-shaders.zip
             python3 - <<'PY'
           import hashlib, zipfile
           path = '/tmp/boot-shaders.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '1d6a8a637f12b4e275edee50177cdc37c8d38ac182ccaea1a14c5e5856fc78be'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '3c8601c0821742286f6e6dc6ea3d12f0bb460d57613d8ab083b739d26183cc4c'
           with zipfile.ZipFile(path) as archive:
               archive.extractall('/tmp/smo-boot-shaders')
           PY

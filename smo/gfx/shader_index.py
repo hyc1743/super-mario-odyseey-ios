@@ -13,6 +13,7 @@ The hash uses the established repository FNV-like offset basis for compatibility
 """
 import os
 import sys
+import json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
@@ -31,7 +32,7 @@ def fnv64(data: bytes) -> int:
     return h
 
 
-def build(root: str):
+def build(root: str, spans=None):
     """递归找 `*/<sha256前16位>/code_full.bin`（离线产物有两种层次：扁平与按归档分目录）。"""
     rows, seen = [], set()
     for dirpath, dirnames, filenames in os.walk(root):
@@ -49,6 +50,16 @@ def build(root: str):
         seen.add(key)
         rows.append((fnv64(data), stage, key + ".metal", len(data),
                      fnv64(data[:64]), fnv64(data[0x50:]), fnv64(data[0x50:0x90])))
+        if spans:
+            with open(os.path.join(spans, key + ".span.json"), encoding="utf-8") as stream:
+                metadata = json.load(stream)
+            size = metadata["span_bytes"]
+            if metadata["key"] != key or not 0x58 <= size <= len(data) or metadata["archive_bytes"] != len(data):
+                raise ValueError("invalid decoded span metadata: " + key)
+            if size < len(data):
+                exact = data[:size]
+                rows.append((fnv64(exact), stage, key + ".metal", size,
+                             fnv64(exact[:64]), fnv64(exact[0x50:]), fnv64(exact[0x50:0x90])))
     return rows
 
 
@@ -72,7 +83,8 @@ def main():
     if not os.path.isdir(unpack):
         print(f"🔴 没有 {unpack}（先跑 smo/tools/sharcb.py 与 dmsh_xlate）")
         return 2
-    rows = build(unpack)
+    spans = sys.argv[sys.argv.index("--spans") + 1] if "--spans" in sys.argv else None
+    rows = build(unpack, spans)
     if not rows:
         print(f"🔴 {unpack} 里没有可用的 code_full.bin")
         return 2

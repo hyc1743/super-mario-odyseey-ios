@@ -64,6 +64,27 @@ static void gpu_lookup_test(void) {
     nvn_st_del(pool_object, 4); nvn_shader_reset();
 }
 
+static void span_variant_test(void) {
+    uint8_t blob[256],object[8]={0};fill(blob,sizeof blob,47);
+    const char *path="smo_shader_spans.idx";FILE *f=fopen(path,"wb");
+    if(!f){fails++;return;}
+    for(unsigned length=192;length<=256;length+=64)
+        fprintf(f,"%016llx\t1\tspan.metal\t%u\t%016llx\t%016llx\t%016llx\n",
+            (unsigned long long)nvn_shader_key(blob,length),length,(unsigned long long)nvn_shader_key(blob,64),
+            (unsigned long long)nvn_shader_key(blob+0x50,length-0x50),(unsigned long long)nvn_shader_key(blob+0x50,64));
+    fclose(f);nvn_shader_reset();CHK(nvn_shader_load(path)==2,"load archive and decoded spans for one asset");
+    nvn_st_ent *pool=nvn_st_new(object,4);pool->v[1]=(uintptr_t)blob;pool->v[2]=sizeof blob;
+    nvn_shader_match match;
+    CHK(nvn_shader_find_gpu((uintptr_t)blob,&match)&&match.matches==1,"multiple exact spans for the same asset are one match");
+    f=fopen(path,"ab");if(!f){fails++;return;}
+    fprintf(f,"%016llx\t1\tdifferent.metal\t256\t%016llx\t%016llx\t%016llx\n",
+        (unsigned long long)nvn_shader_key(blob,256),(unsigned long long)nvn_shader_key(blob,64),
+        (unsigned long long)nvn_shader_key(blob+0x50,176),(unsigned long long)nvn_shader_key(blob+0x50,64));
+    fclose(f);nvn_shader_load(path);
+    CHK(!nvn_shader_find(blob,256)&&!nvn_shader_find_gpu((uintptr_t)blob,&match),"identical binary key with conflicting compiled assets is rejected");
+    remove(path);nvn_st_del(object,4);nvn_shader_reset();
+}
+
 int main(int argc, char **argv) {
     printf("== 1. 合成：自己造的 blob 与索引 ==\n");
     fill(g_blobA, sizeof g_blobA, 7);
@@ -124,7 +145,7 @@ int main(int argc, char **argv) {
                 tracked->v[1] = (uintptr_t)buf; tracked->v[2] = n;
                 nvn_shader_match match;
                 const nvn_shader_ent *gpu = nvn_shader_find_gpu((uintptr_t)buf, &match);
-                CHK(gpu == exact && match.offset == 0 && !match.code_only,
+                CHK(gpu && gpu->stage==exact->stage && !strcmp(gpu->msl,exact->msl) && match.offset == 0 && !match.code_only,
                     "real offline blob resolves through bounded GPU pool lookup");
                 nvn_st_del(object, 4);
             }
@@ -137,6 +158,7 @@ int main(int argc, char **argv) {
     }
 
     gpu_lookup_test();
+    span_variant_test();
     remove(idx);
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");
     return fails != 0;
