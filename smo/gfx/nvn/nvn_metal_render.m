@@ -329,7 +329,7 @@ static int primitive_type(int primitive,MTLPrimitiveType *out) {
 static int copied_array(const void *payload,size_t size,size_t element,int limit,nvn_cmd_array *header,const void **values) {
     if(size<sizeof *header)return 0;memcpy(header,payload,sizeof *header);
     if(header->first<0||header->count<0||header->first>limit||header->count>limit-header->first||
-       (size-sizeof *header)/element!=(size_t)header->count)return 0;
+       size!=((sizeof *header+(size_t)header->count*element+7)&~(size_t)7))return 0;
     *values=(const uint8_t *)payload+sizeof *header;return 1;
 }
 int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,size_t size) {

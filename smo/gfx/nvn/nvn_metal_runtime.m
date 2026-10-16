@@ -92,7 +92,11 @@ static int encode(void *context, uint32_t op, const void *payload, size_t size) 
         memcpy((void *)(uintptr_t)c.address,&value,sizeof value);
         e.command=[metal_queue commandBuffer];return e.command!=nil;
     }
-    if(op>=NVN_CMD_SET_RT)return nvn_metal_render_encode(e,op,payload,size);
+    if(op>=NVN_CMD_SET_RT){
+        int ok=nvn_metal_render_encode(e,op,payload,size);
+        if(!ok)NVN_LOG("NVN_GPU_RENDER_ENCODING_FAILED op=%u size=%zu",op,size);
+        return ok;
+    }
     if (op == NVN_CMD_COPY_BUFFER) {
         nvn_cmd_copy c;
         if (size != sizeof c) return 0;
