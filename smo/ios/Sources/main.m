@@ -36,19 +36,24 @@ static void PackProgress(void *user, unsigned done, const char *name) {
 
 // 文件头若干字节的十六进制（拷坏时靠它对照：正确的大小与头字节写在 STATUS/说明里）
 static NSString *HexHead(NSString *path, NSUInteger n) {
-    NSError *err = nil;
-    NSFileHandle *h = [NSFileHandle fileHandleForReadingAtPath:path];
-    if (!h) {
-        NSDictionary *at = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:&err];
-        (void)at;
-        return [NSString stringWithFormat:@"（读不了：%@）", err.localizedDescription ?: @"原因不明"];
+    // 走 POSIX open/read：NSFileHandle 失败时什么都不说，而这里我们**需要** errno ——
+    // 「卷大小对、内容读不到」是真机上反复遇到的情况，得区分「文件坏了」还是「还没落盘」。
+    // 失败再试三次：用「文件」App 拷贝/下载大文件时，读会在落盘完成前失败。
+    int fd = -1;
+    for (int try = 0; try < 3; try++) {
+        fd = open(path.fileSystemRepresentation, O_RDONLY);
+        if (fd >= 0) break;
+        if (try == 2) return [NSString stringWithFormat:@"（打不开：errno %d %s）", errno, strerror(errno)];
+        usleep(300 * 1000);
     }
-    NSData *d = [h readDataOfLength:n];
-    [h closeFile];
-    if (d.length == 0) return @"（读到 0 字节 —— 文件像是占位符/还没落盘）";
+    unsigned char b[16];
+    ssize_t r = read(fd, b, n <= sizeof b ? n : sizeof b);
+    int e = errno;
+    close(fd);
+    if (r <= 0) return [NSString stringWithFormat:@"（读不到内容：read=%zd errno=%d %s —— 文件还没落盘？）",
+                                                 r, e, strerror(e)];
     NSMutableString *s = [NSMutableString string];
-    const uint8_t *b = d.bytes;
-    for (NSUInteger i = 0; i < d.length; i++) [s appendFormat:@"%02x ", b[i]];
+    for (ssize_t i = 0; i < r; i++) [s appendFormat:@"%02x ", b[i]];
     return s;
 }
 
@@ -94,9 +99,12 @@ static void RunHost(void) {
                     NSString *vp = [NSString stringWithUTF8String:volp[i]];
                     NSError *err = nil;
                     NSDictionary *at = [fm2 attributesOfItemAtPath:vp error:&err];
-                    LOG("  卷 %u：%llu 字节（源应为 %s），改于 %@，头 %@", i,
-                        [at fileSize], i == 0 ? "3218914442" : "2286390220",
-                        [at fileModificationDate], HexHead(vp, 8));
+                    // 注意：LOG 走的是 C 的 vsnprintf —— %@ 它不认识，会打出空字符串（真机上
+                    // 「头」那栏一直空着就是这个原因）。要用 %s + .UTF8String。
+                    LOG("  卷 %u：%llu 字节（源应为 %s），改于 %s，头 %s", i, [at fileSize],
+                        i == 0 ? "3218914442" : "2286390220",
+                        [[at fileModificationDate] description].UTF8String ?: "?",
+                        HexHead(vp, 8).UTF8String ?: "?");
                     (void)err;
                 }
                 [fm2 createDirectoryAtPath:targetS withIntermediateDirectories:YES attributes:nil error:nil];
@@ -109,6 +117,11 @@ static void RunHost(void) {
                                                                          encoding:NSUTF8StringEncoding error:nil];
                 } else {
                     LOG("【红】展开没成功（见上一行的原因）—— 先别进游戏：重拷一遍卷，或看看手机剩余空间");
+                    // 失败后做一次**只读**全卷体检：不写文件（空间不够也能跑），
+                    // 一次数清「几千条里坏了几条、第一条是哪个」。
+                    LOG("整卷校验（只读，不写盘）……");
+                    int badv = smoarc_verify_cb(volp, nvols, NULL, NULL);
+                    LOG("整卷校验结果：%d（-1 = 卷打不开/格式错；0 = 全部完好）；%s", badv, smoarc_error());
                 }
             }
         }
@@ -356,6 +369,12 @@ static NSString *ScanDocuments(void) {
         if (errPath) freopen(errPath.UTF8String, "w", stderr);
     }
     dm_crash_install();             // 崩溃也留现场（信号 + PC/LR + 帧链 → SMO-log-live.txt）
+    // 未捕获的 Objective-C 异常：消息默认只进 stderr（真机上没人看得到），这里写进日志。
+    // 真机第七崩（NSInvalidArgumentException: object cannot be nil）就是靠 stderr 文件才拿到消息的。
+    NSSetUncaughtExceptionHandler(^(NSException *e) {
+        LOG("【ObjC 异常】%s: %s", e.name.UTF8String ?: "?", e.reason.UTF8String ?: "?");
+        for (NSString *line in e.callStackSymbols) LOG("  %s", line.UTF8String ?: "?");
+    });
 
     self.window.rootViewController = [[SMOViewController alloc] init];
     [self.window makeKeyAndVisible];

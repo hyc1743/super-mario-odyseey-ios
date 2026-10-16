@@ -2202,3 +2202,39 @@ v0.6.0 把 stderr 落盘后，`SMO-stderr.txt` 一眼给出答案：
 - `smoarc.c`：CRC 不符时把**实际读到的前 16 字节**与「实算 CRC / 表里 CRC」都写进日志
   （全 0 = 读到空洞或占位符；别的值 = 内容不是同一份）
 - `main.m`：`HexHead` 明确报「读到 0 字节 —— 文件像是占位符/还没落盘」，并打印每个卷的修改时间
+
+## 2.119 真机第七崩的答案是**我们自己的 UI**（v0.6.1）：日志里的非法 UTF-8
+
+v0.6.0 把 stderr 落盘后，SMO-stderr.txt 第一次给出系统库的消息：
+
+```
+*** Terminating app due to uncaught exception 'NSInvalidArgumentException',
+    reason: '*** -[__NSArrayM insertObject:atIndex:]: object cannot be nil'
+```
+
+帧全落在**我们 App 自己**的二进制里（0x102…）。真因：
+
+- `logbuf.c` 每行上限 200 字节。中文/emoji 一多，**截断点会落在多字节字符中间**；
+- `main.m` 的 `RecentLog()` 用 `[NSString stringWithUTF8String:]` 转换 —— 遇到非法 UTF-8 **返回 nil**；
+- App 把 nil 插进 `NSMutableArray` → 抛 `NSInvalidArgumentException` → 进程直接终止。
+
+这就解释了「运行久一点才退出」：要等日志长到某一行被截在半个汉字上。
+
+修法（两边都堵）：
+- `logbuf.c`：`utf8_trim()` —— 存行与 dump 时都把尾部修到合法 UTF-8 边界；
+  `applogic_selftest` 补断言：「长中文行被截断后 dump 仍是合法 UTF-8」（改成逐字节校验）
+- `main.m`：`RecentLog()` 的转换做两层兜底（UTF-8 不行就退 Latin-1，永不返回 nil）
+
+## 2.120 同一轮里的另外三个真机陷阱（v0.6.1）
+
+1. **`LOG(...)` 里不能用 `%@`**：LOG 走 C 的 `vsnprintf`，`%@` 它不认识 —— 真机上
+   「卷 … 字节，头 %@」那一栏一直是**空的**（我们因此白追了一轮「卷读不出来」）。
+   改成 `%s` + `.UTF8String`。
+2. **HexHead 换 POSIX 版**：`open/read` + errno + 失败重试三次，并明确区分
+   「打不开（errno …）」与「读不到内容（read=0 … 文件还没落盘？）」。真机上「大小对但读不到」
+   多半是拷贝/下载还没落盘。
+3. **未捕获的 ObjC 异常进日志**：`NSSetUncaughtExceptionHandler` 把 `name/reason/callStackSymbols`
+   写进环形缓冲 —— 下一轮这类问题不用再靠 stderr 文件绕一圈。
+
+另外：展开失败后自动做一次**只读**全卷体检（`smoarc_verify_cb`，不写盘，空间不足也能跑），
+一次给出「几千条里坏几条 + 第一条坏的叫什么」。

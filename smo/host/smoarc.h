@@ -30,6 +30,11 @@ typedef void (*smoarc_progress_fn)(void *user, unsigned done, const char *name);
 int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
                       smoarc_progress_fn cb, void *user);
 
+// 只校验不展开：逐条读卷、比对 CRC，返回「坏条目数」（-1 = 卷打不开/格式错，原因见 smoarc_error）。
+// 用途：展开失败后做一次全卷体检 —— 不写文件，所以手机空间不够时也能跑，
+// 而且能一次数清「4636 条里坏了几条、第一条是哪个」，不用靠猜。
+int smoarc_verify_cb(const char *const *volumes, unsigned n, smoarc_progress_fn cb, void *user);
+
 // 卷组规划：在 docs 下找 RomFS.smoa.0 卷，返回卷数（0 = 没找到）。
 // 认三种形状（前两种是历史布局，第三种是 prepare_phone_package.py 打的包的形状）：
 //   docs/RomFS.smoa.N                 → target = docs/RomFS

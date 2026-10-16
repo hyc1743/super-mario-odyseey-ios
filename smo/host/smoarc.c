@@ -164,6 +164,54 @@ int smoarc_extract(const char *dir, const char *const *volumes, unsigned n) {
     return smoarc_extract_cb(dir, volumes, n, NULL, NULL);
 }
 
+// ---- 只校验不展开（见 smoarc.h）----
+int smoarc_verify_cb(const char *const *volumes, unsigned n, smoarc_progress_fn cb, void *user) {
+    char name[4096];
+    static uint8_t buf[1 << 16];
+    unsigned done = 0, bad = 0;
+    g_err[0] = 0;
+    for (unsigned v = 0; v < n; v++) {
+        FILE *f = fopen(volumes[v], "rb");
+        if (!f) return fail(-1, "卷打不开（权限/路径？）", volumes[v]);
+        char magic[5] = {0};
+        if (fread(magic, 1, 4, f) != 4 || strcmp(magic, "SMOA")) {
+            fclose(f); return fail(-1, "卷头不是 SMOA（文件被截断或拷错了？）", volumes[v]);
+        }
+        fgetc(f); fgetc(f);
+        for (;;) {
+            long pos = ftell(f);
+            char tag[4] = {0};
+            size_t got = fread(tag, 1, 4, f);
+            if (got == 0) break;
+            if (got != 4) { fclose(f); return fail(-1, "读卷中断（文件被截断？）", volumes[v]); }
+            if (!memcmp(tag, "END!", 4)) break;
+            fseek(f, pos, SEEK_SET);
+            int nl = r16(f), sz = r32(f), crc = r32(f);
+            if (nl <= 0 || sz < 0 || nl >= (int)sizeof name - 1) {
+                fclose(f); return fail(-1, "条目字段越界（卷损坏）", volumes[v]);
+            }
+            if (fread(name, 1, nl, f) != (size_t)nl) { fclose(f); return fail(-1, "读条目名中断", volumes[v]); }
+            name[nl] = 0;
+            uint32_t c = 0xFFFFFFFFu;
+            unsigned long left = (unsigned)sz;
+            while (left) {
+                size_t want = left < sizeof buf ? left : sizeof buf;
+                size_t r = fread(buf, 1, want, f);
+                if (r == 0) { fclose(f); return fail(-1, "读卷没读到数据（卷被截断？）", name); }
+                for (size_t i = 0; i < r; i++) c = crc_table[(c ^ buf[i]) & 0xFF] ^ (c >> 8);
+                left -= (unsigned)r;
+            }
+            if (crc != (int)~c) {
+                bad++;
+                if (bad == 1) snprintf(g_err, sizeof g_err, "第一条坏的：%.380s（卷 %u）", name, v);
+            }
+            if (cb) cb(user, ++done, name);
+        }
+        fclose(f);
+    }
+    return (int)bad;
+}
+
 // ---- 卷组规划（见 smoarc.h 的说明）----
 static int is_dir_p(const char *p) {
     struct stat st;
