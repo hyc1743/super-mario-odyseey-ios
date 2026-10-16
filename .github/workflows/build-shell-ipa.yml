@@ -249,6 +249,8 @@ jobs:
           make -C smo/host smo_host_embedded
           python3 smo/tools/prepare_shared_fonts.py smo/ios/Resources/SharedFonts
           export SMO_FONT_DIR="$PWD/smo/ios/Resources/SharedFonts"
+          export SMO_SHADER_CAPTURE_DIR=/tmp/smo-private-shader-capture
+          mkdir -p "$SMO_SHADER_CAPTURE_DIR"
           BOOT_ARGS=()
           if [ -n "${SMO_PRIVATE_TOKEN:-}" ]; then
             curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
@@ -302,6 +304,9 @@ jobs:
             export SMO_SHADER_DIR=/tmp/smo-boot-shaders
           fi
           python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded "${BOOT_ARGS[@]}"
+      - name: Preserve unmatched shader evidence privately
+        if: ${{ always() && env.SMO_INJECTED == '1' && env.SMO_PRIVATE_TOKEN != '' }}
+        run: python3 smo/verify/upload_shader_capture.py
       - name: 构建并打包
         env:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
