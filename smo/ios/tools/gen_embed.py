@@ -30,6 +30,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from x0_layout import check_x0, x0_end                              # noqa: E402
 
+# Windows 控制台默认 GBK：报错路径要打 🔴，直接 print 会先把 UnicodeEncodeError 抛出来，
+# 掩盖真正的错误信息。编码不动、不能表示的字符替换掉（CI 的 UTF-8 不受影响）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 PG = 0x4000
 
 

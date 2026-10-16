@@ -23,6 +23,11 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Windows 控制台默认编码是 GBK：本文件与 gen_embed 都要打中文/emoji，直接 print 会 UnicodeEncodeError。
+# 编码不动、不能表示的字符替换掉（GBK 下 emoji 变 '?'，中文照常）；CI（UTF-8）行为不变。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 
 def main():
     if len(sys.argv) < 3:
@@ -42,8 +47,10 @@ def main():
         return 2
 
     dst = os.path.join(root, "smo", "ios", "Sources", "Embedded.S")
+    # 强制子进程用 UTF-8 写 stdout：否则 Windows 上它是 GBK，下面按 UTF-8 解码会得到替换字符
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
     r = subprocess.run([sys.executable, os.path.join(HERE, "gen_embed.py"), tmp, dst] + mods,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                       env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out = (r.stdout or b"").decode("utf-8", "replace").strip()
     err = (r.stderr or b"").decode("utf-8", "replace").strip()
     if out:

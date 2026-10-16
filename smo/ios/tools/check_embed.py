@@ -19,6 +19,11 @@ import os
 import re
 import sys
 
+# Windows 控制台默认 GBK：本文件要打 ✅/🔴，直接 print 会把 UnicodeEncodeError 当失败抛出去。
+# 与 embed_inject.py / gen_embed.py 同一处理（编码不动、不能表示的字符替换）。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 PG = 0x4000
 
 

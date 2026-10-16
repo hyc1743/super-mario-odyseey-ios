@@ -206,7 +206,7 @@ jobs:
           set -o pipefail
           if [ -f input/embed-input.zip ]; then
             cp input/embed-input.zip /tmp/embed-input.zip
-            echo "输入来源：仓库内 input/embed-input.zip（$（stat -f%z /tmp/embed-input.zip） 字节）"
+            echo "输入来源：仓库内 input/embed-input.zip（$(stat -f%z /tmp/embed-input.zip) 字节）"
           else
             curl -sL -H "Authorization: Bearer ${{ github.token }}"                  -H "Accept: application/octet-stream" "$GUEST_URL" -o /tmp/embed-input.zip
             head -c 2 /tmp/embed-input.zip | grep -q "PK" || { echo "::error::下载到的不是 zip（URL 或权限不对）"; exit 1; }
