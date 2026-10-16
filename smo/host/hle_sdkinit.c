@@ -3,6 +3,31 @@
 // Keep SDK-local allocators, virtual memory and flags native. Replace only the
 // service connection/registration entrypoints: subsequent APIs are host HLE.
 #include "hle.h"
+#include <stdatomic.h>
+#ifdef __APPLE__
+#include <libkern/OSCacheControl.h>
+#endif
+
+// The CPU audio server reads coherent host memory; there is no Horizon DMA
+// cache ownership transfer. Its SDK FlushDataCache reads CTR_EL0 and executes
+// DC CIVAC, which traps on Apple user threads. Preserve ordering at the host
+// boundary instead. GPU resource synchronization belongs to the Metal layer.
+static void h_flush_data_cache(const void *address, size_t bytes) {
+    (void)address; (void)bytes;
+    atomic_thread_fence(memory_order_seq_cst);
+}
+static void h_flush_entire_data_cache(void) {
+    atomic_thread_fence(memory_order_seq_cst);
+}
+static void h_clear_cache(void *begin, void *end) {
+    if ((uintptr_t)end <= (uintptr_t)begin) return;
+    atomic_thread_fence(memory_order_seq_cst);
+#ifdef __APPLE__
+    sys_icache_invalidate(begin, (uintptr_t)end - (uintptr_t)begin);
+#else
+    __builtin___clear_cache((char *)begin, (char *)end);
+#endif
+}
 
 static void h_diag_startup(void) { LOG("SDK 初始化接管：nndiagStartup（宿主日志）"); }
 static void h_aoc_startup(void) { LOG("SDK 初始化接管：aoc::Initialize（宿主内容查询）"); }
@@ -25,6 +50,9 @@ static void __attribute__((noreturn)) h_abort_result(const char *condition, cons
 }
 
 static const hle_impl_ent g_sdkinit_impl[] = {
+    {"_ZN2nn2os14FlushDataCacheEPKvm", (void *)h_flush_data_cache, "Host coherent CPU memory ordering"},
+    {"_ZN2nn2os20FlushEntireDataCacheEv", (void *)h_flush_entire_data_cache, "Host coherent CPU memory ordering"},
+    {"__clear_cache", (void *)h_clear_cache, "Host instruction cache invalidation"},
     {"nndiagStartup", (void *)h_diag_startup, "诊断日志由宿主提供"},
     {"_ZN2nn3aoc10InitializeEv", (void *)h_aoc_startup, "无需创建 Horizon 内容服务会话"},
     {"_ZN2nn4pctl10InitializeEv", (void *)h_pctl_startup, "无需创建 Horizon 家长控制会话"},

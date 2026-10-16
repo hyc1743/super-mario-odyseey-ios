@@ -49,6 +49,9 @@ EXPLICIT = {"nvnBootstrapLoader"}
 # d2r-mobile takes over service startup at this level rather than connecting to
 # Horizon services. Names below were checked against this SMO SDK's exports/GOT.
 SDK_STARTUP = {
+    "_ZN2nn2os14FlushDataCacheEPKvm": "Host coherent CPU memory; avoid Horizon cache instructions",
+    "_ZN2nn2os20FlushEntireDataCacheEv": "Host coherent CPU memory ordering",
+    "__clear_cache": "Host instruction cache invalidation",
     "nndiagStartup": "诊断输出由宿主提供，不连接 lm",
     "_ZN2nn3aoc10InitializeEv": "追加内容查询由宿主提供，不连接 aoc",
     "_ZN2nn4pctl10InitializeEv": "宿主不连接家长控制服务",

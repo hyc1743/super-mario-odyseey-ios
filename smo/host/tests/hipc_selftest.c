@@ -42,6 +42,21 @@ static void *thread_roundtrip(void *arg) {
 }
 
 int main(void) {
+    // These SDK-internal relocations must select host implementations too.
+    // Native audio initialization reaches FlushDataCache through this route.
+    void (*flush)(const void *, size_t) = (void *)dm_hle_force_lookup("_ZN2nn2os14FlushDataCacheEPKvm");
+    void (*flush_all)(void) = (void *)dm_hle_force_lookup("_ZN2nn2os20FlushEntireDataCacheEv");
+    void (*clear_code)(void *, void *) = (void *)dm_hle_force_lookup("__clear_cache");
+    CHK(flush && flush_all && clear_code, "SDK cache boundaries select host implementations");
+    if (flush && flush_all && clear_code) {
+        uint8_t buffer[64];
+        memset(buffer, 0x5a, sizeof buffer);
+        flush(buffer + 1, sizeof buffer - 2);
+        flush_all();
+        clear_code(buffer, buffer + sizeof buffer);
+        clear_code(buffer, buffer); // empty range
+        CHK(buffer[0] == 0x5a && buffer[63] == 0x5a, "cache boundaries preserve caller bytes");
+    }
     const char *startup[] = {
         "nndiagStartup", "_ZN2nn3aoc10InitializeEv", "_ZN2nn4pctl10InitializeEv",
         "_ZN2nn4diag34InitializeApplicationAbortObserverEv",

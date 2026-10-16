@@ -150,3 +150,15 @@ real resource in private boot-effects.zip, 61,838,135 bytes, commit
 `7ea76748437f37fe04b6263ddcea3ff80401fc47`, SHA256
 `e67294786c2cff43785701e02d944f52db91fa61e36b64e025125c7a927a4126`.
 No successful boot gate, rendered image or real-device fix is claimed yet.
+
+Run `38944179187` confirms audio device notification initialization passes and
+observes the first QueuePresentTexture request. Native execution then traps
+with EXC_BAD_INSTRUCTION at SDK+0x86384, `mrs x9, CTR_EL0`, in FlushDataCache
+called by AddAuxImpl on the sound thread. An aligned-instruction scan of all
+three original text segments finds five cache operations, all in SDK functions
+FlushDataCache and __clear_cache; main and subsdk0 have none. Host boundaries
+now replace those functions and FlushEntireDataCache. CPU renderer memory is
+coherent and uses a full ordering fence; instruction invalidation uses Darwin's
+sys_icache_invalidate. Metal resource synchronization is outside this change.
+Force-table consistency and the host-boundary regression pass locally; native
+startup still needs to confirm this path and reach 60 presentation requests.
