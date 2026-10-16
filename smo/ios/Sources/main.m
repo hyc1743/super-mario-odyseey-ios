@@ -4,8 +4,10 @@
 // 并把宿主的**日志环形缓冲**显示在屏幕上（未接电脑也能看）。宿主启动在下一轮接入。
 
 #import <UIKit/UIKit.h>
+#include <fcntl.h>      // open/O_RDONLY（HexHead 走 POSIX 读，要 errno）
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>     // read/close/usleep
 #include "logbuf.h"
 #include "romfs_resolve.h"
 #include "smoarc.h"
@@ -349,6 +351,14 @@ static NSString *ScanDocuments(void) {
 
 @end
 
+// 未捕获的 Objective-C 异常：消息默认只进 stderr（真机上没人看得到），这里写进日志。
+// 真机第七崩（NSInvalidArgumentException: object cannot be nil）就是靠 stderr 文件才拿到消息的 ——
+// 有了它就不用绕那一圈。（注意：NSSetUncaughtExceptionHandler 收的是**函数指针**，不是 block。）
+static void SMOUncaughtException(NSException *e) {
+    LOG("【ObjC 异常】%s: %s", e.name.UTF8String ?: "?", e.reason.UTF8String ?: "?");
+    for (NSString *line in e.callStackSymbols) LOG("  %s", line.UTF8String ?: "?");
+}
+
 @interface SMOAppDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
 @end
@@ -369,12 +379,7 @@ static NSString *ScanDocuments(void) {
         if (errPath) freopen(errPath.UTF8String, "w", stderr);
     }
     dm_crash_install();             // 崩溃也留现场（信号 + PC/LR + 帧链 → SMO-log-live.txt）
-    // 未捕获的 Objective-C 异常：消息默认只进 stderr（真机上没人看得到），这里写进日志。
-    // 真机第七崩（NSInvalidArgumentException: object cannot be nil）就是靠 stderr 文件才拿到消息的。
-    NSSetUncaughtExceptionHandler(^(NSException *e) {
-        LOG("【ObjC 异常】%s: %s", e.name.UTF8String ?: "?", e.reason.UTF8String ?: "?");
-        for (NSString *line in e.callStackSymbols) LOG("  %s", line.UTF8String ?: "?");
-    });
+    NSSetUncaughtExceptionHandler(&SMOUncaughtException);
 
     self.window.rootViewController = [[SMOViewController alloc] init];
     [self.window makeKeyAndVisible];
