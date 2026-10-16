@@ -262,6 +262,19 @@ jobs:
           with zipfile.ZipFile(path) as archive:
               archive.extractall('/tmp/smo-boot-romfs')
           PY
+            # Separate private chunk keeps each Git blob below 100 MiB. Include
+            # existing literal ObjectData paths from this game build in one pass.
+            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
+              -H "Accept: application/vnd.github.raw+json" \
+              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-objectdata.zip?ref=3012ecc50d7ee8e4ca526f2e033a624b46ada8b2" \
+              -o /tmp/boot-objectdata.zip
+            python3 - <<'PY'
+          import hashlib, zipfile
+          path = '/tmp/boot-objectdata.zip'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'ced0215b4d8ba7cabb0b5cede52d98346aabc3e4a7b8c56f9c9766de77ffecbd'
+          with zipfile.ZipFile(path) as archive:
+              archive.extractall('/tmp/smo-boot-romfs')
+          PY
             BOOT_ARGS=(--romfs /tmp/smo-boot-romfs)
           fi
           python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded "${BOOT_ARGS[@]}"

@@ -247,7 +247,9 @@ static uint32_t h_OpenFile(uint64_t *out, const char *path, int mode) {
     int ro = 0;
     const char *trace = getenv("SMO_TRACE_FS_MISSING");
     if (!host_path_ex(path, hp, sizeof hp, &ro, 0)) {
-        if (trace && !strcmp(trace, "1")) LOG("FS_OPEN_FAILED path=%s errno=%d", path, errno);
+        int saved_errno = errno;
+        if (trace && !strcmp(trace, "1")) LOG("FS_OPEN_FAILED path=%s errno=%d", path, saved_errno);
+        errno = saved_errno;
         return err_res("path", path);
     }
     int flags;
@@ -255,7 +257,9 @@ static uint32_t h_OpenFile(uint64_t *out, const char *path, int mode) {
     else flags = O_RDONLY;
     int fd = open(hp, flags);
     if (fd < 0) {
-        if (trace && !strcmp(trace, "1")) LOG("FS_OPEN_FAILED path=%s errno=%d", path, errno);
+        int saved_errno = errno;
+        if (trace && !strcmp(trace, "1")) LOG("FS_OPEN_FAILED path=%s errno=%d", path, saved_errno);
+        errno = saved_errno;
         return err_res("open", hp);
     }
     int slot = fd & 0xFFFF;
