@@ -245,7 +245,22 @@ jobs:
         run: |
           set -o pipefail
           make -C smo/host smo_host_embedded
-          python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded
+          BOOT_ARGS=()
+          if [ -n "${SMO_PRIVATE_TOKEN:-}" ]; then
+            curl -sS --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
+              -H "Accept: application/vnd.github.raw+json" \
+              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-romfs.zip?ref=embed-input" \
+              -o /tmp/boot-romfs.zip
+            python3 - <<'PY'
+          import hashlib, zipfile
+          path = '/tmp/boot-romfs.zip'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'fc035e5dddb344c4d04da0a6200c081ef764d4fa680362cd3c4ec13a38104c3e'
+          with zipfile.ZipFile(path) as archive:
+              archive.extractall('/tmp/smo-boot-romfs')
+          PY
+            BOOT_ARGS=(--romfs /tmp/smo-boot-romfs)
+          fi
+          python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded "${BOOT_ARGS[@]}"
       - name: 构建并打包
         env:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进

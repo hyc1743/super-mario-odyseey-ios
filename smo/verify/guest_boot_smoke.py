@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run the IPA's embedded ARM64 program before packaging.
 
-This is a limited startup gate, not a rendering/gameplay test. An empty RomFS
-allows mount setup but cannot validate resource loading. Time alone never counts
+This is a limited startup gate, not a rendering/gameplay test. A private RomFS
+fixture can be provided for startup resources. Time alone never counts
 as success: nnMain and at least one started guest thread must both be observed.
 """
 import argparse
@@ -18,18 +18,23 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=pathlib.Path)
     parser.add_argument("--seconds", type=int, default=30)
+    parser.add_argument("--romfs", type=pathlib.Path, help="private startup resource fixture directory")
     parser.add_argument("--output", type=pathlib.Path, default=pathlib.Path("work/boot-smoke"))
     args = parser.parse_args()
     if platform.system() != "Darwin" or platform.machine() != "arm64":
         parser.error("actual guest execution requires an ARM64 macOS runner")
     args.output.mkdir(parents=True, exist_ok=True)
     executable = str(args.executable.resolve())
+    if args.romfs and not args.romfs.is_dir():
+        parser.error("RomFS fixture directory does not exist")
     env = dict(os.environ)
     with tempfile.TemporaryDirectory(prefix="smo-boot-") as temporary:
         for name in ("romfs", "save", "temp"):
             directory = pathlib.Path(temporary, name)
             directory.mkdir()
             env["SMO_" + name.upper()] = str(directory)
+        if args.romfs:
+            env["SMO_ROMFS"] = str(args.romfs.resolve())
         log = args.output / "guest.log"
         with log.open("wb") as output:
             process = subprocess.Popen([executable], stdout=output, stderr=subprocess.STDOUT, env=env)
@@ -46,7 +51,8 @@ def main():
         thread = "GUEST_THREAD_STARTED" in data
         fatal = "FATAL" in data or "【红】" in data
         passed = timed_out and entry and thread and not fatal
-        result = dict(passed=passed, scope="nnMain + guest thread startup; empty RomFS; no rendering validation",
+        result = dict(passed=passed, scope="nnMain + guest thread startup; no rendering validation",
+                      romfs_fixture=bool(args.romfs),
                       seconds=args.seconds, timed_out=timed_out, exit_code=code,
                       entered_nnmain=entry, started_guest_thread=thread, error_log=fatal,
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))
@@ -56,7 +62,7 @@ def main():
         print("\n".join(data.splitlines()[:45] + data.splitlines()[-55:]), flush=True)
         if code is not None and code != 0:
             commands = ["xcrun", "lldb", "-b", "-o", "run",
-                        "-k", "thread backtrace all", "-k", "register read pc x21 x8",
+                        "-k", "thread backtrace all -c 8", "-k", "register read pc x0 x8 x21 x23 x24",
                         "-k", "expression -f x -- (unsigned long long)g_mod[0].base",
                         "-k", "expression -f x -- (unsigned long long)g_mod[1].base",
                         "-k", "expression -f x -- (unsigned long long)g_mod[2].base",
@@ -67,7 +73,10 @@ def main():
                                    timeout=args.seconds, check=False)
                 except subprocess.TimeoutExpired:
                     print("Debugger replay timed out; original crash remains a failure.")
-            print("\n".join((args.output / "backtrace.log").read_text(encoding="utf-8", errors="replace").splitlines()[-85:]))
+            trace = (args.output / "backtrace.log").read_text(encoding="utf-8", errors="replace")
+            start = trace.find("(lldb) thread backtrace")
+            lines = trace[start:].splitlines() if start >= 0 else trace.splitlines()[-85:]
+            print("\n".join(lines[:140] + (lines[-20:] if len(lines) > 140 else [])))
         return 0 if passed else 1
 
 
