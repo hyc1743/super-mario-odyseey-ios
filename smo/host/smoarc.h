@@ -17,6 +17,10 @@
 // CRC32（打包脚本同算法校验用）
 uint32_t crc_buf(const void *p, size_t n);
 
+// 上一次失败的原因（人类可读，中文）。真机上只看到「-2」时，分不清是空间不够还是卷不完整 ——
+// 调用方（App）把这句话直接写进日志。
+const char *smoarc_error(void);
+
 // 展开卷到 dir（路径里可含子目录）。返回 0 成功；-1 格式错；-2 IO 错。
 int smoarc_extract(const char *dir, const char *const *volumes, unsigned n);
 

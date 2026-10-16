@@ -62,24 +62,37 @@ static int mkdirs(char *path) {
     return 0;
 }
 
+// 失败原因：真机上只有一个「-2」时，分不清空间不够还是卷不完整（用户第一次展开就遇到这个）
+static char g_err[512];
+const char *smoarc_error(void) { return g_err[0] ? g_err : "（没有错误）"; }
+static int fail(int code, const char *msg, const char *detail) {
+    // 精度限死 380：详情可能是几千字节的路径，不限 gcc 会报 -Wformat-truncation（当错误）
+    if (detail) snprintf(g_err, sizeof g_err, "%s：%.380s", msg, detail);
+    else        snprintf(g_err, sizeof g_err, "%s", msg);
+    return code;
+}
+
 int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
                       smoarc_progress_fn cb, void *user) {
     char name[4096], full[8192];
+    g_err[0] = 0;
     unsigned long long total = 0;
     unsigned done = 0;
     for (unsigned v = 0; v < n; v++) {
         FILE *f = fopen(volumes[v], "rb");
-        if (!f) return -2;
+        if (!f) return fail(-2, "卷打不开（权限/路径？）", volumes[v]);
         char magic[5] = {0};
-        if (fread(magic, 1, 4, f) != 4 || strcmp(magic, "SMOA")) { fclose(f); return -1; }
+        if (fread(magic, 1, 4, f) != 4 || strcmp(magic, "SMOA")) {
+            fclose(f); return fail(-1, "卷头不是 SMOA（文件被截断或拷错了？）", volumes[v]);
+        }
         int vol = fgetc(f), vols = fgetc(f);
-        if (vol < 0 || vols < 0) { fclose(f); return -1; }
+        if (vol < 0 || vols < 0) { fclose(f); return fail(-1, "卷头损坏", volumes[v]); }
         for (;;) {
             long pos = ftell(f);
             char tag[4] = {0};
             size_t got = fread(tag, 1, 4, f);
             if (got == 0) break;                     // 卷尾
-            if (got != 4) { fclose(f); return -1; }
+            if (got != 4) { fclose(f); return fail(-1, "读卷中断（文件被截断？）", volumes[v]); }
             if (!memcmp(tag, "END!", 4)) {
                 // 卷尾标记：可选的长度校验值（u64 已写字节数，忽略即可）
                 (void)r64(f);
@@ -87,26 +100,42 @@ int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
             }
             fseek(f, pos, SEEK_SET);                 // 不是 END!，回退按条目解析
             int nl = r16(f), sz = r32(f), crc = r32(f);
-            if (nl <= 0 || sz < 0 || nl >= (int)sizeof name - 1) { fclose(f); return -1; }
-            if (fread(name, 1, nl, f) != (size_t)nl) { fclose(f); return -1; }
+            if (nl <= 0 || sz < 0 || nl >= (int)sizeof name - 1) {
+                fclose(f); return fail(-1, "条目字段越界（卷损坏）", volumes[v]);
+            }
+            if (fread(name, 1, nl, f) != (size_t)nl) {
+                fclose(f); return fail(-1, "读条目名中断（卷被截断？）", volumes[v]);
+            }
             name[nl] = 0;
-            if (snprintf(full, sizeof full, "%s/%s", dir, name) >= (int)sizeof full) { fclose(f); return -1; }
+            if (snprintf(full, sizeof full, "%s/%s", dir, name) >= (int)sizeof full) {
+                fclose(f); return fail(-1, "路径太长", name);
+            }
             mkdirs(full);
             FILE *o = fopen(full, "wb");
-            if (!o) { fclose(f); return -2; }
+            if (!o) { fclose(f); return fail(-2, "输出文件打不开（空间不够？目录不可写？）", full); }
             unsigned long left = (unsigned)sz;
             uint32_t c = 0xFFFFFFFFu;
             static uint8_t buf[1 << 16];
             while (left) {
                 size_t want = left < sizeof buf ? left : sizeof buf;
                 size_t r = fread(buf, 1, want, f);
-                if (r == 0) { fclose(o); fclose(f); return -1; }
+                if (r == 0) { fclose(o); fclose(f); return fail(-1, "读卷没读到数据（卷被截断？）", name); }
                 for (size_t i = 0; i < r; i++) c = crc_table[(c ^ buf[i]) & 0xFF] ^ (c >> 8);
-                fwrite(buf, 1, r, o);
+                if (fwrite(buf, 1, r, o) != r) {          // 不检查的话，磁盘写满会静默出半截文件
+                    fclose(o); fclose(f);
+                    return fail(-2, "写文件失败（空间不够？）", full);
+                }
                 left -= (unsigned)r;
             }
+            if (ferror(o) || fflush(o) != 0) {
+                fclose(o); fclose(f);
+                return fail(-2, "写盘没落稳（空间不够？）", full);
+            }
             fclose(o);
-            if (crc != (int)~c) { fclose(f); return -2; }   // 校验不匹配：多半是卷不完整
+            if (crc != (int)~c) {
+                fclose(f);
+                return fail(-2, "条目 CRC 不符（卷不完整 / 拷贝被截断）", name);
+            }
             total += (unsigned)sz;
             if (cb) cb(user, ++done, name);
         }

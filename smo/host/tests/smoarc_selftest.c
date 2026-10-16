@@ -73,6 +73,7 @@ int main(void) {
     fclose(bad);
     static const char *badvols[] = { "/tmp/smoarc_test/smoa.0", "/tmp/smoarc_test/smoa.1" };
     CHK(smoarc_extract("/tmp/smoarc_test/out2", badvols, 2) != 0, "CRC 不匹配 → 报错");
+    CHK(strstr(smoarc_error(), "CRC") != NULL, "错误原因说清楚是 CRC（不是光一个 -2）");
 
     printf("== 卷组规划（决定「在哪儿展开」—— 真机首次就错在这一步）==\n");
     // 上一版只认「目录里没有 RomFS 子目录」的形状，而我们自己打的包是

@@ -73,12 +73,12 @@ static void RunHost(void) {
                 LOG("首次运行：展开 RomFS 容器 %u 卷 → %s（5.5 GB，几分钟；每 100 个文件一行）",
                     nvols, target);
                 int rc = smoarc_extract_cb(target, volp, nvols, PackProgress, NULL);
-                LOG("展开结果：%d（0 = 成功；-1 格式错；-2 读写错或空间不够）", rc);
+                LOG("展开结果：%d（0 = 成功；-1 格式错；-2 读写错）—— %s", rc, smoarc_error());
                 if (rc == 0) {
                     [[NSString stringWithFormat:@"vols=%u\n", nvols] writeToFile:marker atomically:YES
                                                                          encoding:NSUTF8StringEncoding error:nil];
                 } else {
-                    LOG("【红】展开没成功 —— 先别进游戏：重拷一遍卷，或看看手机剩余空间");
+                    LOG("【红】展开没成功（见上一行的原因）—— 先别进游戏：重拷一遍卷，或看看手机剩余空间");
                 }
             }
         }
