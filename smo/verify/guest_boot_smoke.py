@@ -70,7 +70,7 @@ def main():
                          f"smo_timer = threading.Timer({args.seconds}, "
                          "lambda target=lldb.debugger.GetSelectedTarget(): target.GetProcess().SendAsyncInterrupt()); "
                          "smo_timer.daemon = True; smo_timer.start()")
-            inspect = ["thread backtrace all -c 12", "register read pc x0 x1 x2 x8 x21 x23 x24",
+            inspect = ["thread backtrace -c 40", "thread backtrace all -c 12", "register read pc x0 x1 x2 x8 x21 x23 x24",
                        "expression -f x -- (unsigned long long)g_mod[0].base",
                        "expression -f x -- (unsigned long long)g_mod[1].base",
                        "expression -f x -- (unsigned long long)g_mod[2].base"]

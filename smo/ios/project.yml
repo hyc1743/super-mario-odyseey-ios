@@ -46,6 +46,7 @@ targets:
       - path: ../host/hle_vi.c
       - path: ../host/hle_oe.c
       - path: ../host/hle_pl.c
+      - path: ../host/hle_audio.c
       - path: ../host/hle_hid.c
       - path: ../host/hle_force_gen.c
       - path: ../host/hle_nvn_reg.c

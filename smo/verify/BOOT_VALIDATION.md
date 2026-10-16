@@ -85,3 +85,10 @@ IsValidAudioRendererParameter 仍被错误接到通用零返回桩。静态检�
 防止配置函数再被覆盖，同时保持 GetAudioRendererWorkBufferSize 的服务接管。
 LLDB 重放在 svcBreak 分派前条件断点，避免正常退出导致丢失调用栈。
 本地快速回归 7/7 通过；后续启动是否推进以新的云端结果为准。
+
+运行 `38940142864` 的 LLDB 重放确认参数检查已通过，并调用更多音频配置接口。
+进一步按 SDK 实现逐项保留 83 个本地音频函数（显式符号白名单），包括混音、
+声音、效果、内存池及缓冲区元数据；Open/Start/RequestUpdate 等服务接口仍接管。
+新增 GetAudioRendererWorkBufferSize：按 SDK 的公开/内部参数布局转换，调用 SDK 自带的
+AudioRenderSystem::GetWorkBufferSize 纯计算函数，避免固定魔数或 IPC。单测验证参数验证、
+字节布局、保留位清零和重复查询。此时完整音频服务及扬声器输出仍未实现。
