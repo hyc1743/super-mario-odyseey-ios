@@ -11,7 +11,10 @@
 // 平台相关的只有两个页操作（dm_as_reserve / dm_as_protect，见 loader_apple.c 与自检里的实现），
 // 所以这份文件能在本机当单测跑（smo/host/tests/svc_selftest.c）。
 #include "dm.h"
+#include "logbuf.h"
 #include <pthread.h>
+#include <time.h>
+#include <unistd.h>
 
 // ---- 地址空间分区 ----
 #define RESERVE   (5ull << 30)          // 预留 5 GB：前 1 GB（alias + stack）+ 4 GB 堆
@@ -179,7 +182,82 @@ int svc_dispatch(unsigned num, uint64_t *regs) {
         regs[1] = 0;
         return 0;
     }
-    default:
-        return -1;                                        // 不是内存族 → 交回上层
+    // ---- 杂项族（照参考项目 dm/host/hle_svc.c 的实现抄；真机第八轮卡住就是缺这几个）----
+    // 为什么必须实现：未实现的 svc 以前既不写 regs[0] 也不报错，SDK 读到的是**栈上的垃圾** ——
+    // 真机上 GetInfo(RandomEntropy) 拿到垃圾后 SDK 直接 svcBreak(Panic)（日志停在 svc #38）。
+    case 0x1E: {                                          // GetSystemTick：19.2 MHz 计数器
+        static uint64_t t0;
+        struct timespec ts; timespec_get(&ts, TIME_UTC);
+        uint64_t now = (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+        if (!t0) t0 = now;
+        regs[0] = (now - t0) * 192 / 10;
+        return 0;
+    }
+    case 0x26: {                                          // Break(reason, ptr, size)：SDK 致命中止
+        uint32_t res = (regs[1] && regs[2] >= 4) ? *(const uint32_t *)(uintptr_t)regs[1] : 0;
+        // 调用点 = x30（LR）：门入口保存了 x0..x30，所以能报出「是哪个模块的哪个偏移在 abort」
+        module_t *mm = module_of((void *)(uintptr_t)regs[30]);
+        LOG("【中止】svcBreak reason=%#llx Result=%#x ptr=%#llx size=%#llx 调用点 %s+%#llx",
+            (unsigned long long)regs[0], res, (unsigned long long)regs[1], (unsigned long long)regs[2],
+            mm ? mm->name : "?",
+            mm ? (unsigned long long)(regs[30] - (uint64_t)(uintptr_t)mm->base) : 0);
+        if (regs[0] & 0x80000000ull) { regs[0] = 0; return 0; }   // 高位 = 仅通知，可继续
+        // 真机上没有调试器时内核会终止进程；这里是宿主，等价做法是明确停下并留下现场
+        dm_progress_finish(DM_RUN_FAIL, "游戏运行库主动中止（svcBreak）—— 见日志最后一行");
+        dm_log_raw("【中止】进程结束（svcBreak 致命）\n");
+        _exit(42);
+    }
+    case 0x27: {                                          // OutputDebugString(str, len)
+        if (regs[0] && regs[1]) LOG("[客体] %.*s", (int)(regs[1] > 512 ? 512 : regs[1]), (const char *)(uintptr_t)regs[0]);
+        regs[0] = 0;
+        return 0;
+    }
+    case 0x29: {                                          // GetInfo(out*, id, handle, subid) → x1 = 值
+        uint64_t id = regs[1], v = 0;
+        switch (id) {
+        case 0:  v = 7; break;                                  // CoreMask（与参考项目同值）
+        case 1:  v = 0; break;                                  // PriorityMask
+        case 2:  v = (uint64_t)(uintptr_t)g_alias; break;       // AliasAddr
+        case 3:  v = g_alias ? ALIAS_SZ : 0; break;             // AliasSize
+        case 4:  v = (uint64_t)(uintptr_t)g_heap; break;        // HeapAddr
+        case 5:  v = g_heap_cap; break;                         // HeapSize
+        case 6: case 21: v = dm_app_pool(); break;              // TotalMem / TotalNonSystem
+        case 7: case 22: v = g_heap_cur + image_bytes(); break; // UsedMem / UsedNonSystem
+        case 8:  v = 0; break;                                  // DebuggerAttached
+        case 9:  v = 0; break;                                  // ResourceLimit
+        case 10: v = 0; break;                                  // IdleTick
+        case 11: {                                              // RandomEntropy：每次给新值
+            static uint64_t n;
+            struct timespec ts; timespec_get(&ts, TIME_UTC);
+            v = ((uint64_t)ts.tv_sec << 32) ^ ((uint64_t)ts.tv_nsec << 8) ^ (++n) ^ (uint64_t)(uintptr_t)&ts;
+            break;
+        }
+        case 12: v = (uint64_t)(uintptr_t)g_as; break;          // AslrAddr
+        case 13: v = g_as ? RESERVE : 0; break;                 // AslrSize
+        case 14: v = (uint64_t)(uintptr_t)g_stack; break;       // StackAddr
+        case 15: v = g_stack_cap; break;                        // StackSize
+        case 16: v = 0x2000000; break;                          // SystemResourceTotal
+        case 17: v = 0x400000; break;                           // SystemResourceUsed
+        case 18: v = 0x0100000000010000ull; break;              // ProgramId（SMO 的 title id）
+        case 20: v = 0; break;                                  // UserExceptionContextAddr
+        case 23: v = 1; break;                                  // IsApplication
+        default: v = 0; break;
+        }
+        regs[0] = 0;
+        regs[1] = v;
+        return 0;
+    }
+    default: {
+        // 记录一次（每个号只报一次）并**返回成功**：以前这里是「什么都不做」，SDK 会读到
+        // 未初始化的返回寄存器，然后在别处崩/卡，排查成本极高。
+        static uint8_t seen[256];
+        if (!seen[num & 0xFF]) {
+            seen[num & 0xFF] = 1;
+            LOG("SVC %#x 未实现（x0=%#llx x1=%#llx x2=%#llx）—— 占位返回成功", num,
+                (unsigned long long)regs[0], (unsigned long long)regs[1], (unsigned long long)regs[2]);
+        }
+        regs[0] = 0;
+        return 0;
+    }
     }
 }

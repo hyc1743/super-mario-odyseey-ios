@@ -31,6 +31,10 @@ int svc_thread(int num, uint64_t *regs) { (void)num; (void)regs; return 0; }
 void dm_ro_protect(void *p, size_t n) { (void)p; (void)n; }
 
 // 该文件里只用到内存族：把 hle_svc.c 之外的符号都挡掉
+// 本自检不链 loader_core.c（不装模块）：给 module_of 一个空实现，
+// 让 svcBreak 的「调用点」日志拿到 "?" 而不是链接失败。
+module_t *module_of(const void *p) { (void)p; return NULL; }
+
 static int fails;
 // 注意：条件**只能求值一次**（见 fs_selftest.c 里的说明：求值两次会让带副作用的断言跑两遍）
 #define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); if (!_ok) fails++; } while (0)
