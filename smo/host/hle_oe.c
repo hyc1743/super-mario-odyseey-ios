@@ -49,7 +49,6 @@ void dm_oe_set_language(uint64_t lang) { g_lang = lang; }
 // ---------------------------------------------------------------- 接管
 static int h_GetOpMode(void) { return g_opmode; }
 static int h_GetPerfMode(void) { return g_opmode == OPMODE_DOCKED ? PERF_BOOST : PERF_NORMAL; }
-static uint64_t h_GetLang(void) { return g_lang; }
 // LanguageCode is an 8-byte value returned in x0 (SDK Make at +0x15b740).
 // These helpers must not be generic zero-returning service stubs: the game uses
 // them to select LocalizedData/<language> before loading layout/font resources.
@@ -63,6 +62,8 @@ static uint64_t h_MakeLanguageCode(int language) {
         memcpy(&value, codes[language], strlen(codes[language]));
     return value;
 }
+// SDK GetDesiredLanguage returns LanguageCode by value, not the Language enum.
+static uint64_t h_GetLang(void) { return h_MakeLanguageCode((int)g_lang); }
 static int h_LanguageCodeEqual(const char *a, const char *b) { return !strncmp(a, b, 8); }
 static int h_GetFocus(void) { return g_focus; }
 static void h_SetFocusHandling(int mode) { (void)mode; }
