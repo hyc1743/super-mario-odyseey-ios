@@ -12,6 +12,10 @@ void dm_log_set_file(const char *path);
 // 写入一条日志（dm.h 的 LOG 宏调它）。线程安全由调用方保证（目前单线程使用）。
 void dm_log_emit(const char *fmt, ...);
 
+// 直接写盘（只用 write(2)，异步信号安全）。用途：崩溃信号处理里打现场 ——
+// 那时 stdio 的锁可能正被拿着，printf/fprintf 会死锁在别的线程上。
+void dm_log_raw(const char *s);
+
 // 把环形缓冲里的内容拼成一段文本（行序从旧到新）。返回字节数。
 size_t dm_log_dump(char *out, size_t cap);
 

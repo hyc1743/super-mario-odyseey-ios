@@ -1,8 +1,14 @@
 // 日志环形缓冲的实现。见 logbuf.h。
 #include "logbuf.h"
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 #define LOGBUF_LINES 512          // 屏上日志 512 行足够排查一轮启动
 #define LOGBUF_LINE  200
@@ -10,10 +16,21 @@
 static char g_lines[LOGBUF_LINES][LOGBUF_LINE];
 static unsigned g_head, g_n;
 static FILE *g_file;                  // 实时落盘（崩溃也留得下）
+static int g_fd = -1;                 // 同一份文件的裸 fd：崩溃处理用 write 直写
 
 void dm_log_set_file(const char *path) {
     if (g_file) fclose(g_file);
+    if (g_fd >= 0) close(g_fd);
     g_file = path ? fopen(path, "w") : NULL;      // 每次启动新开（覆盖上一轮）
+    // O_APPEND：裸写总是落在文件末尾，不会跟 FILE* 的偏移互相覆盖（两者是各自独立的文件描述）
+    g_fd = path ? open(path, O_WRONLY | O_CREAT | O_APPEND, 0644) : -1;
+}
+
+void dm_log_raw(const char *s) {
+    if (g_fd >= 0 && s) {
+        ssize_t r = write(g_fd, s, strlen(s));
+        (void)r;
+    }
 }
 
 void dm_log_emit(const char *fmt, ...) {

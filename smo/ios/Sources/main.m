@@ -4,8 +4,12 @@
 // 并把宿主的**日志环形缓冲**显示在屏幕上（未接电脑也能看）。宿主启动在下一轮接入。
 
 #import <UIKit/UIKit.h>
+#include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <ucontext.h>
+#include <unistd.h>
 #include "logbuf.h"
 #include "romfs_resolve.h"
 #include "smoarc.h"
@@ -31,6 +35,71 @@ static void PackProgress(void *user, unsigned done, const char *name) {
     (void)user;
     if (done % 100) return;
     LOG("  容器展开：%u 个文件（%s）", done, name ? name : "");
+}
+
+// ---- 崩溃现场：把信号、地址、PC/LR 与帧链直接写进日志文件 ----
+// 真机上没有终端，而崩溃后 App 就没了 —— 系统崩溃报告要用户手动去设置里翻，还未必看得懂。
+// 这里用 dm_log_raw（只调 write(2)，异步信号安全）把最关键的几个数写下来，下一版就好定位。
+static char *put_s(char *p, const char *s) { while (*s) *p++ = *s++; return p; }
+static char *put_x(char *p, uint64_t v) {          // 不经 printf：崩溃时 stdio 的锁可能正被拿着
+    *p++ = '0'; *p++ = 'x';
+    int started = 0;
+    for (int i = 60; i >= 0; i -= 4) {
+        unsigned d = (unsigned)((v >> i) & 0xF);
+        if (d || started || i == 0) { *p++ = (char)(d < 10 ? '0' + d : 'a' + d - 10); started = 1; }
+    }
+    return p;
+}
+
+static const char *SigName(int sig) {
+    switch (sig) {
+        case SIGSEGV: return "SIGSEGV";
+        case SIGBUS:  return "SIGBUS";
+        case SIGILL:  return "SIGILL";
+        case SIGTRAP: return "SIGTRAP";
+        case SIGABRT: return "SIGABRT";
+        case SIGFPE:  return "SIGFPE";
+        default:      return "SIG?";
+    }
+}
+
+static void CrashHandler(int sig, siginfo_t *info, void *uctx) {
+    char buf[256], *p;
+    ucontext_t *uc = (ucontext_t *)uctx;
+    p = put_s(buf, "【崩溃】");
+    p = put_s(p, SigName(sig));
+    p = put_s(p, " 地址 ");
+    p = put_x(p, (uint64_t)(uintptr_t)(info ? info->si_addr : 0));
+    if (uc) {
+        p = put_s(p, " PC "); p = put_x(p, (uint64_t)uc->uc_mcontext->__ss.__pc);
+        p = put_s(p, " LR "); p = put_x(p, (uint64_t)uc->uc_mcontext->__ss.__lr);
+        p = put_s(p, " FP "); p = put_x(p, (uint64_t)uc->uc_mcontext->__ss.__fp);
+    }
+    *p++ = '\n'; *p = 0;
+    dm_log_raw(buf);
+    if (uc) {                                      // 帧指针链：看得出是谁调过来的
+        uint64_t fp = (uint64_t)uc->uc_mcontext->__ss.__fp;
+        for (int i = 0; i < 12 && fp; i++) {
+            uint64_t next = *(uint64_t *)fp, ret = *(uint64_t *)(fp + 8);
+            p = put_s(buf, "  回溯 "); p = put_x(p, ret);
+            p = put_s(p, " (fp "); p = put_x(p, fp); p = put_s(p, ")\n"); *p = 0;
+            dm_log_raw(buf);
+            if (next <= fp || next - fp > (1u << 20)) break;   // 链断了/不靠谱就停
+            fp = next;
+        }
+    }
+    dm_log_raw("（进程马上会被系统收走）\n");
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void InstallCrashHandler(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = CrashHandler;
+    sa.sa_flags = SA_SIGINFO;
+    static const int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGTRAP, SIGABRT, SIGFPE };
+    for (unsigned i = 0; i < sizeof sigs / sizeof sigs[0]; i++) sigaction(sigs[i], &sa, NULL);
 }
 
 static void RunHost(void) {
@@ -95,20 +164,13 @@ static void RunHost(void) {
         }
     }
     LOG("== SMO 宿主（App 内）：从 %s 装载 ==", ep);
-    host_thread_keys_create();
     // 不装 rtld：宿主自己扮演 rtld（映射/重定位/DT_INIT 都在 loader_core.c），而 rtld 的 32 条重定位
     // 落在代码段边界页里，按三段装不了（smo/ios/tools/x0_layout.py）。参考项目同样只装游戏模块。
     static const char *names[] = { "sdk", "subsdk0", "main" };
-    load_modules(ep, names, 3);
-    run_module_inits();
-    uint32_t h = svc_thread_main_init();
-    LOG("主线程句柄 %#x", h);
-    void *fn = guest_sym("nnMain");
-    if (!fn) { LOG("【红】找不到入口符号 nnMain"); return; }
-    module_t *m = module_of(fn);
-    LOG("== 进入客体入口 nnMain（在 %s，偏移 +%#zx）==", m ? m->name : "?",
-        m ? (size_t)((const uint8_t *)fn - m->base) : 0);
-    guest_thread_init();
+    // 引导顺序只有一处：host_boot()（与 CLI 宿主同一份）。上一版这里把 run_module_inits 写在了
+    // svc_thread_main_init 前面 —— 客体第一个构造函数就去读线程/TLS 环境，真机上一跑就崩。
+    void *fn = host_boot(ep, names, 3, "nnMain");
+    if (!fn) return;
     dm_jump_guest(NULL, fn);
     LOG("== 客体入口返回了（正常游戏里 nnMain 不会返回）==");
 }
@@ -310,6 +372,7 @@ static NSString *ScanDocuments(void) {
     NSString *liveLog = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject
                           stringByAppendingPathComponent:@"SMO-log-live.txt"];
     if (liveLog) dm_log_set_file(liveLog.UTF8String);
+    InstallCrashHandler();          // 崩溃也留现场（信号 + PC/LR + 帧链 → SMO-log-live.txt）
 
     self.window.rootViewController = [[SMOViewController alloc] init];
     [self.window makeKeyAndVisible];

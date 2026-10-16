@@ -41,25 +41,17 @@ int main(int argc, char **argv) {
     }
 
     LOG("== SMO 宿主：装载 %s 下的 %d 个模块 ==", dir, nmods);
-    host_thread_keys_create();
-    load_modules(dir, mods, nmods);
-    if (list_only) { unimpl_report(); return 0; }
+    if (list_only) {
+        host_thread_keys_create();
+        load_modules(dir, mods, nmods);
+        unimpl_report();
+        return 0;
+    }
 
-    // 主线程登记（句柄之后交给 SDK 的 nn::os；真机上 SDK 会拿它当主线程）
-    uint32_t main_h = svc_thread_main_init();
-    LOG("主线程句柄 %#x", main_h);
-
-    // 扮演 rtld 的 InitModules：按装载顺序调各模块 DT_INIT（模块自己的 init_array 在 _init 里跑）
-    run_module_inits();
-
-    void *fn = guest_sym(entry);
-    if (!fn) { LOG("【红】找不到入口符号 %s", entry); return 1; }
-    module_t *m = module_of(fn);
-    LOG("== 进入客体入口 %s（在 %s，偏移 +%#zx）==", entry, m ? m->name : "?",
-        m ? (size_t)((const uint8_t *)fn - m->base) : 0);
-
-    // 主线程也要有客体线程环境（线程槽），再跳进客体
-    guest_thread_init();
+    // 引导顺序只有一处：host_boot()（建键 → 装载 → 主线程登记 → 模块 inits → 入口 → 客体线程环境）。
+    // 以前这段顺序在本文件与 iOS App 里各写了一遍，漂移过一次（真机首跑：客体构造函数必崩）。
+    void *fn = host_boot(dir, mods, nmods, entry);
+    if (!fn) return 1;
     dm_jump_guest(NULL, fn);
     LOG("== 客体入口返回了（正常游戏里 nnMain 不会返回）==");
     unimpl_report();

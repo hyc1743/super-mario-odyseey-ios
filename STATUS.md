@@ -34,7 +34,7 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 两卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0/.1`（3.2+2.3 GB，4636 文件）（第二十六轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.0 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.1 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -1997,3 +1997,29 @@ CI secret `SMO_PRIVATE_TOKEN` 目前用的是本机 **Git Credential Manager 里
   所以**不附产物**）；成品进**私有仓同名 release**，资产名 `SMOMobile-<版本>.ipa`
 - 非 tag 的分支构建：都进私有仓 `build-latest`，资产名带 run 号 + 短 sha（对照哪次提交）
 - **v0.5.0** = 第一条能真机跑的出包链路：公开 runner 免费构建 + 内嵌 + 容器修复 + 真机日志落盘
+
+## 2.112 真机第二崩：引导顺序写了两份，App 那份是错的（v0.5.1）
+
+2.110 的日志落盘修好后，第一次拿到真机证据。日志停在：
+
+```
+sdk: DT_INIT +0x24（init_array 103 项）
+```
+
+即：三个模块**全部装载成功**（内嵌三段映射、重定位、447 条接管表、11775 次符号查询 0 不一致），
+崩在**第一次执行客体代码**（sdk 的构造函数）时。
+
+根因：App 的引导顺序与宿主 CLI 不一致 —— `main.c` 是
+`keys → load → svc_thread_main_init → run_module_inits`，
+而 `ios/Sources/main.m` 把 `run_module_inits` 写在了 `svc_thread_main_init` **前面**。
+客体构造函数（改写后的代码）第一时间就要读线程/TLS 环境，主线程没登记就是空指针。
+
+修法（不让它再漂移）：
+
+- 引导顺序收进 `smo/host/host_boot.c` 的 `host_boot()` —— CLI 与 App 都只调它，顺序只有一份
+  （同一类教训第三次：CI 单测文件清单、CI 注入清单、现在是引导顺序）
+- `run_module_inits()` 加不变量检查（`dm_boot_mark_main_thread`），谁再写错顺序，日志会直接指出来
+- **新增崩溃信号处理**（`main.m`）：SIGSEGV/SIGBUS/SIGILL/SIGTRAP/SIGABRT/SIGFPE 时把信号、
+  地址、PC/LR/FP 与帧链用 `dm_log_raw()`（只调 `write(2)`，异步信号安全）写进 `SMO-log-live.txt`
+  —— 真机上「崩了就什么都没有」的时代结束
+- `logbuf` 加 `dm_log_raw()`（O_APPEND 裸 fd）；单测补「裸写也进同一文件」断言

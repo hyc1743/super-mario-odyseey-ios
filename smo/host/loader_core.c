@@ -332,7 +332,16 @@ void load_modules(const char *dir, const char *const *names, int n) {
 // 扮演 Horizon rtld 的 InitModules：按装载顺序调各模块的 DT_INIT。
 // 时机由 SDK 的启动流程决定（nn::init::Start 之后、nnMain 之前）——参考项目如此，
 // 本项目目前的 bootstrap 是「装载完就调」，等接上 SDK 初始化顺序后再对齐。
+// 主线程登记的标记：由 host_boot()（host_boot.c）在 svc_thread_main_init 之后置位。
+// 为什么要这个标记：loader_core.c 不能直接依赖线程层（loader_selftest 只链本文件），
+// 但这个不变量必须有人看着 —— 真机首跑就是它没被满足而崩的。
+static int g_main_thread_marked;
+void dm_boot_mark_main_thread(void) { g_main_thread_marked = 1; }
+
 void run_module_inits(void) {
+    // 客体构造函数的改写代码第一时间就去读线程/TLS 环境：主线程没登记就是空指针，一跑就崩。
+    if (!g_main_thread_marked)
+        LOG("【红】主线程还没登记就调 run_module_inits —— 客体构造函数拿不到线程/TLS，必崩（顺序见 host_boot）");
     for (int i = 0; i < g_nmod; i++) {
         module_t *m = &g_mod[i];
         if (!m->init) continue;

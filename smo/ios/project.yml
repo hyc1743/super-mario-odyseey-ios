@@ -31,6 +31,7 @@ targets:
       - path: Resources
       # 宿主（同一份代码编进 App；不包含 host/main.c —— App 的引导在 main.m 的 RunHost 里）
       - path: ../host/loader_core.c
+      - path: ../host/host_boot.c
       - path: ../host/loader_apple.c
       - path: ../host/thread.c
       - path: ../host/hle.c

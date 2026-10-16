@@ -194,6 +194,12 @@ uint32_t svc_thread_main_init(void) {                     // 主线程登记，�
     return t->handle;
 }
 
+// 主线程是否已登记。run_module_inits 之前必须为真：否则客体构造函数拿不到线程/TLS 环境（
+// 真机首跑就是这么崩的：App 里 run_module_inits 排在了 svc_thread_main_init 前面）。
+int svc_thread_main_ready(void) {
+    return g_keythr != 0 && pthread_getspecific(g_keythr) != NULL;
+}
+
 // ---------------------------------------------------------------- 同步对象（事件）
 
 static int sig_obj(uint32_t h, int *bad) {                // 该句柄是否处于「已触发」

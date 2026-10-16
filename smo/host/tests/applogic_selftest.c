@@ -48,6 +48,7 @@ int main(void) {
         dm_log_set_file(lf);
         dm_log_emit("落盘测试 %d", 42);
         dm_log_emit("第二行");
+        dm_log_raw("裸写一行（崩溃处理用 write 直写）\n");   // 崩溃现场走的就是这条路径
         dm_log_set_file(NULL);          // 关文件（实现里每行都 flush，这里只是收尾）
         FILE *f = fopen(lf, "rb");
         char txt[512] = {0};
@@ -55,6 +56,7 @@ int main(void) {
         if (f) fclose(f);
         CHK(got > 0, "dm_log_set_file 之后文件里确实有内容（不是 0 字节）");
         CHK(strstr(txt, "落盘测试 42") && strstr(txt, "第二行"), "两行都写进了文件");
+        CHK(strstr(txt, "裸写一行") != NULL, "dm_log_raw 也写进了同一个文件（崩溃现场那条路）");
         remove(lf);
         dm_log_clear();
     }
