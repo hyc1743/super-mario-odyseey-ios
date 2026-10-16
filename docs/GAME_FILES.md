@@ -78,7 +78,7 @@ either: textures, interface art and audio use different formats in the two relea
 ## 自签工具用户的流程（本地一条命令；这是**推荐**流程）
 
     python smo/ios/tools/make_installable.py out
-    → out/SMOMobile-可安装.ipa（壳 + 本机 Guest.framework 注入完成）
+    → out/SMOMobile-<版本>.ipa（壳 + 本机 Guest.framework 注入完成）
 
 1. 首次：`prepare_phone_package.py` 生成 Guest.framework 与手机资源包（一次性）
 2. 每次更新：`make_installable.py` → 自签工具签名 → **覆盖安装**（手机上的 RomFS/ExeFS 保留）

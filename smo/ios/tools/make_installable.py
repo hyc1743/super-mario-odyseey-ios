@@ -6,7 +6,7 @@
   1. 从公共仓下载最新 release 的 SMOMobile-shell.ipa（壳，不含游戏内容）
   2. 用本机 out/smo-phone-package/①放进App安装包/Frameworks/Guest.framework
      （你自己的游戏程序，之前用 prepare_phone_package.py 生成）注入进去
-  3. 输出 <输出目录>/SMOMobile-可安装.ipa —— 拿给自签工具签名即可
+  3. 输出 <输出目录>/SMOMobile-<版本>.ipa —— 拿给自签工具签名即可
 
 以后每次更新：重跑本命令 → 自签 → **覆盖安装**（手机上的游戏资源保留，不用重拷）。
 
@@ -53,7 +53,7 @@ def main():
     sys.path.insert(0, HERE)
     import repack_ipa
     tag = rel["tag_name"].lstrip("v")
-    outname = f"SMOMobile-{tag}-可安装.ipa"
+    outname = f"SMOMobile-{tag}.ipa"
     dst = os.path.join(out, outname)
     argv = [sys.argv[0], local, fw, dst]
     rc = repack_ipa.main() if False else None
