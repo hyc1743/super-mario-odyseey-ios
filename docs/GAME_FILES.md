@@ -75,7 +75,18 @@ on an iPhone without changing a single byte, which is what makes smooth play pos
 is built for a different kind of processor and cannot do that. The game data is not interchangeable
 either: textures, interface art and audio use different formats in the two releases.
 
-## 自签工具用户的更新流程（release IPA 直接可用）
+## 自签工具用户的流程（本地一条命令；这是**推荐**流程）
+
+    python smo/ios/tools/make_installable.py out
+    → out/SMOMobile-可安装.ipa（壳 + 本机 Guest.framework 注入完成）
+
+1. 首次：`prepare_phone_package.py` 生成 Guest.framework 与手机资源包（一次性）
+2. 每次更新：`make_installable.py` → 自签工具签名 → **覆盖安装**（手机上的 RomFS/ExeFS 保留）
+3. 游戏程序（改写产物）没变就不用重跑第 1 步 —— Guest.framework 复用
+
+（下面的私有 fork + GUEST_URL 注入是备选：适合想让 release 自带游戏程序的用户。）
+
+## 备选：私有 fork 注入（release IPA 直接自带游戏程序）
 
 目标：release 产物就是**可直接自签安装的 IPA**（已含 Guest.framework），游戏资源固定在手机里，
 每次更新 = 下载 → 自签 → 覆盖安装。做法与参考项目 d2r-mobile-build 一致（私有 fork + 外部 URL 注入）：
