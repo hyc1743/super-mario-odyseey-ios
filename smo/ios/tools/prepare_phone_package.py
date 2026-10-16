@@ -8,7 +8,7 @@
                                                     重打包签名（guest dylib：真机上唯一能执行的映像）
     ①放进App安装包/Frameworks/Guest.framework/    ← 解压 IPA 后放进 SMOMobile.app/Frameworks/，
                                                     重打包签名（guest dylib：真机上唯一能执行的映像）
-    ②复制到手机/                                   ← **一个文件夹**：ExeFS + RomFS 都在里面，
+    SMO Resource/                                   ← **一个文件夹**：ExeFS + RomFS 都在里面，
                                                     手机上一次复制完成（RomFS 巨大，--romfs 指定源才拷）
 
 用法：
@@ -54,7 +54,7 @@ def main():
         print(f"🔴 {rewrite} 里缺：{missing}（先跑 patch_nso.py 生成改写产物）")
         return 2
 
-    exefs_out = os.path.join(out, "②复制到手机", "ExeFS")
+    exefs_out = os.path.join(out, "SMO Resource", "ExeFS")
     fw_out = os.path.join(out, "①放进App安装包", "Frameworks", "Guest.framework")
     os.makedirs(exefs_out, exist_ok=True)
     os.makedirs(fw_out, exist_ok=True)
@@ -95,7 +95,7 @@ def main():
     print(f"② ExeFS（tsv × {2 * len(need)} + shaders.idx）→ {exefs_out}")
 
     # ② RomFS：巨大，默认只写说明；--pack-romfs 时打成卷（两个大文件）
-    romfs_out = os.path.join(out, "②复制到手机", "RomFS")
+    romfs_out = os.path.join(out, "SMO Resource", "RomFS")
     if pack_romfs and romfs and os.path.isdir(romfs):
         import zlib
         files = []
@@ -151,7 +151,7 @@ def main():
 【二】把数据拷到手机
   1. 先打开一次 App（让它在「文件」里出现；v0.3.0 起才开了文件共享，旧版没有这个目录）
   2. 用「文件」App：我的 iPhone → SMOMobile 文件夹
-  3. 把「②复制到手机」整个文件夹里的内容（ExeFS + RomFS）一次性拷进去
+  3. 把「SMO Resource」**整个文件夹**拷进去（一层包装目录，App 认）
 
 【三】跑起来、拿日志
   1. 打开 App：宿主自动装载 → 屏幕日志滚动

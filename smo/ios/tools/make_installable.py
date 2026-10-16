@@ -52,7 +52,8 @@ def main():
     # 3) 注入（复用 repack_ipa.py）
     sys.path.insert(0, HERE)
     import repack_ipa
-    outname = "SMOMobile-可安装.ipa"
+    tag = rel["tag_name"].lstrip("v")
+    outname = f"SMOMobile-{tag}-可安装.ipa"
     dst = os.path.join(out, outname)
     argv = [sys.argv[0], local, fw, dst]
     rc = repack_ipa.main() if False else None

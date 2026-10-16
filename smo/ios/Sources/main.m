@@ -27,20 +27,29 @@ static void RunHost(void) {
     NSURL *docs2 = [fm2 URLForDirectory:NSDocumentDirectory inDomain:NSUserDomainMask
                       appropriateForURL:nil create:NO error:nil];
     if (docs2) {
-        NSString *romfsDir = [docs2.path stringByAppendingPathComponent:@"RomFS"];
-        BOOL isDir = NO;
-        if (![fm2 fileExistsAtPath:romfsDir isDirectory:&isDir] || !isDir) {
+        // 卷可能在 Documents 根，也可能在一层包装目录（用户拷的是整个 SMO Resource 文件夹）。
+        // 依次找：哪个目录里有 RomFS.smoa.0 且没有 RomFS 目录，就在哪里展开。
+        NSMutableArray<NSString *> *cands = [NSMutableArray arrayWithObject:docs2.path];
+        for (NSString *sub in [fm2 contentsOfDirectoryAtPath:docs2.path error:nil] ?: @[]) {
+            BOOL sd = NO;
+            NSString *sp = [docs2.path stringByAppendingPathComponent:sub];
+            if ([fm2 fileExistsAtPath:sp isDirectory:&sd] && sd) [cands addObject:sp];
+        }
+        for (NSString *base in cands) {
+            NSString *romfsDir = [base stringByAppendingPathComponent:@"RomFS"];
+            BOOL isDir = NO;
+            if ([fm2 fileExistsAtPath:romfsDir isDirectory:&isDir] && isDir) continue;
             const char *vols[8];
             unsigned nvols = 0;
             for (int i = 0; i < 8; i++) {
-                NSString *v = [docs2.path stringByAppendingPathComponent:
+                NSString *v = [base stringByAppendingPathComponent:
                                [NSString stringWithFormat:@"RomFS.smoa.%d", i]];
                 if (![fm2 fileExistsAtPath:v]) break;
                 vols[nvols++] = v.UTF8String;
             }
             if (nvols) {
-                LOG("首次运行：展开 RomFS 容器（%u 卷，几分钟）…", nvols);
-                int rc = smoarc_extract(docs2.path.UTF8String, vols, nvols);
+                LOG("首次运行：在 %s 展开 RomFS 容器（%u 卷，几分钟）…", base.UTF8String, nvols);
+                int rc = smoarc_extract(base.UTF8String, vols, nvols);
                 LOG("展开结果：%d（0 = 成功）", rc);
             }
         }
