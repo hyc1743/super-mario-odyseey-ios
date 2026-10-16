@@ -79,8 +79,14 @@ def build(out, names):
         body += b
         off += len(b)
     strtab = b'\0' * 8
+    # 空代码签名槽（LC_CODE_SIGNATURE）：没有它，某些签名工具在「签前 Mach-O 准备」阶段
+    # 会把 dylib 判成异常并拒签（全能签报「Guest 单独签名失败」就是这个）。
+    # 16 字节空签名放进 __LINKEDIT，codesign 会原位替换。
+    emptysig = b'\0' * 16
+    sigoff = off + len(strtab)
     uuid = hashlib.sha256(body).digest()[:16]            # 由内容定：同样输入在哪台机器出库都逐字节相同
-    cmds += [segment('__LINKEDIT', off, PG, off, len(strtab), 1, []),
+    cmds += [segment('__LINKEDIT', off, PG, off, len(strtab) + 16, 1, []),
+             struct.pack('<IIII', 0x1d, 16, sigoff, 16),  # LC_CODE_SIGNATURE（空）
              dylib_cmd(0xd, b'@rpath/Guest.framework/Guest'),                     # LC_ID_DYLIB
              struct.pack('<II10I', 0x80000022, 48, *([0] * 10)),                  # LC_DYLD_INFO_ONLY
              struct.pack('<IIIIII', 0x2, 24, off, 0, off, len(strtab)),           # LC_SYMTAB：0 符号
@@ -91,7 +97,7 @@ def build(out, names):
     lc = b''.join(cmds)
     assert 32 + len(lc) <= PG
     mh = struct.pack('<IiiIIIII', 0xfeedfacf, 0x0100000c, 0, 6, len(cmds), len(lc), 0x00100085, 0)
-    return (mh + lc).ljust(PG, b'\0') + body + strtab
+    return (mh + lc).ljust(PG, b'\0') + body + strtab + emptysig
 
 
 INFO_PLIST = '''<?xml version="1.0" encoding="UTF-8"?>
