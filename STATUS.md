@@ -34,7 +34,7 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 若干卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0…5`（每卷 ≤1 GB，共 4636 文件）（第二十七轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.8 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.9 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -2106,3 +2106,41 @@ TLS 不建、`nn::os` 运行时等于没初始化 → 构造函数一用 TLS 就
 
 实测新产物：6 卷（1,073,770,015 / 1,073,340,665 / 1,071,803,782 / 1,044,068,449 /
 1,072,084,835 / 170,236,956 字节），4636 条、CRC 全对。
+
+## 2.117 真机第六崩：整套 SDK 运行时初始化（nn::init::Start 六步）都缺（v0.5.9）
+
+v0.5.6 的 rtld 接线（TLS 分配器）生效后，`__nnmusl_init_dso` 真的跑起来了，
+崩点从「sdk: DT_INIT 之后」推进到 `__nnmusl_init_dso` 内部：
+
+```
+3c5144: bl nnosGetModuleCountMax()                 → 128
+3c5160: bl nnosAllocateMemoryForThreadLocal(1032)  → 返回 NULL
+3c5178: bl memset(NULL, 0, 1032)                   → SIGSEGV（写 0x407）
+```
+
+顺着 NULL 追到 `main` 里的 `nn::init::detail::DefaultAllocatorForThreadLocal`：它读
+`main+0x2473670`，为 0 就返回 NULL；而这个全局由 `nn::init::InitializeAllocator(void*, size_t)`
+设置，唯一的调用者是 **`nninitStartup`**（main+0x536f34），
+而 `nninitStartup` 又是被 **`nn::init::Start(size_t, size_t, void(*)(void), void(*)(void))`**
+（sdk+0x68668）调用的 —— 也就是 Nintendo 的「SDK 启动流程」。
+
+我们的人一直没调这套，只在 `loader_core.c` 里留过一句 TODO：
+「时机由 SDK 的启动流程决定（nn::init::Start 之后、nnMain 之前）——参考项目如此，
+本项目目前的 bootstrap 是『装载完就调』，等接上 SDK 初始化顺序后再对齐」。
+
+这一轮把这套顺序补齐了。参考项目（`dm/host/main.c` 的 `guest_main`）是逐条照抄的：
+
+```
+_init_libc0 → nnosInitialize(主线程句柄, 0) → _init_libc1（musl 锁/SSP）
+  → nninitInitializeSdkModule → nninitStartup（游戏分配器）→ _init_libc2
+  → run_module_inits（各模块 DT_INIT，rtld 回调 B）
+  → SetHostArgc/SetHostArgv → nnMain
+```
+
+关键一环：**`nnosInitialize` 正是构造 `g_OsResourceManagerStorage` 的地方**
+（sdk+0x8f89c：`ldr x0,[0x91ffb8]; bl …`）—— 这正是第五/第六崩里那个「线程链表头是 0」的
+bss 对象。所以前几轮「构造函数用 TLS 就崩」的根因是：**SDK 运行时初始化整段没跑**，
+而不是单个服务缺实现。
+
+`host_boot()` 现在按上表逐步调用（每一步都打 `>>> 符号名` 日志，缺符号会红字点名），
+`SetHostArgc/Argv` 也给上（argv[0] = "SMO"）。
