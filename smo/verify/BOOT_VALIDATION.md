@@ -126,13 +126,27 @@ FORTIFY 中止，已改为实际剩余容量。原生启动再次通过音频，
 私有包追加该真实资源，更新到 `527b041e45f7a9d584432287e7862a4d0f1760aa`，
 84,968,352 字节，SHA256 `05419cd018e530bba47a5df4ff58ebc70a7042cf8dbda30ef871bf5678ca2551`。
 
-?? `38943030416` ??? Texture2dMap ?????? main+0x9caae8
-`al::Resource::tryGetByml`????? GameDataHolder+0x14b8????????
-main+0x52e5f4 ???????????? `ObjectData/WorldWarpHole.szs`?
-????????????????? main ???????? ObjectData ?????
-???? 61 ???????? 43,656,656 ????????? boot-objectdata.zip?
-38,688,365 ????? `3012ecc50d7ee8e4ca526f2e033a624b46ada8b2`?
-SHA256 `ced0215b4d8ba7cabb0b5cede52d98346aabc3e4a7b8c56f9c9766de77ffecbd`?
-???????????/????????????????????
-????????????? errno ???????????????
-???????????????????????? IPA?
+Run `38943030416` passed Texture2dMap loading and crashed at main+0x9caae8
+`al::Resource::tryGetByml`, called by GameDataHolder+0x14b8. File tracing and
+the literal at main+0x52e5f4 identify missing `ObjectData/WorldWarpHole.szs`.
+To avoid one build per missing file, include all 61 existing ObjectData literal
+paths found in this main (43,656,656 bytes uncompressed) in a separate private
+boot-objectdata.zip: 38,688,365 bytes, commit
+`3012ecc50d7ee8e4ca526f2e033a624b46ada8b2`, SHA256
+`ced0215b4d8ba7cabb0b5cede52d98346aabc3e4a7b8c56f9c9766de77ffecbd`.
+Dynamically constructed resource names are not covered. Preserve errno across
+optional missing-file logs; the filesystem self-test passes.
+
+Run `38943647640` passed GameDataHolder and entered first-scene initialization.
+The main thread aborted at SDK+0x87924 from al::AudioSystem::update, polling a
+SystemEvent never initialized by the generic AcquireAudioDeviceSwitchNotification
+stub. That API now binds a real SDK SystemEvent without periodic false device
+switch notifications. Device queries expose the CPU renderer's single stereo
+route with the SDK's verified 0x100-byte name ABI. Audio regression covers
+binding, output bounds, capacity handling and consistent endpoint queries.
+Host speaker delivery remains pending; these queries do not prove audio playback.
+A background loader also requested missing EffectData/EffectPtcl.szs; add that
+real resource in private boot-effects.zip, 61,838,135 bytes, commit
+`7ea76748437f37fe04b6263ddcea3ff80401fc47`, SHA256
+`e67294786c2cff43785701e02d944f52db91fa61e36b64e025125c7a927a4126`.
+No successful boot gate, rendered image or real-device fix is claimed yet.

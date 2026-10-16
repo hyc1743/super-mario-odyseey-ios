@@ -9,6 +9,7 @@ static const void *expected_parameter;
 static uint8_t expected_internal[0x34];
 static int constructed, initialized, finalized, destroyed, started, stopped;
 static int client_calls, server_calls, processed, bound, forgotten;
+static void *last_bound;
 static uint32_t server_result, init_result;
 static int budget;
 static uint8_t commands[64];
@@ -24,7 +25,7 @@ static uint64_t size(const void *p) {
     CHECK(!memcmp(p, expected_internal, sizeof expected_internal));
     return 0x8000;
 }
-void hle_bind_system_event(void *event) { CHECK(event); bound++; }
+void hle_bind_system_event(void *event) { CHECK(event); last_bound = event; bound++; }
 void hle_signal_system_event(void *event) { (void)event; }
 void hle_forget_system_event(void *event) { CHECK(event); forgotten++; }
 static void construct(void *p) { CHECK(p); constructed++; }
@@ -166,6 +167,30 @@ int main(void) {
     CHECK(!execute(handle) && processed == 2);
     close_renderer(handle);
     free(allocation);
+    // Native boot previously aborted while polling this uninitialized event.
+    void (*notification)(void *) = (void *)dm_hle_force_lookup(
+        "_ZN2nn5audio36AcquireAudioDeviceSwitchNotificationEPNS_2os11SystemEventE");
+    int (*list_devices)(void *, int) = (void *)dm_hle_force_lookup(
+        "_ZN2nn5audio19ListAudioDeviceNameEPNS0_15AudioDeviceNameEi");
+    void (*active_device)(void *) = (void *)dm_hle_force_lookup(
+        "_ZN2nn5audio24GetActiveAudioDeviceNameEPNS0_15AudioDeviceNameE");
+    int (*active_channels)(void) = (void *)dm_hle_force_lookup(
+        "_ZN2nn5audio21GetActiveChannelCountEv");
+    CHECK(notification && list_devices && active_device && active_channels);
+    int previous_bound = bound;
+    notification(&event);
+    CHECK(bound == previous_bound + 1 && last_bound == &event);
+    struct { uint64_t before; char names[2][0x100]; uint64_t after; } devices;
+    memset(&devices, 0xa5, sizeof devices);
+    CHECK(list_devices(devices.names, 0) == 0 && devices.names[0][0] == (char)0xa5);
+    CHECK(list_devices(NULL, 1) == 0 && list_devices(devices.names, -1) == 0);
+    CHECK(list_devices(devices.names, 2) == 1);
+    CHECK(!strcmp(devices.names[0], "AudioTvOutput"));
+    CHECK(devices.names[0][255] == 0 && devices.names[1][0] == (char)0xa5);
+    active_device(devices.names[1]);
+    CHECK(!memcmp(devices.names[0], devices.names[1], 0x100));
+    CHECK(devices.before == UINT64_C(0xa5a5a5a5a5a5a5a5) && devices.after == devices.before);
+    CHECK(active_channels() == 2);
     printf("audio parameter ABI: %s\n", fails ? "FAIL" : "PASS");
     return fails ? 1 : 0;
 }

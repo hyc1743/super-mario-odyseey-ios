@@ -257,7 +257,34 @@ static int h_get_limit(renderer_handle handle) {
     return value;
 }
 
+// SDK+0x184668/0x184918 use 0x100 bytes per AudioDeviceName.
+// Expose the CPU renderer's single stereo endpoint. Speaker delivery is still
+// pending; these describe the renderer route, not physical device discovery.
+typedef struct { char name[0x100]; } audio_device_name;
+static const audio_device_name output_device = { "AudioTvOutput" };
+static int h_list_devices(audio_device_name *out, int capacity) {
+    if (!out || capacity <= 0) return 0;
+    *out = output_device;
+    return 1;
+}
+static void h_active_device(audio_device_name *out) {
+    if (out) *out = output_device;
+}
+static int h_active_channels(void) { return 2; }
+static void h_device_notification(void *event) {
+    if (!event) die("Audio device notification requires a SystemEvent");
+    // The caller polls this event every frame, including with a zero timeout.
+    // It must be an initialized SDK event even when this fixed route never
+    // switches. Do not periodically signal a device-change event.
+    hle_bind_system_event(event);
+    LOG("AUDIO_DEVICE_NOTIFICATION_BOUND");
+}
+
 static const hle_impl_ent impl[] = {
+    {"_ZN2nn5audio19ListAudioDeviceNameEPNS0_15AudioDeviceNameEi", (void *)h_list_devices, "CPU renderer stereo endpoint"},
+    {"_ZN2nn5audio24GetActiveAudioDeviceNameEPNS0_15AudioDeviceNameE", (void *)h_active_device, "CPU renderer active endpoint"},
+    {"_ZN2nn5audio21GetActiveChannelCountEv", (void *)h_active_channels, "Stereo renderer route"},
+    {"_ZN2nn5audio36AcquireAudioDeviceSwitchNotificationEPNS_2os11SystemEventE", (void *)h_device_notification, "Initialize SDK notification event for fixed renderer route"},
     {"_ZN2nn5audio30GetAudioRendererWorkBufferSizeERKNS0_22AudioRendererParameterE",
      (void *)h_renderer_work_size, "SDK server's pure size calculation; no service IPC"},
     {"_ZN2nn5audio17OpenAudioRendererEPNS0_19AudioRendererHandleEPNS_2os11SystemEventERKNS0_22AudioRendererParameterEPvm", (void *)h_open, "In-process SDK audio server"},
