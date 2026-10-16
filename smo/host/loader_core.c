@@ -236,12 +236,34 @@ void relocate(module_t *m) {
             if (type == R_AARCH64_RELATIVE) { *where = (uint64_t)(uintptr_t)m->base + (uint64_t)r->r_addend; cnt[0]++; continue; }
             const Elf64_Sym *s = &m->symtab[si];
             const char *nm = m->strtab + s->st_name;
+            // rtld 提供的链接器符号：**模块自己的**重定位表边界。
+            // 真实 rtld 在装载时把这三个范围给每个模块（sdk/subsdk0/main 各导入 4 个）。
+            // 不实现的话它们会被登记成宿主桩地址，而 `__nnmusl_init_dso`（musl 的 DSO 初始化，
+            // 它会建 nn::os 的资源管理器/线程管理器）拿这些参数出去用 —— 于是 SDK 的运行时
+            // 初始化等于没做，构造函数一用 TLS 就崩在「遍历线程链表、表头是 0」上（真机第四崩）。
+            // 名字两套都认：__rel_*（8 字节项）与 __rela_*（24 字节项），NSO 用 RELA，两者同源。
+            uint64_t rtld_sym = 0;
+            if (!strcmp(nm, "__rel_dyn_start") || !strcmp(nm, "__rela_dyn_start"))
+                rtld_sym = (uint64_t)(uintptr_t)(m->base + rela);
+            else if (!strcmp(nm, "__rel_dyn_end") || !strcmp(nm, "__rela_dyn_end"))
+                rtld_sym = (uint64_t)(uintptr_t)(m->base + rela + relasz);
+            else if (!strcmp(nm, "__rel_plt_start") || !strcmp(nm, "__rela_plt_start"))
+                rtld_sym = (uint64_t)(uintptr_t)(m->base + jmprel);
+            else if (!strcmp(nm, "__rel_plt_end") || !strcmp(nm, "__rela_plt_end"))
+                rtld_sym = (uint64_t)(uintptr_t)(m->base + jmprel + pltsz);
             // 解析顺序与参考项目一致：
             //   ① 服务层强制接管（HLE_FORCE）——即使模块内有定义也覆盖，服务客户端就走这条
             //   ② 本模块定义
             //   ③ 别的模块导出（跨模块重定位）
             //   ④ 最后才交给宿主的 import 解析（HLE / 桩）
-            uint64_t v = dm_hle_force(nm);
+            uint64_t v;
+            if (rtld_sym) {
+                v = rtld_sym;
+                LOG("%s: 链接器符号 %s = %#llx（模块自己的重定位表边界，rtld 口径）",
+                    m->name, nm, (unsigned long long)v);
+            } else {
+                v = dm_hle_force(nm);
+            }
             if (v) hle++;
             else if (s->st_shndx) v = (uint64_t)(uintptr_t)(m->base + s->st_value);
             else {

@@ -139,9 +139,14 @@ def write_module(outdir, name, exports, imports, ngates=0):
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else "work/synthetic"
-    # 两个模块：sdk 导出一批符号、main 使用它们（跨模块）+ 使用宿主 import
+    # 两个模块：sdk 导出一批符号、main 使用它们（跨模块）+ 使用宿主 import。
+    # sdk 的 import 里带四个 **rtld 链接器符号**（__rel_dyn_start/end、__rel_plt_start/end）——
+    # 真实产物里 sdk/subsdk0/main 各导入这四个，装载器必须解析成「模块自己的重定位表边界」，
+    # 而不是塞给宿主 import（真机第四崩就是它们被绑成宿主桩地址：musl 的 __nnmusl_init_dso
+    # 拿这几个参数去做 DSO 初始化，SDK 的运行时等于没初始化）。合成产物里放上，CI 才拦得住回归。
     write_module(out, "sdk", [f"nn3hid{i}" for i in range(6)] + ["nn2fs4OpenEv"],
-                 ["nnsocketBind", "nnsockX"], ngates=3)
+                 ["nnsocketBind", "nnsockX", "__rel_dyn_start", "__rel_dyn_end",
+                  "__rel_plt_start", "__rel_plt_end"], ngates=3)
     write_module(out, "main", [],
                  ["nn3hid0", "nn2fs4OpenEv", "memcpy", "unknownHostSymbol"], ngates=0)
     print(f"合成产物已写入 {out}")

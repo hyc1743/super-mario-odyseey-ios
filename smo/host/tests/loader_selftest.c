@@ -85,8 +85,19 @@ int main(int argc, char **argv) {
     // 段标记（__got_start / __rela_dyn_end / __tdata_align_abs …，import_graph 里 16 条）。
     // 改成精确值：区间太宽时，少装一个模块这种变化它也照样放过。
     if (g_nmod == 3 && !strcmp(g_mod[2].name, "main")) {
-        CHK(g_import_uniq == 13,
-            "真实产物：交宿主 import 13 个不同名字（= import_graph 的 21 条去重；服务层走 HLE_FORCE）");
+        CHK(g_import_uniq == 9,
+            "真实产物：交宿主 import 9 个不同名字（= 旧的 13 减 4 个 rtld 链接器符号；服务层走 HLE_FORCE）");
+    }
+    // **回归断言**：四个 rtld 链接器符号必须由装载器按模块自己解析（__rel_dyn_start/end 指向
+    // 模块的 .rela.dyn、__rel_plt_* 指向 .rela.plt）。真机第四崩就是它们被当成宿主 import
+    // 塞进了宿主桩地址，而 __nnmusl_init_dso 拿这四个参数去做 DSO 初始化。
+    {
+        static const char *ls[] = {"__rel_dyn_start", "__rel_dyn_end", "__rel_plt_start", "__rel_plt_end"};
+        int leaked = 0;
+        for (unsigned i = 0; i < g_import_uniq; i++)
+            for (unsigned k = 0; k < sizeof ls / sizeof ls[0]; k++)
+                if (!strcmp(g_imp[i], ls[k])) leaked = 1;
+        CHK(!leaked, "rtld 链接器符号没走宿主 import（模块自己提供重定位表边界）");
     }
     CHK(g_imports >= g_import_uniq, "调用次数不少于名字数");
     printf("\n%s\n", bad ? "有断言不通过" : "全部通过");
