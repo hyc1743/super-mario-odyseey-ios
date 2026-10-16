@@ -60,6 +60,9 @@ def main():
         print(json.dumps(result, ensure_ascii=False), flush=True)
         # Host text logs contain names/addresses, never guest bytes or memory dumps.
         print("\n".join(data.splitlines()[:45] + data.splitlines()[-55:]), flush=True)
+        failures = [line for line in data.splitlines() if "失败" in line or "【红】" in line or "UNIMPL" in line]
+        if failures:
+            print("Startup dependency/error evidence:\n" + "\n".join(failures[-60:]), flush=True)
         if code is not None and code != 0:
             commands = ["xcrun", "lldb", "-b", "-o", "run",
                         "-k", "thread backtrace all -c 8", "-k", "register read pc x0 x8 x21 x23 x24",

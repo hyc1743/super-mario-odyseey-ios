@@ -16,7 +16,7 @@ python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded --romfs /path/
 输出所有线程回溯、关键寄存器和三个游戏模块的装载基址，可换算实际游戏偏移。
 本地结果写到 `work/boot-smoke/`。不上传游戏二进制或内存转储到公开 artifact。
 
-范围：这是早期启动检查。CI 从私有输入分支下载并校验约 5 MB 的 SystemData 测试包；
+范围：这是早期启动检查。CI 从私有输入分支下载并校验约 5 MB 的启动资源测试包；
 不带 --romfs 手动运行时使用空目录。没有验证完整资源、iOS 签名和系统差异、
 Metal 绘制或可玩性；30 秒存活也不能排除线程死锁。需要资源的后续路径应补充真实输入
 再验证，不能通过屏蔽错误或伪造接口成功来让构建变绿。
@@ -37,3 +37,10 @@ Metal 绘制或可玩性；30 秒存活也不能排除线程死锁。需要资�
   停在 main+0x73b4c0 `sead::PrimitiveDrawMgrNvn::prepareFromBinaryImpl`；
   此时使用空 RomFS，着色器输入数据为空。随后增加私有 SystemData 启动资源输入，
   不以跳过崩溃或伪造着色器数据的方式通过检查。
+- 云端运行 `38933134253` 加载 SystemData 后到达控制器逐帧更新，停在
+  main+0x75ba14。检查输入接口发现 TouchScreenState<1> 复用了写入 0x290 字节的
+  <16> 版本，且 GetNpadStates 的参数和返回值签名也不正确。增加边界哨兵及真实签名测试，
+  同时修正 JoyAssignment 查询和 StartSixAxisSensor 对 const 参数的错误写入。
+- 云端运行 `38933610358` 越过控制器更新，推进到 RootTask/GameSystem 初始化。
+  最新停点为 main+0x9caae8 `al::Resource::tryGetByml`，调用方为 EffectDataBase 构造；
+  为私有测试输入追加真实 EffectDataBase.szs，再验证依赖加载，不伪造资源对象。

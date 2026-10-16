@@ -254,7 +254,7 @@ jobs:
             python3 - <<'PY'
           import hashlib, zipfile
           path = '/tmp/boot-romfs.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'fc035e5dddb344c4d04da0a6200c081ef764d4fa680362cd3c4ec13a38104c3e'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '8b3586bd02f4761ba6a4e79c1c86f6e7cd19a078d6abc20cfeb264d0c2a65624'
           with zipfile.ZipFile(path) as archive:
               archive.extractall('/tmp/smo-boot-romfs')
           PY
