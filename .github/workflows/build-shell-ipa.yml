@@ -101,6 +101,12 @@ jobs:
   shell-ipa:
     name: 构建 App 壳 → 未签名 IPA
     runs-on: macos-latest
+    # 私有仓 token（可选）：给了就能在这台**公开 runner**（免费）上出「内嵌版」——
+    # 输入包从私有仓拉、成品 IPA 传回私有仓 release；公开 artifact 永远只留空壳。
+    # 放在 job 级 env：step 的 if 不能直接引用 secrets，但能引用 env。
+    env:
+      SMO_PRIVATE_TOKEN: ${{ secrets.SMO_PRIVATE_TOKEN }}
+      PRIVATE_REPO: hyc1743/super-mario-odyssey-ios-build
     steps:
       - uses: actions/checkout@v4
       - name: 工具版本
@@ -193,30 +199,45 @@ jobs:
           make -C smo/host smo_host 2>&1 | tee smo/host/build.log
       - name: 装 xcodegen（生成 .xcodeproj）
         run: brew install xcodegen
-      - name: 注入游戏程序（内嵌路线；任一条满足即做）
-        # 两种输入来源：
-        #   ① 仓库内自带 `input/embed-input.zip`（私有仓专用：把输入包直接提交进你自己的私有仓，
-        #      不需要任何外部网盘/变量 —— 公开仓不会有这个文件）
-        #   ② 仓库变量 GUEST_URL（可选带 GUEST_SHA256 校验），CI 带 token 下载
-        if: ${{ vars.GUEST_URL != '' || hashFiles('input/embed-input.zip') != '' }}
+      - name: 注入游戏程序（内嵌路线；三个输入来源按优先级）
+        # 输入来源：
+        #   ① 仓内 `input/embed-input.zip`（私有仓专用：把输入包提交进你自己的私有仓）
+        #   ② 私有仓（PRIVATE_REPO）的 `embed-input` 分支上的同一路径，用 SMO_PRIVATE_TOKEN 经 API 拉 ——
+        #      公开仓这边只在 runner 上取一次内容：不落 git、不进公开 artifact。
+        #      为什么单开一个分支：这样私有仓的 main 与公开仓逐字节一致，输入包不会随 main 推出去。
+        #   ③ 仓库变量 GUEST_URL（可选带 GUEST_SHA256 校验），带 token 下载
+        if: ${{ vars.GUEST_URL != '' || hashFiles('input/embed-input.zip') != '' || env.SMO_PRIVATE_TOKEN != '' }}
         env:
           GUEST_URL: ${{ vars.GUEST_URL }}
           GUEST_SHA256: ${{ vars.GUEST_SHA256 }}
         run: |
           set -o pipefail
+          Z=/tmp/embed-input.zip
+          rm -f "$Z"
           if [ -f input/embed-input.zip ]; then
-            cp input/embed-input.zip /tmp/embed-input.zip
-            echo "输入来源：仓库内 input/embed-input.zip（$(stat -f%z /tmp/embed-input.zip) 字节）"
+            cp input/embed-input.zip "$Z"
+            echo "输入来源：仓内 input/embed-input.zip"
+          elif [ -n "${SMO_PRIVATE_TOKEN:-}" ]; then
+            curl -sS -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
+                 -H "Accept: application/vnd.github.raw+json" \
+                 "https://api.github.com/repos/$PRIVATE_REPO/contents/input/embed-input.zip?ref=embed-input" \
+                 -o "$Z"
+            echo "输入来源：私有仓 $PRIVATE_REPO"
           else
-            curl -sL -H "Authorization: Bearer ${{ github.token }}"                  -H "Accept: application/octet-stream" "$GUEST_URL" -o /tmp/embed-input.zip
-            head -c 2 /tmp/embed-input.zip | grep -q "PK" || { echo "::error::下载到的不是 zip（URL 或权限不对）"; exit 1; }
-            if [ -n "$GUEST_SHA256" ]; then
-              GOT=$(python3 -c "import hashlib;print(hashlib.sha256(open('/tmp/embed-input.zip','rb').read()).hexdigest())")
-              [ "$GOT" = "$GUEST_SHA256" ] || { echo "::error::输入包校验失败：期望 $GUEST_SHA256 实得 $GOT"; exit 1; }
-              echo "输入包校验通过（sha256 ${GOT:0:16}…）"
-            fi
+            curl -sL -H "Authorization: Bearer ${{ github.token }}"                  -H "Accept: application/octet-stream" "$GUEST_URL" -o "$Z"
+            echo "输入来源：GUEST_URL"
           fi
-          python3 smo/ios/tools/embed_inject.py /tmp/embed-input.zip .
+          # 三种来源都可能是「一段 JSON 错误体」而不是 zip，所以统一在这里验头部
+          head -c 2 "$Z" | grep -q "PK" || { echo "::error::拿到的不是 zip（来源/权限不对）"; head -c 200 "$Z"; exit 1; }
+          echo "字节数：$(wc -c < "$Z")"
+          if [ -n "${GUEST_SHA256:-}" ]; then
+            GOT=$(python3 -c "import hashlib;print(hashlib.sha256(open('$Z','rb').read()).hexdigest())")
+            [ "$GOT" = "$GUEST_SHA256" ] || { echo "::error::输入包校验失败：期望 $GUEST_SHA256 实得 $GOT"; exit 1; }
+            echo "输入包校验通过（sha256 ${GOT:0:16}…）"
+          fi
+          python3 smo/ios/tools/embed_inject.py "$Z" .
+          # 后面的「上传到哪」按这个开关分流（公开 artifact vs 私有 release）
+          echo "SMO_INJECTED=1" >> "$GITHUB_ENV"
       - name: 构建并打包
         env:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
@@ -256,12 +277,40 @@ jobs:
           ls -la smo/ios/out
           unzip -l smo/ios/out/SMOMobile-shell.ipa | head -20
       - uses: actions/upload-artifact@v4
+        # 内嵌版含游戏程序 —— **绝不**传成公开 artifact；只有空壳才传
+        if: env.SMO_INJECTED != '1'
         with:
           name: SMOMobile-shell-ipa
           path: smo/ios/out/SMOMobile-shell.ipa
           if-no-files-found: error
+      - name: 内嵌版 → 私有仓 release（公开仓只留空壳）
+        # 公开 runner 免费出包，成品只进私有仓：tag `build-latest` 下的 release 资产，
+        # 名字带 run 号与短 sha（每次构建都留得下，也方便对照是哪次提交）。
+        if: env.SMO_INJECTED == '1' && env.SMO_PRIVATE_TOKEN != ''
+        env:
+          SMO_TAG: build-latest
+        run: |
+          set -o pipefail
+          IPA=smo/ios/out/SMOMobile-shell.ipa
+          SHA7=$(echo "${{ github.sha }}" | cut -c1-7)
+          NAME="SMOMobile-embed-r${{ github.run_number }}-${SHA7}.ipa"
+          API="https://api.github.com/repos/$PRIVATE_REPO"
+          UP="https://uploads.github.com/repos/$PRIVATE_REPO"
+          AUTH="Authorization: Bearer $SMO_PRIVATE_TOKEN"
+          REL_ID=$(curl -sS -H "$AUTH" "$API/releases/tags/$SMO_TAG" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true)
+          if [ -z "$REL_ID" ]; then
+            echo "建 release $SMO_TAG"
+            REL_ID=$(curl -sS -X POST -H "$AUTH" -H "Content-Type: application/json" "$API/releases" \
+              -d "{\"tag_name\":\"$SMO_TAG\",\"name\":\"内嵌版构建（公开 runner）\",\"prerelease\":true,\"body\":\"未签名 IPA，含游戏程序，仅本仓可见。下载 → 自签 → 覆盖安装。\"}" \
+              | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')
+          fi
+          echo "release id = $REL_ID；上传 $NAME（$(wc -c < "$IPA") 字节）"
+          curl -sS --fail-with-body -X POST -H "$AUTH" -H "Content-Type: application/octet-stream" \
+               --data-binary @"$IPA" "$UP/releases/$REL_ID/assets?name=$NAME" -o /tmp/asset.json
+          python3 -c "import json;d=json.load(open('/tmp/asset.json'));print('已上传：',d.get('browser_download_url') or d)"
       - name: 打 tag 时发 Release
-        if: startsWith(github.ref, 'refs/tags/')
+        # 内嵌版不入公开 release（含游戏程序）—— 它走上面的私有仓上传
+        if: startsWith(github.ref, 'refs/tags/') && env.SMO_INJECTED != '1'
         uses: softprops/action-gh-release@v2
         with:
           files: smo/ios/out/SMOMobile-shell.ipa
