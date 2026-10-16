@@ -50,6 +50,14 @@ SERVICE_FAMILIES = {
 # v0.6.6 把它误归为服务并强制接到返回 0 的桩，SDK 初始化随即空指针崩溃。
 LOCAL_LIBRARIES = {"os", "util", "diag", "mem", "lmem", "search", "nnex", "libc", "rtld", "gfx", "ro", "profiler"}
 
+# sf 中的缓冲区 getter / 序列化不是远端服务：必须使用 SDK 的实际 TLS 和布局。
+# v0.6.7 在 sdk+0x12a2a8 向 GetMessageBufferOnTls 的空桩返回值写消息头而崩溃。
+LOCAL_SF_SYMBOLS = {
+    "_ZN2nn2sf4hipc21GetMessageBufferOnTlsEv",
+    "_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor11SetupHeaderEPvmRKNS2_21HipcMessageHeaderInfoE",
+    "_ZN2nn2sf4hipc6detail25HipcMessageBufferAccessor6SetTagEt",
+}
+
 
 def family_of(sym):
     """抽「顶层命名空间」：改编名第一个嵌套名组件（`_ZN2nn…` → nn、`_ZN2nv…` → nv、
@@ -110,6 +118,8 @@ def load_modules(exefs):
 
 def verdict(sym, provided_by):
     fam = family_of(sym)
+    if sym in LOCAL_SF_SYMBOLS and provided_by:
+        return "模块内", fam
     # 非 nn 命名空间：这几个是实测查出来的，列出来因为它们不是「服务客户端」那套
     if fam == "nv":
         return "图形(NVN)，宿主接管", fam           # nv::InitializeGraphics / SetGraphicsAllocator

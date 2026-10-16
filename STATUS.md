@@ -2293,3 +2293,32 @@ v0.6.0 把 stderr 落盘后，SMO-stderr.txt 第一次给出系统库的消息�
 回归：工具链自检增加 6 个 lmem 符号的策略、库存、生成表检查，以及 fs / NVN
 接管仍保留的检查；修复前 6 项失败。Windows 快速回归通过 7 项（含 14 个 C 自检）。
 尚未在 macOS 构建修复后的 IPA，也未在真机验证能否继续完成 SDK 初始化。
+
+## 2.124 v0.6.7 真机闪退：HIPC 消息缓冲区 getter 被接到空桩（v0.6.8 修复）
+
+用户上传的 `SMO-log-previous.txt`：接管表 441 条，`nninitInitializeSdkModule`
+内部经过日志服务连接，调用 `GetMessageBufferOnTls` 占位桩后立刻 SIGSEGV。
+sdk 基址 `0x11d400000`，PC `0x11d52a2a8`，即 sdk+`0x12a2a8`；
+x20=0，故障指令 `stp w8,w9,[x20]`，FAR=0。上轮 lmem 空桩调用已经消失。
+
+用本地 LLVM/Capstone 核对 SDK（非 REA 反编译结论）：
+
+- `GetMessageBufferOnTls` 位于 sdk+`0x98db0`，原指令为读取 `tpidrro_el0`；
+  `work/rewrite/sdk.sites.tsv` 已有该处 `tpidrro_r` 改写，会返回线程自己的 TLR。
+- sdk+`0x12a268` 的 OpenLogger 组包：type=4、special header 含 PID、SFCI cmd=0，
+  消息从 +0x20 对齐。发送后要求 SFCO、成功 Result，以及一个 move handle。
+- `nn::lm::Initialize` 使用 CreateLogServiceByHipc 创建的代理打开 ILogger。
+  只给 getter 一个非空指针仍不够：连接必须写出句柄，发送必须提供真实可解析的响应。
+
+修复：3 个本地函数（TLS getter、SetupHeader、SetTag）恢复使用 SDK 实现；接管表
+441 → 438。新增 `hle_hipc.c` 实现服务解析、lm 连接、OpenLogger/日志/目的地请求、
+关闭及克隆会话。支持的请求回 HIPC/CMIF 响应，未知服务/命令回错误；当前接收并丢弃
+游戏的日志包，宿主 logbuf 不受影响。新文件同时接入 Makefile CORE 和 iOS 工程。
+
+验证：快速回归 7 项全部通过（含 15 个 C 自检）；新增 `hipc_selftest` 覆盖 PID/描述符
+偏移、move handle、SFCO/Result/token、会话耗尽、关闭与并发，并纳入 macOS CI。
+另在本机把实际宿主 C 实现编为 DLL，用 Unicorn 执行 SDK 自己的
+`HipcMessageReader::Initialize`（sdk+`0x42de4`），核对 OpenLogger 和 ILogger cmd0/1
+响应：move handle、原始数据长度、SFCO、Result 均正确。这是局部响应兼容性验证，
+尚不代表完整 SDK 启动或真机已通过。REA 打开 ELF 成功，但深度分析后端未配置，
+本轮未使用其反编译结果。

@@ -9,7 +9,7 @@ CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
 # CORE = 除 main.c 以外的宿主全部源（自检目标复用；内嵌装载自检也要它）
-CORE = logbuf.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_oe.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+CORE = logbuf.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_hipc.c hle_oe.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
 SRC = $(CORE) main.c
 INC = -I. -I../gfx/nvn
 
@@ -71,6 +71,10 @@ thread_selftest: hle_thread.c tests/thread_selftest.c dm.h hle_thread.h
 fs_selftest: hle_fs.c hle.c hle_force_gen.c tests/fs_selftest.c dm.h hle.h
 	$(CC) $(CFLAGS) -I. -o $@ logbuf.c hle_fs.c hle.c hle_force_gen.c tests/fs_selftest.c
 
+# HIPC 单测：启动日志服务的消息往返、句柄生命周期、边界与并发。
+hipc_selftest: hle_hipc.c hle.c hle_force_gen.c tests/hipc_selftest.c dm.h hle.h
+	$(CC) $(CFLAGS) -I. -o $@ logbuf.c hle_hipc.c hle.c hle_force_gen.c tests/hipc_selftest.c
+
 # oe + hid 单测：环境查询与 Npad/触屏布局
 oehid_selftest: hle_oe.c hle_hid.c hle.c hle_force_gen.c tests/oehid_selftest.c dm.h hle.h dm_input.h dm_oe.h
 	$(CC) $(CFLAGS) -I. -o $@ logbuf.c hle_oe.c hle_hid.c hle.c hle_force_gen.c tests/oehid_selftest.c
@@ -106,13 +110,14 @@ ifeq ($(UNAME_S),Darwin)
 TEST_EXTRA = embed_selftest
 endif
 
-test: $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
+test: $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
 	./applogic_selftest
 	./smoarc_selftest
 	./loader_selftest $(SYNDIR) sdk main
 	./svc_selftest
 	./thread_selftest
 	./fs_selftest
+	./hipc_selftest
 	./oehid_selftest
 	./nvn_iface_selftest
 	./nvn_selftest
@@ -135,6 +140,6 @@ run: smo_host
 	./smo_host work/rewrite sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host embed_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
+	rm -f smo_host embed_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
 
 .PHONY: test run equiv clean

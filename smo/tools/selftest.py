@@ -232,6 +232,14 @@ def test_hle_policy():
               and sym not in forced and sym not in generated
               and any(len(r) == 5 and r[1] == sym and r[3:] == ["sdk", "模块内"]
                       for r in inventory))
+    for sym in hle_inventory.LOCAL_SF_SYMBOLS:
+        check("HIPC 本地缓冲区/序列化使用 SDK 实现：" + sym,
+              hle_inventory.verdict(sym, ["sdk"]) == ("模块内", "sf")
+              and sym not in forced and sym not in generated
+              and any(len(r) == 5 and r[1] == sym and r[3:] == ["sdk", "模块内"]
+                      for r in inventory))
+    check("HIPC 传输仍由宿主接管",
+          "_ZN2nn2sf4hipc15SendSyncRequestENS_3svc6HandleEPvm" in forced)
     # 服务接管仍必须保留，不能通过关闭整个 HLE 表来修复本地库。
     fs = "_ZN2nn2fs12MountRomCacheEPKcPvm"
     check("fs 服务仍需接管", hle_inventory.verdict(fs, ["sdk"])[0]
