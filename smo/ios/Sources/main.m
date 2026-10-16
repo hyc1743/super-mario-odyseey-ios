@@ -45,6 +45,7 @@ static NSString *HexHead(NSString *path, NSUInteger n) {
     }
     NSData *d = [h readDataOfLength:n];
     [h closeFile];
+    if (d.length == 0) return @"（读到 0 字节 —— 文件像是占位符/还没落盘）";
     NSMutableString *s = [NSMutableString string];
     const uint8_t *b = d.bytes;
     for (NSUInteger i = 0; i < d.length; i++) [s appendFormat:@"%02x ", b[i]];
@@ -91,9 +92,12 @@ static void RunHost(void) {
                 // 卷 1 = 2286390220 字节，头 53 4d 4f 41 01 02）。
                 for (unsigned i = 0; i < nvols; i++) {
                     NSString *vp = [NSString stringWithUTF8String:volp[i]];
-                    NSDictionary *at = [fm2 attributesOfItemAtPath:vp error:nil];
-                    LOG("  卷 %u：%llu 字节（源应为 %s），头 %@", i,
-                        [at fileSize], i == 0 ? "3218914442" : "2286390220", HexHead(vp, 8));
+                    NSError *err = nil;
+                    NSDictionary *at = [fm2 attributesOfItemAtPath:vp error:&err];
+                    LOG("  卷 %u：%llu 字节（源应为 %s），改于 %@，头 %@", i,
+                        [at fileSize], i == 0 ? "3218914442" : "2286390220",
+                        [at fileModificationDate], HexHead(vp, 8));
+                    (void)err;
                 }
                 [fm2 createDirectoryAtPath:targetS withIntermediateDirectories:YES attributes:nil error:nil];
                 LOG("首次运行：展开 RomFS 容器 %u 卷 → %s（5.5 GB，几分钟；每 100 个文件一行）",
@@ -161,7 +165,12 @@ static NSString *RecentLog(void) {
     char buf[16384];
     size_t n = dm_log_dump(buf, sizeof buf);
     if (!n) return @"（暂无宿主日志）";
-    return [NSString stringWithUTF8String:buf];
+    // 注意：日志里若混进非法 UTF-8，stringWithUTF8String: 会返回 nil；而 nil 一旦进
+    // NSMutableArray 就抛 NSInvalidArgumentException 直接终止进程（真机第七崩）。
+    // 两层兜底：UTF-8 不行就退到 Latin-1（字节一对一映射，永不失败）。
+    NSString *s = [[NSString alloc] initWithBytes:buf length:n encoding:NSUTF8StringEncoding];
+    if (!s) s = [[NSString alloc] initWithBytes:buf length:n encoding:NSISOLatin1StringEncoding];
+    return s ?: @"（日志读不出来）";
 }
 
 // 在 App 自己的目录里找游戏文件。装包流程与参考项目一致：资源放在 App 的目录里，

@@ -23,6 +23,20 @@ static void mkp(const char *fmt, const char *a, const char *b) {
     SMO_MKDIR(p);
 }
 
+// 极简 UTF-8 校验（够判定「有没有被切在半个字上」）
+static int utf8_ok(const char *s, size_t n) {
+    for (size_t i = 0; i < n; ) {
+        unsigned char c = (unsigned char)s[i];
+        size_t need = c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3
+                    : (c & 0xF8) == 0xF0 ? 4 : 0;
+        if (!need || i + need > n) return 0;
+        for (size_t k = 1; k < need; k++)
+            if (((unsigned char)s[i + k] & 0xC0) != 0x80) return 0;
+        i += need;
+    }
+    return 1;
+}
+
 int main(void) {
     printf("== 1. 日志环形缓冲 ==\n");
     dm_log_clear();
@@ -58,6 +72,25 @@ int main(void) {
         CHK(strstr(txt, "落盘测试 42") && strstr(txt, "第二行"), "两行都写进了文件");
         CHK(strstr(txt, "裸写一行") != NULL, "dm_log_raw 也写进了同一个文件（崩溃现场那条路）");
         remove(lf);
+        dm_log_clear();
+    }
+
+    // 每行上限 200 字节：长中文行必然被截断；截断处必须是合法 UTF-8 边界，
+    // 否则 UI 侧 [NSString stringWithUTF8String:] 返回 nil → 插进 NSMutableArray 直接崩
+    // （真机第七崩就是这个；「运行久一点才崩」因为要等日志长到切中某个多字节字符）。
+    {
+        dm_log_clear();
+        char big[1024];
+        size_t o = 0;
+        for (int i = 0; i < 120 && o + 4 < sizeof big; i++) {
+            big[o++] = (char)0xE6; big[o++] = (char)0xB1; big[o++] = (char)0x89;   // 「汉」
+        }
+        big[o] = 0;                                  // 120 个「汉」= 360 字节，必定被切
+        dm_log_emit("%s", big);
+        char d2[16384];
+        size_t n2 = dm_log_dump(d2, sizeof d2);
+        CHK(n2 > 0, "长中文行能 dump 出来");
+        CHK(utf8_ok(d2, n2), "dump 出来的内容在 UTF-8 边界上（截断不留半个汉字）");
         dm_log_clear();
     }
 

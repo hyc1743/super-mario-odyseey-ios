@@ -34,7 +34,7 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 若干卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0…5`（每卷 ≤1 GB，共 4636 文件）（第二十七轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.6.0 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.6.1 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -2170,3 +2170,35 @@ v0.6.0 补三样诊断：
 
 顺带：卷那件事仍未解决 —— 日志显示 6 个卷**字节数完全正确**但「头」读不出来且展开时第 1 条 CRC 不符，
 说明打开 App 那一刻文件还读不到内容（拷贝/下载没真正落盘）。等拷贝彻底结束再开 App。
+
+## 2.119 真机第七崩的真相：不是游戏，是我们自己的 UI（v0.6.1）
+
+v0.6.0 把 stderr 落盘后，`SMO-stderr.txt` 一眼给出答案：
+
+```
+*** Terminating app due to uncaught exception 'NSInvalidArgumentException',
+    reason: '*** -[__NSArrayM insertObject:atIndex:]: object cannot be nil'
+```
+
+**是 App 自己的界面代码抛异常**（调用栈里 0x102… 全是我们的主二进制）。原因：
+
+- 环形缓冲每行上限 200 字节，日志里出现中文/emoji 时**会被切在半个字上**；
+- `RecentLog()` 里 `[NSString stringWithUTF8String:buf]` 遇到非法 UTF-8 **返回 nil**；
+- 界面把 nil 插进 `NSMutableArray` → `NSInvalidArgumentException` → 进程终止。
+- 「运行久一点才退出」正是因为它要等日志长到把某个多字节字符切开。
+
+修两处（各自带断言）：
+- `logbuf.c`：存行与 dump 时都把行尾修到合法 UTF-8 边界（最多回退 3 字节）；
+  `applogic_selftest` 新增「长中文行被截断后 dump 仍是合法 UTF-8」断言
+- `main.m`：`RecentLog()` 两层兜底（UTF-8 不行退 Latin-1，永不返回 nil）
+
+也就是说 SDK 初始化其实在正常推进（崩前已经走到 `nnosInitialize` 里连发了 6 条 svc），
+这一崩与客体无关。
+
+## 2.120 卷「大小对但读不出来」的诊断（v6.6.1 一并）
+
+用户反馈：卷的字节数完全正确、但 App 里「头」读不出来 —— 这不是「拷贝没完成」能解释的。
+所以让证据说话：
+- `smoarc.c`：CRC 不符时把**实际读到的前 16 字节**与「实算 CRC / 表里 CRC」都写进日志
+  （全 0 = 读到空洞或占位符；别的值 = 内容不是同一份）
+- `main.m`：`HexHead` 明确报「读到 0 字节 —— 文件像是占位符/还没落盘」，并打印每个卷的修改时间

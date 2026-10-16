@@ -115,12 +115,19 @@ int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
             if (!o) { fclose(f); return fail(-2, "输出文件打不开（空间不够？目录不可写？）", full); }
             unsigned long left = (unsigned)sz;
             uint32_t c = 0xFFFFFFFFu;
+            uint8_t head[16] = {0};                      // 前 16 字节：CRC 不符时用来判断「读到的是什么」
+            size_t head_n = 0;
             static uint8_t buf[1 << 16];
             while (left) {
                 size_t want = left < sizeof buf ? left : sizeof buf;
                 size_t r = fread(buf, 1, want, f);
                 if (r == 0) { fclose(o); fclose(f); return fail(-1, "读卷没读到数据（卷被截断？）", name); }
                 for (size_t i = 0; i < r; i++) c = crc_table[(c ^ buf[i]) & 0xFF] ^ (c >> 8);
+                if (head_n < sizeof head) {
+                    size_t k = sizeof head - head_n < r ? sizeof head - head_n : r;
+                    memcpy(head + head_n, buf, k);
+                    head_n += k;
+                }
                 if (fwrite(buf, 1, r, o) != r) {          // 不检查的话，磁盘写满会静默出半截文件
                     fclose(o); fclose(f);
                     return fail(-2, "写文件失败（空间不够？）", full);
@@ -134,7 +141,15 @@ int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
             fclose(o);
             if (crc != (int)~c) {
                 fclose(f);
-                return fail(-2, "条目 CRC 不符（卷不完整 / 拷贝被截断）", name);
+                // 把「实际读到的前 16 字节」写进原因：全是 0 = 读到空洞/占位符；别的值 = 内容不同版本；
+                // 再附两个 CRC 值，一眼能看出是「读的东西不对」还是「校验算法不对」。
+                char detail[512];
+                int o2 = snprintf(detail, sizeof detail, "%s（读到的前 16 字节:", name);
+                for (size_t i = 0; i < 16 && o2 < (int)sizeof detail - 4; i++)
+                    o2 += snprintf(detail + o2, sizeof detail - (size_t)o2, " %02x", head[i]);
+                snprintf(detail + (o2 < (int)sizeof detail - 40 ? o2 : (int)sizeof detail - 40),
+                         sizeof detail, "；实算 %08x / 表里 %08x）", (unsigned)(~c), (unsigned)crc);
+                return fail(-2, "条目 CRC 不符", detail);
             }
             total += (unsigned)sz;
             if (cb) cb(user, ++done, name);

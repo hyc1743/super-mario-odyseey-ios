@@ -13,6 +13,21 @@
 #define LOGBUF_LINES 512          // 屏上日志 512 行足够排查一轮启动
 #define LOGBUF_LINE  200
 
+// 把 n 字节的串尾修到合法 UTF-8 边界（最多回退 3 字节）。
+// 为什么需要：每行上限 200 字节，中文/emoji 被切在半个字上时，UI 侧
+// [NSString stringWithUTF8String:] 会返回 nil —— App 把 nil 插进 NSMutableArray 会抛
+// NSInvalidArgumentException 直接终止进程（真机第七崩就是这么来的；「运行久一点才崩」
+// 是因为要等日志长到切中某个多字节字符）。
+static size_t utf8_trim(const char *s, size_t n) {
+    for (size_t back = 1; back <= 3 && back <= n; back++) {
+        unsigned char c = (unsigned char)s[n - back];
+        if ((c & 0xC0) == 0x80) continue;              // 续字节：继续往前找起始字节
+        size_t need = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+        return (back == need) ? n : (n - back);        // 序列完整就原样；不完整就把这半个字丢掉
+    }
+    return n;
+}
+
 static char g_lines[LOGBUF_LINES][LOGBUF_LINE];
 static unsigned g_head, g_n;
 static FILE *g_file;                  // 实时落盘（崩溃也留得下）
@@ -40,6 +55,7 @@ void dm_log_emit(const char *fmt, ...) {
     vsnprintf(slot, LOGBUF_LINE, fmt, ap);
     va_end(ap);
     slot[LOGBUF_LINE - 1] = 0;
+    slot[utf8_trim(slot, strlen(slot))] = 0;      // 截断时别留下半个汉字
     fprintf(stderr, "[smo] %s\n", slot);
     // 真机崩溃时环形缓冲会随进程消失 —— 每行同时写盘并 flush，崩溃后文件里一定留得下尾部。
     // （上一版这里只 fopen 没写过：所谓「实时落盘」是空的，第一次真机排查才发现。）
@@ -57,7 +73,7 @@ size_t dm_log_dump(char *out, size_t cap) {
     unsigned oldest = (g_head + LOGBUF_LINES - g_n) % LOGBUF_LINES;
     for (unsigned i = 0; i < g_n; i++) {
         const char *l = g_lines[(oldest + i) % LOGBUF_LINES];
-        size_t n = strlen(l);
+        size_t n = utf8_trim(l, strlen(l));       // 双保险：老行也过一遍
         if (used + n + 2 <= cap) {
             memcpy(out + used, l, n);
             out[used + n] = '\n';
