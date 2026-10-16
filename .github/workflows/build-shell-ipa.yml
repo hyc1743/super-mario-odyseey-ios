@@ -202,7 +202,9 @@ jobs:
           GUEST_SHA256: ${{ vars.GUEST_SHA256 }}
         run: |
           set -o pipefail
-          curl -sL "$GUEST_URL" -o /tmp/embed-input.zip
+          # 带 token 下载：输入包放在本仓（私有仓）的 release 附件里也能取到，不需要外部网盘
+          curl -sL -H "Authorization: Bearer ${{ github.token }}"                -H "Accept: application/octet-stream" "$GUEST_URL" -o /tmp/embed-input.zip
+          head -c 2 /tmp/embed-input.zip | grep -q "PK" || { echo "::error::下载到的不是 zip（URL 或权限不对）"; exit 1; }
           GOT=$(python3 -c "import hashlib;print(hashlib.sha256(open('/tmp/embed-input.zip','rb').read()).hexdigest())")
           if [ -n "$GUEST_SHA256" ] && [ "$GOT" != "$GUEST_SHA256" ]; then
             echo "::error::输入包校验失败：期望 $GUEST_SHA256 实得 $GOT"; exit 1
