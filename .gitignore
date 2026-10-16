@@ -62,3 +62,6 @@ smo/host/smo_host
 smo/host/*_selftest
 smo/host/*_selftest.exe
 smo/host/smo_host.exe
+
+# 内嵌段与内嵌表（从游戏改写产物生成，含游戏程序，绝不入库）
+smo/ios/Sources/Embedded.*

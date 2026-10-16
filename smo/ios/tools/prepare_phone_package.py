@@ -75,24 +75,18 @@ def main():
             f.write(guest_dylib.INFO_PLIST % "local.guest")
         print(f"① Guest.framework → {fw_out}（{len(data)} 字节）")
         if guest_zip:
+            # 给 CI「内嵌路线」用的输入包：改写产物本身（patched.bin + tsv），CI 上现场生成内嵌段
             import hashlib
             import zipfile
             with zipfile.ZipFile(guest_zip, "w", zipfile.ZIP_DEFLATED) as z:
-                z.writestr("Guest.framework/Guest", data)
-                z.writestr("Guest.framework/Info.plist",
-                           guest_dylib.INFO_PLIST % "local.guest")
+                for n in need:
+                    for ext in ("patched.bin", "fixups.tsv", "gates.tsv"):
+                        f = os.path.join(rewrite, f"{n}.{ext}")
+                        if os.path.exists(f):
+                            z.write(f, f"{n}.{ext}")
             h = hashlib.sha256(open(guest_zip, "rb").read()).hexdigest()
-            print(f"① guest.zip → {guest_zip}")
-            print(f"① sha256 = {h}   ← 私有 fork 的仓库变量 GUEST_SHA256 填这个，GUEST_URL 填 zip 的下载地址")
-
-    # ② tsv + 着色器索引（小文件；索引供图形层用，现在带上无妨）
-    for n in need:
-        for ext in ("fixups.tsv", "gates.tsv"):
-            shutil.copy2(os.path.join(rewrite, n + "." + ext), exefs_out)
-    idx = os.path.join(ROOT, "work", "shaders.idx")
-    if os.path.exists(idx):
-        shutil.copy2(idx, exefs_out)
-    print(f"② ExeFS（tsv × {2 * len(need)} + shaders.idx）→ {exefs_out}")
+            print(f"① embed 输入包 → {guest_zip}（{os.path.getsize(guest_zip)} 字节）")
+            print(f"① sha256 = {h}   ← 私有 fork 的 GUEST_SHA256 填这个，GUEST_URL 填它的下载地址")
 
     # ② RomFS：巨大，默认只写说明；--pack-romfs 时打成卷（两个大文件）
     romfs_out = os.path.join(out, "SMO Resource", "RomFS")

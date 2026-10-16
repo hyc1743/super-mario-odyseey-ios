@@ -193,6 +193,22 @@ jobs:
           make -C smo/host smo_host 2>&1 | tee smo/host/build.log
       - name: 装 xcodegen（生成 .xcodeproj）
         run: brew install xcodegen
+      - name: 注入游戏程序（可选：仓库变量 GUEST_URL / GUEST_SHA256 都设了才做）—— 内嵌路线
+        # 与参考项目一致：映像编进 App **主二进制自己的段**（不是单独的大 dylib）——
+        # 签名工具只需签一个二进制，不会出现「大库/换壳 Framework」那类失败。
+        if: ${{ vars.GUEST_URL != '' }}
+        env:
+          GUEST_URL: ${{ vars.GUEST_URL }}
+          GUEST_SHA256: ${{ vars.GUEST_SHA256 }}
+        run: |
+          set -o pipefail
+          curl -sL "$GUEST_URL" -o /tmp/embed-input.zip
+          GOT=$(python3 -c "import hashlib;print(hashlib.sha256(open('/tmp/embed-input.zip','rb').read()).hexdigest())")
+          if [ -n "$GUEST_SHA256" ] && [ "$GOT" != "$GUEST_SHA256" ]; then
+            echo "::error::输入包校验失败：期望 $GUEST_SHA256 实得 $GOT"; exit 1
+          fi
+          echo "输入包校验通过（sha256 ${GOT:0:16}…）"
+          python3 smo/ios/tools/embed_inject.py /tmp/embed-input.zip .
       - name: 构建并打包
         env:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
@@ -226,27 +242,6 @@ jobs:
             smo/ios/out_step.log
             smo/ios/out/xcodebuild.log
           if-no-files-found: warn
-      - name: 注入 Guest.framework（可选：仓库变量 GUEST_URL / GUEST_SHA256 都设了才做）
-        if: ${{ vars.GUEST_URL != '' }}
-        run: |
-          curl -sL "$GUEST_URL" -o /tmp/guest.zip
-          python3 - "$GUEST_SHA256" /tmp/guest.zip <<'PY'
-          import hashlib, sys
-          want = sys.argv[1]
-          got = hashlib.sha256(open(sys.argv[2], "rb").read()).hexdigest()
-          if want and got != want:
-              print(f"::error::Guest 校验失败：期望 {want[:16]}… 实得 {got[:16]}…")
-              sys.exit(1)
-          print(f"Guest 校验通过（sha256 {got[:16]}…）")
-          PY
-          unzip -q /tmp/guest.zip -d /tmp/guest
-          APP=$(find Gen/dd/Build/Products -maxdepth 3 -name 'SMOMobile.app' -type d | head -1)
-          mkdir -p "$APP/Frameworks"
-          cp -R /tmp/guest/Guest.framework "$APP/Frameworks/"
-          echo "已注入 Guest.framework → $APP/Frameworks/"
-        env:
-          GUEST_URL: ${{ vars.GUEST_URL }}
-          GUEST_SHA256: ${{ vars.GUEST_SHA256 }}
       - name: 产物摘要
         if: success()
         run: |
