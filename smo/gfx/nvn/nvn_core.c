@@ -11,6 +11,7 @@
 // ------------------------------------------------------------------ 状态表（nvn_state.c）
 #include "nvn_state.h"
 #include "nvn_tex.h"
+#include <time.h>
 
 // 宿主侧睡眠：轮询等待用。mingw 有 usleep，其他平台用 nanosleep。
 #if defined(_WIN32)
@@ -468,25 +469,36 @@ uint64_t nvn_SyncFinalize(uint64_t sync, uint64_t a1, uint64_t a2, uint64_t a3,
 // 宿主侧信号（队列/呈现路径调；真机上由 Metal 的完成回调触发）
 void nvn_sync_signal(void *sync) {
     nvn_st_ent *e = nvn_st_get(sync, NVN_T_SYNC);
-    if (e) e->v[SYNC_SIGNALED] = 1;
+    if (e) __atomic_store_n(&e->v[SYNC_SIGNALED], 1, __ATOMIC_RELEASE);
 }
 
-// nvnSyncWait(sync, timeout_ns)：0 = 等到，非 0 = 超时。
-// 现在按 200 微秒轮询。真机上应换成条件变量（这里不换是为了不引入平台相关的等待原语，
-// 等到 Metal 重放层接上时一起做 —— 那时它会被 GPU 完成回调唤醒，轮询就不合适了）。
+// NVNsyncWaitResult: already signaled=0, satisfied after waiting=1,
+// timeout=2, failed=3. A zero timeout polls; fences stay signaled until rearmed.
+static uint64_t sync_now_ns(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now)) NVN_DIE("SyncWait clock unavailable");
+    return (uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec;
+}
 uint64_t nvn_SyncWait(uint64_t sync, uint64_t timeout_ns, uint64_t a2, uint64_t a3,
                       uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *e = need(ARG_OBJ(sync), NVN_T_SYNC, "SyncWait");
-    if (!e) return 1;
-    uint64_t waited_us = 0;
-    while (!e->v[SYNC_SIGNALED]) {
-        if (timeout_ns && waited_us * 1000ULL >= timeout_ns) return 1;   // 超时
+    if (!e) return 3;
+    if (__atomic_load_n(&e->v[SYNC_SIGNALED], __ATOMIC_ACQUIRE)) return 0;
+    if (!timeout_ns) return 2;
+    uint64_t start = sync_now_ns();
+    int reported = 0;
+    for (;;) {
+        if (__atomic_load_n(&e->v[SYNC_SIGNALED], __ATOMIC_ACQUIRE)) return 1;
+        uint64_t elapsed = sync_now_ns() - start;
+        if (elapsed >= timeout_ns) return 2;
+        if (!reported && elapsed >= UINT64_C(1000000000)) {
+            NVN_LOG("NVN_FENCE_WAIT sync=%p timeout_ns=%llu; no completion reported",
+                    ARG_OBJ(sync), (unsigned long long)timeout_ns);
+            reported = 1;
+        }
         nvn_host_sleep_us(200);
-        waited_us += 200;
     }
-    e->v[SYNC_SIGNALED] = 0;              // NVN：等到之后同步对象自动复位
-    return 0;
 }
 
 // ------------------------------------------------------------------ 采样器

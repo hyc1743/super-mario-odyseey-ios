@@ -8,6 +8,12 @@
 enum { STATE_WORKERS = 4, STATE_OBJECTS = 4096 };
 static uint8_t state_keys[STATE_WORKERS][STATE_OBJECTS];
 static nvn_st_ent *state_entries[STATE_WORKERS][STATE_OBJECTS];
+void nvn_sync_signal(void *sync);
+static void *signal_later(void *sync) {
+    nvn_host_sleep_us(2000);
+    nvn_sync_signal(sync);
+    return NULL;
+}
 static void *create_states(void *arg) {
     unsigned worker = (unsigned)(uintptr_t)arg;
     for (unsigned i = 0; i < STATE_OBJECTS; i++) {
@@ -128,12 +134,23 @@ int main(void) {
     nvn_BufferBuilderSetStorage(OBJ(bufb), OBJ(pool), 4090, 16, 0, 0, 0, 0);
     CHK(nvn_BufferInitialize(OBJ(bufb), OBJ(bufb), 0, 0, 0, 0, 0, 0) == 0, "reject buffer extending beyond pool");
 
-    printf("== 5. 同步对象：超时 / 信号 / 等到后自动复位 ==\n");
+    printf("== 5. Sync timeout / signal / persistent fence ==\n");
     CHK(nvn_SyncInitialize(OBJ(sync), OBJ(dev), 0, 0, 0, 0, 0, 0) == 1, "SyncInitialize 成功");
-    CHK(nvn_SyncWait(OBJ(sync), 1000000ull, 0, 0, 0, 0, 0, 0) != 0, "没人信号时等待超时（1ms）");
+    CHK(nvn_SyncWait(OBJ(sync), 0, 0, 0, 0, 0, 0, 0) == 2, "zero timeout polls an unsignaled fence");
+    CHK(nvn_SyncWait(OBJ(sync), 1000000ull, 0, 0, 0, 0, 0, 0) == 2, "1 ms timeout returns TIMEOUT_EXPIRED");
     nvn_sync_signal(sync);
     CHK(nvn_SyncWait(OBJ(sync), 0, 0, 0, 0, 0, 0, 0) == 0, "信号之后等待立即成功");
-    CHK(nvn_SyncWait(OBJ(sync), 1000000ull, 0, 0, 0, 0, 0, 0) != 0, "等到之后自动复位（再来要再等）");
+    CHK(nvn_SyncWait(OBJ(sync), 1000000ull, 0, 0, 0, 0, 0, 0) == 0, "completed fence remains signaled");
+    nvn_SyncInitialize(OBJ(sync), OBJ(dev), 0, 0, 0, 0, 0, 0);
+    pthread_t signaler;
+    int created = pthread_create(&signaler, NULL, signal_later, sync) == 0;
+    CHK(created, "launch fence completion thread");
+    if (created) {
+        uint64_t result = nvn_SyncWait(OBJ(sync), 200000000ull, 0, 0, 0, 0, 0, 0);
+        // Scheduling may complete the signal before the wait call starts.
+        CHK(result == 0 || result == 1, "concurrent completion returns a success enumerator");
+        pthread_join(signaler, NULL);
+    }
     CHK(nvn_SyncFinalize(OBJ(sync), 0, 0, 0, 0, 0, 0, 0) == 0, "SyncFinalize 成功");
 
     printf("== 6. 采样器：float 参数走 s0（统一 u64 签名对它不成立）==\n");

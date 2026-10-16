@@ -57,12 +57,13 @@ def main():
                       romfs_fixture=bool(args.romfs),
                       seconds=args.seconds, timed_out=timed_out, exit_code=code,
                       entered_nnmain=entry, started_guest_thread=thread, presented_60_frames=frames, error_log=fatal,
+                      fence_wait_observed="NVN_FENCE_WAIT" in data,
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))
         (args.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)
         # Host text logs contain names/addresses, never guest bytes or memory dumps.
         print("\n".join(data.splitlines()[:45] + data.splitlines()[-55:]), flush=True)
-        failures = [line for line in data.splitlines() if "失败" in line or "【红】" in line or "UNIMPL" in line]
+        failures = [line for line in data.splitlines() if "失败" in line or "【红】" in line or "UNIMPL" in line or "NVN_FENCE_WAIT" in line]
         if failures:
             print("Startup dependency/error evidence:\n" + "\n".join(failures[-60:]), flush=True)
         if not passed:

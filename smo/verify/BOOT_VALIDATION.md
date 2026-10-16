@@ -174,3 +174,24 @@ Same-object use/destruction remains caller-synchronized. Regression creates
 16,384 objects on four threads, checks every entry and retained pointer, deletes
 half, tests type reuse and resets the expanded table. Core/interface/replay and
 texture regressions pass locally. Native startup validation follows.
+
+Run `38945340348` executes for 30 seconds without a crash or fatal log. The
+expanded state index reaches 65,536 buckets / at least 24,576 live objects;
+particle buffers now load without the former zero-address crash. The gate
+correctly fails: only one presentation request, not 60. LLDB interrupts the main
+thread in nvn_SyncWait from main+0x732378 waitForGpuDone. The wrapper at
+main+0x73a1cc passes UINT64_MAX as the timeout. QueueFenceSync and
+QueueSubmitCommands currently only record calls; neither reports real GPU
+completion. The Metal code is an offline test backend, not a guest queue bridge.
+The reference project's fence uses its last Metal submission and waits for the
+actual completion value. Signaling the current fence unconditionally would hide
+this missing implementation and is not a valid startup fix.
+
+Also correct the independently verified SyncWait ABI: 0=already signaled,
+1=satisfied while waiting, 2=timeout, 3=failure; zero timeout polls, and completed
+fences remain signaled. The former implementation treated zero as infinite,
+returned the wrong timeout value, and auto-reset fences. Atomic completion
+loads/stores support cross-thread delivery. Regression verifies polling, bounded
+timeout, persistent completion and a concurrent signal. Long waits now log
+NVN_FENCE_WAIT, captured explicitly in startup result.json. This diagnostic does
+not report a stall as a crash or bypass GPU completion. No new IPA is released.
