@@ -61,6 +61,29 @@ int main(void) {
     gett(&ts, 16);
     CHK(ts.count == 0, "抬起后点数 = 0");
 
+    printf("== hid: ABI and output boundaries ==\n");
+    union { uint64_t align; uint8_t bytes[0x300]; } small;
+    memset(small.bytes, 0xA5, sizeof small.bytes);
+    void (*getone)(void *) = (void *)dm_hle_force_lookup("_ZN2nn3hid19GetTouchScreenStateILm1EEEvPNS0_16TouchScreenStateIXT_EEE");
+    dm_input_set_touch(1, t);
+    getone(small.bytes);
+    int guard_ok = 1;
+    for (size_t i = 0x38; i < sizeof small.bytes; i++) if (small.bytes[i] != 0xA5) guard_ok = 0;
+    CHK(guard_ok, "TouchScreenState<1> writes exactly 0x38 bytes; caller objects survive");
+    CHK(((int32_t *)small.bytes)[2] == 1 && small.bytes[0x10] == 7, "single touch contains first published point");
+    int (*getmany)(NpadState *, int, const uint32_t *) = (void *)dm_hle_force_lookup("_ZN2nn3hid13GetNpadStatesEPNS0_16NpadFullKeyStateEiRKj");
+    NpadState states[2];
+    memset(states, 0xA5, sizeof states);
+    CHK(getmany(states, 0, &id) == 0 && ((uint8_t *)states)[0] == 0xA5, "zero sample capacity writes nothing");
+    CHK(getmany(states, 2, &id) == 1 && states[0].attributes == 1, "Npad array API receives capacity and id in their correct argument slots");
+    CHK(((uint8_t *)&states[1])[0] == 0xA5, "returns one available sample without overwriting the next slot");
+    uint32_t (*assignment)(const uint32_t *) = (void *)dm_hle_force_lookup("_ZN2nn3hid20GetNpadJoyAssignmentERKj");
+    uint32_t const_id = 0x20;
+    CHK(assignment(&const_id) == 0 && const_id == 0x20, "assignment query returns an enum and preserves const id");
+    void (*startaxis)(const void *) = (void *)dm_hle_force_lookup("_ZN2nn3hid18StartSixAxisSensorERKNS0_19SixAxisSensorHandleE");
+    startaxis(&const_id);
+    CHK(const_id == 0x20, "StartSixAxisSensor preserves its input handle");
+
     printf("== oe：环境与通知 ==\n");
     int (*opo)(void) = (void *)dm_hle_force_lookup("_ZN2nn2oe16GetOperationModeEv");
     int (*operf)(void) = (void *)dm_hle_force_lookup("_ZN2nn2oe18GetPerformanceModeEv");

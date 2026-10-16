@@ -87,6 +87,17 @@ static void h_Handheld(NpadState *s, const uint32_t *id) { fill(s, id ? *id : NP
 static void h_JoyDual(NpadState *s, const uint32_t *id) { fill(s, id ? *id : 0, STYLE_FULLKEY); }      // 双 Joy-Con 按全键处理
 static void h_JoyLeft(NpadState *s, const uint32_t *id) { fill(s, id ? *id : 0, 0); }                 // 半边手柄：SMO 单机用不到
 static void h_JoyRight(NpadState *s, const uint32_t *id) { fill(s, id ? *id : 0, 0); }
+#define MULTI(name, single) \
+static int name(NpadState *out, int capacity, const uint32_t *id) { \
+    if (!out || capacity <= 0) return 0; \
+    single(out, id); return 1; \
+}
+MULTI(h_FullKeys, h_FullKey)
+MULTI(h_Handhelds, h_Handheld)
+MULTI(h_JoyDuals, h_JoyDual)
+MULTI(h_JoyLefts, h_JoyLeft)
+MULTI(h_JoyRights, h_JoyRight)
+#undef MULTI
 static uint32_t h_GetStyleSet(const uint32_t *id) {
     (void)id;
     return g_style;
@@ -94,9 +105,9 @@ static uint32_t h_GetStyleSet(const uint32_t *id) {
 static void h_Disconnect(const uint32_t *id) { (void)id; }
 static void h_SetJoyHold(int t) { (void)t; }
 static void h_SwapAssign(const uint32_t *a, const uint32_t *b) { (void)a; (void)b; }
-static void h_GetJoyAssign(uint32_t *out, const uint32_t *id) { (void)id; if (out) *out = 0; }
+static uint32_t h_GetJoyAssign(const uint32_t *id) { (void)id; return 0; }
 static void h_GetControllerColor(void *out, void *out2, const uint32_t *id) { (void)id; if (out) memset(out, 0, 12); if (out2) memset(out2, 0, 12); }
-static void h_GetSixAxis(uint32_t *out, const void *h) { (void)h; if (out) *out = 0; }                 // 六轴：报「没接着」
+static void h_StartSixAxis(const void *handle) { (void)handle; }
 static void h_GetDebugPad(void *s) { if (s) memset(s, 0, 0x28); }
 static void h_Vibration(const void *h, const void *v) { (void)h; (void)v; }                            // 振动：宿主先收下不用
 
@@ -110,6 +121,17 @@ static int h_GetTouch(TouchState16 *out, int n) {
     pthread_mutex_unlock(&g_in_lock);
     return 1;
 }
+// TouchScreenState<1> has only 0x38 bytes, not the 0x290 bytes of <16>.
+// Its API has no second parameter. Sharing h_GetTouch corrupted caller memory.
+static void h_GetTouchOne(void *out) {
+    if (!out) return;
+    pthread_mutex_lock(&g_in_lock);
+    memset(out, 0, 0x38);
+    *(int64_t *)out = ++g_sampling;
+    ((int32_t *)out)[2] = g_touch_count ? 1 : 0;
+    if (g_touch_count) memcpy((uint8_t *)out + 0x10, g_touch[0], 0x28);
+    pthread_mutex_unlock(&g_in_lock);
+}
 static void h_ActivateTouch(void) { }
 static void h_InitTouchScreen(void) { }
 
@@ -122,11 +144,11 @@ static const hle_impl_ent g_hid_impl[] = {
     {"_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyDualStateERKj", (void *)h_JoyDual, "hid；双 Joy-Con 状态"},
     {"_ZN2nn3hid12GetNpadStateEPNS0_16NpadJoyLeftStateERKj", (void *)h_JoyLeft, "hid；左 Joy-Con（单机用不到）"},
     {"_ZN2nn3hid12GetNpadStateEPNS0_17NpadJoyRightStateERKj", (void *)h_JoyRight, "hid；右 Joy-Con（单机用不到）"},
-    {"_ZN2nn3hid13GetNpadStatesEPNS0_16NpadFullKeyStateEiRKj", (void *)h_FullKey, "hid；全键手柄状态（多个）"},
-    {"_ZN2nn3hid13GetNpadStatesEPNS0_17NpadHandheldStateEiRKj", (void *)h_Handheld, "hid；掌机手柄状态（多个）"},
-    {"_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj", (void *)h_JoyDual, "hid；双 Joy-Con（多个）"},
-    {"_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj", (void *)h_JoyLeft, "hid；左 Joy-Con（多个）"},
-    {"_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj", (void *)h_JoyRight, "hid；右 Joy-Con（多个）"},
+    {"_ZN2nn3hid13GetNpadStatesEPNS0_16NpadFullKeyStateEiRKj", (void *)h_FullKeys, "hid；全键手柄状态（多个）"},
+    {"_ZN2nn3hid13GetNpadStatesEPNS0_17NpadHandheldStateEiRKj", (void *)h_Handhelds, "hid；掌机手柄状态（多个）"},
+    {"_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyDualStateEiRKj", (void *)h_JoyDuals, "hid；双 Joy-Con（多个）"},
+    {"_ZN2nn3hid13GetNpadStatesEPNS0_16NpadJoyLeftStateEiRKj", (void *)h_JoyLefts, "hid；左 Joy-Con（多个）"},
+    {"_ZN2nn3hid13GetNpadStatesEPNS0_17NpadJoyRightStateEiRKj", (void *)h_JoyRights, "hid；右 Joy-Con（多个）"},
     {"_ZN2nn3hid15GetNpadStyleSetERKj", (void *)h_GetStyleSet, "hid；手柄样式集合"},
     {"_ZN2nn3hid14DisconnectNpadERKj", (void *)h_Disconnect, "hid；断开手柄（宿主无实际设备）"},
     {"_ZN2nn3hid18SetNpadJoyHoldTypeENS0_15NpadJoyHoldTypeE", (void *)h_SetJoyHold, "hid；Joy-Con 握持方式"},
@@ -136,10 +158,10 @@ static const hle_impl_ent g_hid_impl[] = {
     {"_ZN2nn3hid16GetDebugPadStateEPNS0_13DebugPadStateE", (void *)h_GetDebugPad, "hid；调试手柄（全 0）"},
     {"_ZN2nn3hid18InitializeDebugPadEv", (void *)h_Init, "hid；调试手柄初始化"},
     {"_ZN2nn3hid18SendVibrationValueERKNS0_21VibrationDeviceHandleERKNS0_14VibrationValueE", (void *)h_Vibration, "hid；振动（宿主先收下不用）"},
-    {"_ZN2nn3hid18StartSixAxisSensorERKNS0_19SixAxisSensorHandleE", (void *)h_GetSixAxis, "hid；六轴（报没接着）"},
+    {"_ZN2nn3hid18StartSixAxisSensorERKNS0_19SixAxisSensorHandleE", (void *)h_StartSixAxis, "hid；启动六轴（宿主忽略）"},
     {"_ZN2nn3hid21InitializeTouchScreenEv", (void *)h_InitTouchScreen, "hid；触屏初始化"},
     {"_ZN2nn3hid20GetTouchScreenStatesILm16EEEiPNS0_16TouchScreenStateIXT_EEEi", (void *)h_GetTouch, "hid；触屏状态 ← 前台触点"},
-    {"_ZN2nn3hid19GetTouchScreenStateILm1EEEvPNS0_16TouchScreenStateIXT_EEE", (void *)h_GetTouch, "hid；触屏状态（1 点）"},
+    {"_ZN2nn3hid19GetTouchScreenStateILm1EEEvPNS0_16TouchScreenStateIXT_EEE", (void *)h_GetTouchOne, "hid；触屏状态（1 点）"},
     {"_ZN2nn3hid24ActivateTouchScreenInputEv", (void *)h_ActivateTouch, "hid；启用触屏输入"},
     {"_ZN2nn3hid19SetTouchScreenDefaultConfigurationEPKNS0_26TouchScreenConfigurationE", (void *)h_ActivateTouch, "hid；触屏配置（宿主忽略）"},
 };
