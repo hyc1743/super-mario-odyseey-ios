@@ -9,6 +9,12 @@
 
 static char g_lines[LOGBUF_LINES][LOGBUF_LINE];
 static unsigned g_head, g_n;
+static FILE *g_file;                  // 实时落盘（崩溃也留得下）
+
+void dm_log_set_file(const char *path) {
+    if (g_file) fclose(g_file);
+    g_file = path ? fopen(path, "w") : NULL;      // 每次启动新开（覆盖上一轮）
+}
 
 void dm_log_emit(const char *fmt, ...) {
     char *slot = g_lines[g_head];

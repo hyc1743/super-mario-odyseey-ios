@@ -266,6 +266,11 @@ static NSString *ScanDocuments(void) {
 
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)opts {
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    // 日志实时落盘到 Documents/SMO-log-live.txt（崩溃也留得下；导出按钮里也会带上）
+    NSString *liveLog = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject
+                          stringByAppendingPathComponent:@"SMO-log-live.txt"];
+    if (liveLog) dm_log_set_file(liveLog.UTF8String);
+
     self.window.rootViewController = [[SMOViewController alloc] init];
     [self.window makeKeyAndVisible];
     // 宿主引导放后台：不得阻塞主线程（引导 + 客体入口会一直跑）

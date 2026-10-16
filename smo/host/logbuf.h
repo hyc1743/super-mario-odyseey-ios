@@ -5,6 +5,10 @@
 #define SMO_LOGBUF_H
 #include <stddef.h>
 
+// 把日志同时追加写入该文件（App 启动时设为 Documents/SMO-log-live.txt）。
+// 真机上崩溃时环形缓冲会随进程消失，落盘的那份能留下来 —— 首轮排查靠它。
+void dm_log_set_file(const char *path);
+
 // 写入一条日志（dm.h 的 LOG 宏调它）。线程安全由调用方保证（目前单线程使用）。
 void dm_log_emit(const char *fmt, ...);
 
