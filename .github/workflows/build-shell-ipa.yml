@@ -247,7 +247,7 @@ jobs:
           make -C smo/host smo_host_embedded
           BOOT_ARGS=()
           if [ -n "${SMO_PRIVATE_TOKEN:-}" ]; then
-            curl -sS --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
+            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
               -H "Accept: application/vnd.github.raw+json" \
               "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-romfs.zip?ref=561002efeda1852a3e678b7fa7354554523d303b" \
               -o /tmp/boot-romfs.zip
