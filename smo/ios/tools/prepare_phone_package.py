@@ -14,12 +14,15 @@
 用法：
     prepare_phone_package.py [--rewrite work/rewrite] [--out out/smo-phone-package]
                              [--romfs work/game/RomFS]     # 给了就硬拷 RomFS（慢）
+                             [--pack-romfs]                # 不拷几千个小文件，打成 RomFS.smoa.0/.1 两卷
+                                                           # （App 首次启动自动展开，拷手机只有两个文件）
                              [--no-dylib]                  # 跳过 Guest.framework
                              [--guest-zip <路径>]           # 额外把 Guest.framework 压成 zip 并打印 sha256
                                                              #（上传到任意网盘/URL，供私有 fork 的 CI 注入）
 """
 import os
 import shutil
+import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +35,7 @@ def main():
     romfs = None
     no_dylib = False
     argv = sys.argv[1:]
+    pack_romfs = "--pack-romfs" in argv
     for i, a in enumerate(argv):
         if a == "--rewrite" and i + 1 < len(argv):
             rewrite = argv[i + 1]
@@ -90,9 +94,40 @@ def main():
         shutil.copy2(idx, exefs_out)
     print(f"② ExeFS（tsv × {2 * len(need)} + shaders.idx）→ {exefs_out}")
 
-    # ② RomFS：巨大，默认只写说明
+    # ② RomFS：巨大，默认只写说明；--pack-romfs 时打成卷（两个大文件）
     romfs_out = os.path.join(out, "②复制到手机", "RomFS")
-    if romfs and os.path.isdir(romfs):
+    if pack_romfs and romfs and os.path.isdir(romfs):
+        import zlib
+        files = []
+        for dp, _, fns in os.walk(romfs):
+            for fn in fns:
+                full = os.path.join(dp, fn)
+                files.append((os.path.relpath(full, romfs).replace(os.sep, "/"), full))
+        files.sort()
+        vol_limit = 3 * 1024 * 1024 * 1024
+        vols = [[]]                     # 每卷的条目列表
+        cur = 0
+        for rel, full in files:
+            sz = os.path.getsize(full)
+            if vols[-1] and cur + sz > vol_limit:
+                vols.append([])
+                cur = 0
+            vols[-1].append((rel, full))
+            cur += sz
+        if os.path.exists(romfs_out):
+            shutil.rmtree(romfs_out)
+        os.makedirs(romfs_out)
+        for vi, vol in enumerate(vols):
+            with open(os.path.join(romfs_out, f"RomFS.smoa.{vi}"), "wb") as vf:
+                vf.write(b"SMOA" + bytes([vi, len(vols)]))
+                for rel, full in vol:
+                    data = open(full, "rb").read()
+                    vf.write(struct.pack("<HII", len(rel.encode()), len(data), zlib.crc32(data) & 0xFFFFFFFF))
+                    vf.write(rel.encode())
+                    vf.write(data)
+                vf.write(b"END!")
+        print(f"② RomFS 打成 {len(vols)} 卷 → {romfs_out}（{len(files)} 个文件）")
+    elif romfs and os.path.isdir(romfs):
         if os.path.exists(romfs_out):
             shutil.rmtree(romfs_out)
         shutil.copytree(romfs, romfs_out)

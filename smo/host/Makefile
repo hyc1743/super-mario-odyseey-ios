@@ -88,6 +88,9 @@ $(SYNDIR)/sdk.patched.bin:
 # 代码段 RX / 可写段 RW 且真能写、门登记成功。iOS 真机路线就靠这条路，所以在 CI（macOS）上先证。
 EMBED_S = ../../work/embed_selftest.S
 EMBED_C = ../../work/embed_selftest.c
+smoarc_selftest: smoarc.c tests/smoarc_selftest.c smoarc.h
+	$(CC) $(CFLAGS) $(INC) -o $@ smoarc.c tests/smoarc_selftest.c
+
 applogic_selftest: logbuf.c romfs_resolve.c tests/applogic_selftest.c dm.h logbuf.h romfs_resolve.h
 	$(CC) $(CFLAGS) $(INC) -o $@ logbuf.c romfs_resolve.c tests/applogic_selftest.c
 
@@ -103,8 +106,9 @@ ifeq ($(UNAME_S),Darwin)
 TEST_EXTRA = embed_selftest
 endif
 
-test: $(TEST_EXTRA) applogic_selftest loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
+test: $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
 	./applogic_selftest
+	./smoarc_selftest
 	./loader_selftest $(SYNDIR) sdk main
 	./svc_selftest
 	./thread_selftest
@@ -131,6 +135,6 @@ run: smo_host
 	./smo_host work/rewrite rtld sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host embed_selftest applogic_selftest loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
+	rm -f smo_host embed_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
 
 .PHONY: test run equiv clean

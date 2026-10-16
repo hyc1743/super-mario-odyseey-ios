@@ -6,6 +6,7 @@
 #import <UIKit/UIKit.h>
 #include "logbuf.h"
 #include "romfs_resolve.h"
+#include "smoarc.h"
 #include "dm.h"
 #include "hle.h"
 #include "hle_thread.h"
@@ -20,6 +21,29 @@ static void RunHost(void) {
     if (!docs || !dm_exefs_path(ep, sizeof ep, docs.path.UTF8String)) {
         LOG("App：Documents 里没有 ExeFS —— 只显示状态页（把改写产物放进「文件」App 的 SMOMobile/ExeFS）");
         return;
+    }
+    // 首次运行：Documents 里没有 RomFS 目录、但有 RomFS.smoa.0 卷时，先展开（几千个小文件装在两个大文件里）
+    NSFileManager *fm2 = NSFileManager.defaultManager;
+    NSURL *docs2 = [fm2 URLForDirectory:NSDocumentDirectory inDomain:NSUserDomainMask
+                      appropriateForURL:nil create:NO error:nil];
+    if (docs2) {
+        NSString *romfsDir = [docs2.path stringByAppendingPathComponent:@"RomFS"];
+        BOOL isDir = NO;
+        if (![fm2 fileExistsAtPath:romfsDir isDirectory:&isDir] || !isDir) {
+            const char *vols[8];
+            unsigned nvols = 0;
+            for (int i = 0; i < 8; i++) {
+                NSString *v = [docs2.path stringByAppendingPathComponent:
+                               [NSString stringWithFormat:@"RomFS.smoa.%d", i]];
+                if (![fm2 fileExistsAtPath:v]) break;
+                vols[nvols++] = v.UTF8String;
+            }
+            if (nvols) {
+                LOG("首次运行：展开 RomFS 容器（%u 卷，几分钟）…", nvols);
+                int rc = smoarc_extract(docs2.path.UTF8String, vols, nvols);
+                LOG("展开结果：%d（0 = 成功）", rc);
+            }
+        }
     }
     LOG("== SMO 宿主（App 内）：从 %s 装载 ==", ep);
     host_thread_keys_create();

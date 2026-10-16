@@ -43,6 +43,7 @@ targets:
       - path: ../host/hle_nvn_reg.c
       - path: ../host/logbuf.c
       - path: ../host/romfs_resolve.c
+      - path: ../host/smoarc.c
       - path: ../host/entry.S
       # 图形层（宿主同一份；nvn_mtl.m 暂不进 App —— 图形层接上时再加）
       - path: ../gfx/nvn/hle_nvn.c
