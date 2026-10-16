@@ -9,16 +9,22 @@ CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
 # CORE = 除 main.c 以外的宿主全部源（自检目标复用；内嵌装载自检也要它）
-CORE = logbuf.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_hipc.c hle_sdkinit.c hle_vi.c hle_oe.c hle_pl.c hle_audio.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
-SRC = $(CORE) main.c
+CORE = logbuf.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_hipc.c hle_sdkinit.c hle_vi.c hle_oe.c hle_pl.c hle_audio.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+HOST_GPU_SRC =
+HOST_GPU_FLAGS =
+ifeq ($(shell uname -s),Darwin)
+HOST_GPU_SRC = ../gfx/nvn/nvn_metal_runtime.m
+HOST_GPU_FLAGS = -DSMO_METAL_RUNTIME=1 -fobjc-arc -framework Metal -framework Foundation
+endif
+SRC = $(CORE) main.c $(HOST_GPU_SRC)
 INC = -I. -I../gfx/nvn
 
 smo_host: $(SRC) dm.h hle.h
-	$(CC) $(CFLAGS) $(INC) -o $@ $(SRC) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(INC) $(HOST_GPU_FLAGS) -o $@ $(SRC) $(LDFLAGS)
 
 # Execute the exact embedded program used by the IPA, without the iOS UI.
 smo_host_embedded: $(SRC) ../ios/Sources/Embedded.S ../ios/Sources/Embedded.c
-	$(CC) $(CFLAGS) $(INC) -DSMO_EMBED -o $@ $^ \
+	$(CC) $(CFLAGS) $(INC) $(HOST_GPU_FLAGS) -DSMO_EMBED -o $@ $^ \
 	    -Wl,-segprot,__DMsdkW,rw,rw -Wl,-segprot,__DMsubsdk0W,rw,rw -Wl,-segprot,__DMmainW,rw,rw
 
 # 图形层单测的公共依赖。
@@ -29,7 +35,7 @@ smo_host_embedded: $(SRC) ../ios/Sources/Embedded.S ../ios/Sources/Embedded.c
 # CI 没发现是因为它绕过 Makefile、自己写 gcc 命令行 —— 现在 regress.sh 会跑 `make test`。
 # 结论：这一组文件是相互依赖的整体，就该只写一次。
 GFX_COMMON = ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c \
-             ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+             ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
 
 # NVN 图形层单测：接口层（按名取函数 + 命令记录）
 nvn_iface_selftest: $(GFX_COMMON) ../gfx/nvn/tests/nvn_selftest.c
@@ -38,6 +44,15 @@ nvn_iface_selftest: $(GFX_COMMON) ../gfx/nvn/tests/nvn_selftest.c
 # NVN 核心家族状态层单测（设备/池/缓冲/同步/采样器/程序）
 nvn_selftest: $(GFX_COMMON) ../gfx/nvn/tests/nvn_core_selftest.c
 	$(CC) $(CFLAGS) $(INC) -o $@ $^
+
+cmd_selftest: $(GFX_COMMON) ../gfx/nvn/tests/cmd_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
+
+queue_selftest: $(GFX_COMMON) ../gfx/nvn/tests/queue_selftest.c
+	$(CC) $(CFLAGS) $(INC) -o $@ $^
+
+metal_queue_selftest: $(GFX_COMMON) ../gfx/nvn/nvn_metal_runtime.m ../gfx/nvn/tests/metal_queue_selftest.c
+	$(CC) $(CFLAGS) $(INC) -DSMO_METAL_RUNTIME=1 -fobjc-arc -framework Metal -framework Foundation -o $@ $^
 
 # 着色器索引单测（合成自检；真实数据用命令行给索引与 blob）
 shader_selftest: $(GFX_COMMON) ../gfx/nvn/tests/shader_selftest.c
@@ -112,8 +127,8 @@ smoarc_selftest: smoarc.c tests/smoarc_selftest.c smoarc.h
 applogic_selftest: logbuf.c romfs_resolve.c tests/applogic_selftest.c dm.h logbuf.h romfs_resolve.h
 	$(CC) $(CFLAGS) $(INC) -o $@ logbuf.c romfs_resolve.c tests/applogic_selftest.c
 
-embed_selftest: $(CORE) tests/embed_selftest.c $(EMBED_S) $(EMBED_C)
-	$(CC) $(CFLAGS) $(INC) -DSMO_EMBED -o $@ $(CORE) $(EMBED_S) $(EMBED_C) tests/embed_selftest.c \
+embed_selftest: $(CORE) $(HOST_GPU_SRC) tests/embed_selftest.c $(EMBED_S) $(EMBED_C)
+	$(CC) $(CFLAGS) $(INC) $(HOST_GPU_FLAGS) -DSMO_EMBED -o $@ $(CORE) $(HOST_GPU_SRC) $(EMBED_S) $(EMBED_C) tests/embed_selftest.c \
 	      -Wl,-segprot,__DMsdkW,rw,rw
 
 $(EMBED_S): $(SYNDIR)/sdk.patched.bin ../ios/tools/gen_embed.py
@@ -124,7 +139,7 @@ ifeq ($(UNAME_S),Darwin)
 TEST_EXTRA = embed_selftest gate_stack_selftest
 endif
 
-test: $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
+test: cmd_selftest queue_selftest $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
 	./applogic_selftest
 	./smoarc_selftest
 	./loader_selftest $(SYNDIR) sdk main
@@ -138,6 +153,8 @@ test: $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selfte
 	./audio_selftest
 	./nvn_iface_selftest
 	./nvn_selftest
+	./cmd_selftest
+	./queue_selftest
 	./shader_selftest
 	./replay_selftest
 	./tex_selftest
@@ -158,7 +175,7 @@ run: smo_host
 	./smo_host work/rewrite sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host embed_selftest gate_stack_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
+	rm -f cmd_selftest queue_selftest smo_host embed_selftest gate_stack_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
 
 .PHONY: test run equiv clean
 

@@ -18,7 +18,9 @@ int main(void) {
     unsigned miss = 0, impl = 0;
     for (unsigned i = 0; i < g_nvn_table_n; i++) {
         if (!nvn_BootstrapLoader(g_nvn_table[i].name)) miss++;
-        if (g_nvn_table[i].fn != (nvn_fn)nvn_unimplemented) impl++;
+        /* Named fail-fast command diagnostics are not implementations. */
+        if (g_nvn_table[i].fn != (nvn_fn)nvn_unimplemented &&
+            !nvn_is_missing_command(g_nvn_table[i].fn)) impl++;
     }
     CHK(miss == 0, "每个名字都能按名取到函数地址");
     CHK(impl == g_nvn_impl_n, "已实现数与生成时登记的一致");

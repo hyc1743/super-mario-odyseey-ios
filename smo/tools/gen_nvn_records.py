@@ -10,6 +10,7 @@
 """
 import os
 import sys
+from gen_nvn import COMMAND_IMPLEMENTED, QUEUE_IMPLEMENTED
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NAMES = os.path.join(ROOT, "smo", "gfx", "nvn", "names.txt")
@@ -69,8 +70,8 @@ HEAD = """// 【自动生成，不要手改】由 smo/tools/gen_nvn_records.py �
 
 def main():
     names = [l.strip() for l in open(NAMES, encoding="utf-8") if l.strip() and not l.startswith("#")]
-    impl = sorted(n for n in names if any(n.startswith(p) for p in FAMILIES))
-    todo = [n for n in impl if n not in SKIP]
+    impl = sorted(n for n in names if any(n.startswith(p) for p in FAMILIES) or n in COMMAND_IMPLEMENTED)
+    todo = [n for n in impl if n not in SKIP and n not in COMMAND_IMPLEMENTED and n not in QUEUE_IMPLEMENTED]
     lines = [HEAD,
              "#define NVN_REC(name) uint64_t nvn_##name(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, \\",
              "    uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) { \\",

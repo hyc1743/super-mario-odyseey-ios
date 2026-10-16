@@ -31,12 +31,29 @@ IMPLEMENTED_FAMILIES = [
     "nvnProgram", "nvnTexture", "nvnSampler", "nvnQueue", "nvnEvent",
 ]
 
+# Command APIs are registered individually until the complete family exists.
+COMMAND_IMPLEMENTED = {"nvnCommandBuffer" + suffix for suffix in (
+    "Initialize", "Finalize", "SetMemoryCallback", "SetMemoryCallbackData",
+    "GetMemoryCallback", "GetMemoryCallbackData", "AddCommandMemory", "AddControlMemory",
+    "GetCommandMemorySize", "GetCommandMemoryUsed", "GetCommandMemoryFree",
+    "GetControlMemorySize", "GetControlMemoryUsed", "GetControlMemoryFree",
+    "BeginRecording", "EndRecording", "IsRecording", "CallCommands", "CopyCommands",
+    "CopyBufferToBuffer", "UpdateUniformBuffer", "ClearBuffer", "Barrier", "SetDebugLabel",
+)}
+QUEUE_IMPLEMENTED = {"nvnQueue" + suffix for suffix in (
+    "BuilderSetDefaults", "BuilderSetDevice", "BuilderSetFlags",
+    "BuilderSetCommandMemorySize", "BuilderSetControlMemorySize", "BuilderSetComputeMemorySize",
+    "BuilderSetCommandFlushThreshold", "BuilderSetQueueMemory", "BuilderGetQueueMemorySize",
+    "Initialize", "Finalize", "SubmitCommands", "Flush", "Finish", "FenceSync", "WaitSync",
+)}
+
 HEAD = """// 【自动生成，不要手改】由 smo/tools/gen_nvn.py 从 smo/gfx/nvn/names.txt 生成。
 //
 // 游戏通过 nvnBootstrapLoader(名字) 按名取接口；这张表就是「名字 → 宿主实现」。
 // 未实现的名字统一指向 nvn_unimplemented（首次调用打印一行、返回 0），
 // 真机日志里出现哪个名字就是下一批要补的。
 #include "nvn_host.h"
+#include "nvn_cmd.h"
 
 """
 
@@ -47,7 +64,7 @@ def main():
         line = line.strip()
         if line and not line.startswith("#"):
             names.append(line)
-    impl = {n for n in names if any(n.startswith(p) for p in IMPLEMENTED_FAMILIES)}
+    impl = {n for n in names if any(n.startswith(p) for p in IMPLEMENTED_FAMILIES)} | COMMAND_IMPLEMENTED
     missing = set()
     if missing:
         print(f"🔴 IMPLEMENTED 里有 {len(missing)} 个名字不在 names.txt 里：{sorted(missing)[:5]}")
@@ -56,6 +73,27 @@ def main():
     for n in sorted(impl):
         out.append(f"uint64_t nvn_{n[3:]}(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);")
     out.append("")
+    # Record named gaps, report the whole batch, and reject submission before commit.
+    missing_commands = sorted(n for n in names if n.startswith("nvnCommandBuffer") and n not in impl)
+    out.extend([
+        "#define NVN_MISSING_COMMAND(name) \\",
+        "static uint64_t missing_##name(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, \\",
+        "    uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) { \\",
+        "    uint64_t args[8] = {a0,a1,a2,a3,a4,a5,a6,a7}; \\",
+        '    return nvn_cmd_record_missing(#name,args); }',
+    ])
+    out.extend(f"NVN_MISSING_COMMAND({n})" for n in missing_commands)
+    out.extend(["#undef NVN_MISSING_COMMAND", ""])
+    out.append("static const nvn_fn missing_commands[] = {")
+    out.extend(f"    (nvn_fn)missing_{n}," for n in missing_commands)
+    out.extend([
+        "};",
+        "int nvn_is_missing_command(nvn_fn fn) {",
+        "    for (unsigned i=0; i<sizeof missing_commands/sizeof *missing_commands; ++i)",
+        "        if (missing_commands[i] == fn) return 1;",
+        "    return 0;",
+        "}", "",
+    ])
     out.append("// 未实现：打印一次名字（含调用次数），返回 0")
     out.append("uint64_t nvn_unimplemented(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7);")
     out.append("")
@@ -72,6 +110,8 @@ def main():
     for n in names:
         if n in impl:
             out.append(f'    {{"{n}", (nvn_fn)nvn_{n[3:]}}},')
+        elif n in missing_commands:
+            out.append(f'    {{"{n}", (nvn_fn)missing_{n}}},')
         else:
             out.append(f'    {{"{n}", (nvn_fn)nvn_unimplemented}},')
     out.append("};")

@@ -93,6 +93,22 @@ unsigned nvn_st_count(void) {
     pthread_mutex_unlock(&state_lock);
     return value;
 }
+int nvn_st_pool_range(uint64_t address, uint64_t size, uint64_t *base, uint64_t *length) {
+    int found = 0;
+    pthread_mutex_lock(&state_lock);
+    for (unsigned slot = 0; slot < capacity && !found; ++slot) {
+        for (state_node *n = buckets[slot]; n; n = n->next) {
+            nvn_st_ent *e = &n->entry;
+            if (e->type != 4 || !e->v[1] || address < e->v[1]) continue;
+            uint64_t offset = address - e->v[1];
+            if (offset <= e->v[2] && size <= e->v[2] - offset) {
+                *base = e->v[1]; *length = e->v[2]; found = 1; break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&state_lock);
+    return found;
+}
 unsigned nvn_st_reused(void) {
     pthread_mutex_lock(&state_lock);
     unsigned value = reused;

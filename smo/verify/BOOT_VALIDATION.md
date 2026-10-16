@@ -206,3 +206,18 @@ NVN command submission -> Metal execution -> completion/fence bridge, followed
 by window acquisition/presentation and rendering verification. No unconditional
 fence signal or dummy rendered frame was added. iOS hardware behavior and host
 speaker output remain unverified.
+
+The next implementation adds guest-memory-backed NVN command streams, stable
+ended handles, segment rollover through the guest's memory callback, deep
+CopyCommands and ordered CallCommands. Uniform update payloads are captured at
+record time. A runtime backend submits real Metal buffer clear/update/copy
+commands and ordered fence markers; SyncWait polls actual completion/error
+sequences. Missing commands are collected per submission and reject it before
+commit. Portable command/fence tests pass locally; the Metal hardware test and
+actual ARM64 startup must still run in CI. Rendering, swapchain presentation,
+image correctness and device stability are not proven by this change.
+
+The packaging gate now also requires real GPU submission/completion diagnostics
+and 60 GPU-completed frame presentations. QueuePresentTexture request counts
+alone cannot pass. The runtime does not emit that frame-completion marker yet;
+it must be attached to real rendering/presentation in the subsequent work.

@@ -27,5 +27,8 @@ unsigned    nvn_st_count(void);
 unsigned    nvn_st_reused(void);
 void        nvn_st_reset(void);
 void       *nvn_st_iter(unsigned i, uint32_t *type);
+/* Find a live memory pool containing a complete GPU address range. The caller
+ * must keep the pool alive until GPU completion, as required by NVN. */
+int nvn_st_pool_range(uint64_t address, uint64_t size, uint64_t *base, uint64_t *length);
 
 #endif

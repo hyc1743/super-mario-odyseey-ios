@@ -22,6 +22,7 @@ void nvn_set_log_handler(void (*handler)(const char *));
 enum { NVN_FALSE = 0, NVN_TRUE = 1 }; // NVNboolean is not an nn::Result.
 
 typedef uint64_t (*nvn_fn)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+int nvn_is_missing_command(nvn_fn fn);
 typedef struct { const char *name; nvn_fn fn; } nvn_ent;
 
 extern const nvn_ent g_nvn_table[];

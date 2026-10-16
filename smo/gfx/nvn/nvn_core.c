@@ -11,6 +11,7 @@
 // ------------------------------------------------------------------ 状态表（nvn_state.c）
 #include "nvn_state.h"
 #include "nvn_tex.h"
+#include "nvn_gpu.h"
 #include <time.h>
 
 // 宿主侧睡眠：轮询等待用。mingw 有 usleep，其他平台用 nanosleep。
@@ -479,17 +480,27 @@ static uint64_t sync_now_ns(void) {
     if (clock_gettime(CLOCK_MONOTONIC, &now)) NVN_DIE("SyncWait clock unavailable");
     return (uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec;
 }
+static int sync_poll(nvn_st_ent *e) {
+    if (__atomic_load_n(&e->v[SYNC_SIGNALED], __ATOMIC_ACQUIRE)) return 1;
+    uint64_t sequence = __atomic_load_n(&e->v[2], __ATOMIC_ACQUIRE);
+    if (!sequence) return 0;
+    return nvn_gpu_poll(sequence);
+}
 uint64_t nvn_SyncWait(uint64_t sync, uint64_t timeout_ns, uint64_t a2, uint64_t a3,
                       uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *e = need(ARG_OBJ(sync), NVN_T_SYNC, "SyncWait");
     if (!e) return 3;
-    if (__atomic_load_n(&e->v[SYNC_SIGNALED], __ATOMIC_ACQUIRE)) return 0;
+    int status = sync_poll(e);
+    if (status < 0) return 3;
+    if (status > 0) return 0;
     if (!timeout_ns) return 2;
     uint64_t start = sync_now_ns();
     int reported = 0;
     for (;;) {
-        if (__atomic_load_n(&e->v[SYNC_SIGNALED], __ATOMIC_ACQUIRE)) return 1;
+        status = sync_poll(e);
+        if (status < 0) return 3;
+        if (status > 0) return 1;
         uint64_t elapsed = sync_now_ns() - start;
         if (elapsed >= timeout_ns) return 2;
         if (!reported && elapsed >= UINT64_C(1000000000)) {

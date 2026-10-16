@@ -138,7 +138,7 @@ jobs:
             tail -15 /tmp/mtl.log | while IFS= read -r l; do echo "::error::[mtl] $l"; done
             exit 1
           fi
-          if ! xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -Ismo/host -o /tmp/mtl_replay_selftest smo/gfx/nvn/nvn_mtl.m               smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/nvn_tex.c smo/gfx/nvn/nvn_shader.c               smo/gfx/nvn/nvn_replay.c smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c               smo/gfx/nvn/tests/mtl_replay_selftest.c               > /tmp/mtl2_build.log 2>&1; then
+          if ! xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -Ismo/host -o /tmp/mtl_replay_selftest smo/gfx/nvn/nvn_mtl.m               smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/nvn_cmd.c smo/gfx/nvn/nvn_gpu.c smo/gfx/nvn/nvn_tex.c smo/gfx/nvn/nvn_shader.c               smo/gfx/nvn/nvn_replay.c smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c               smo/gfx/nvn/tests/mtl_replay_selftest.c               > /tmp/mtl2_build.log 2>&1; then
             echo "::error::[mtl 合龙 编译] 失败"
             tail -20 /tmp/mtl2_build.log | while IFS= read -r l; do echo "::error::[mtl 合龙 编译] $l"; done
             exit 1
@@ -154,7 +154,7 @@ jobs:
       - name: macOS：逐个 C 单测（每个失败立刻进注解，不依赖日志文件）
         run: |
           set -o pipefail
-          TARGETS="applogic_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest embed_selftest gate_stack_selftest"
+          TARGETS="cmd_selftest queue_selftest metal_queue_selftest applogic_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest embed_selftest gate_stack_selftest"
           if ! make -C smo/host $TARGETS PY=python3 > /tmp/build.log 2>&1; then
             echo "::error::[macOS] 单测编译/链接失败"
             tail -25 /tmp/build.log | while IFS= read -r l; do echo "::error::[macOS 编译] $l"; done

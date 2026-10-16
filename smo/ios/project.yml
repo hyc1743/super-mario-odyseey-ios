@@ -54,11 +54,14 @@ targets:
       - path: ../host/romfs_resolve.c
       - path: ../host/smoarc.c
       - path: ../host/entry.S
-      # 图形层（宿主同一份；nvn_mtl.m 暂不进 App —— 图形层接上时再加）
+      # Guest Metal submissions use nvn_metal_runtime.m; nvn_mtl.m is an offline probe.
       - path: ../gfx/nvn/hle_nvn.c
       - path: ../gfx/nvn/nvn_table.c
       - path: ../gfx/nvn/nvn_state.c
       - path: ../gfx/nvn/nvn_core.c
+      - path: ../gfx/nvn/nvn_cmd.c
+      - path: ../gfx/nvn/nvn_gpu.c
+      - path: ../gfx/nvn/nvn_metal_runtime.m
       - path: ../gfx/nvn/nvn_shader.c
       - path: ../gfx/nvn/nvn_replay.c
       - path: ../gfx/nvn/nvn_tex.c
@@ -66,6 +69,7 @@ targets:
       - path: ../gfx/nvn/nvn_texread.c
     settings:
       base:
+        GCC_PREPROCESSOR_DEFINITIONS: ["$(inherited)", "SMO_METAL_RUNTIME=1"]
         PRODUCT_BUNDLE_IDENTIFIER: com.example.smomobile
         PRODUCT_NAME: SMOMobile
         MARKETING_VERSION: "0.1.0"

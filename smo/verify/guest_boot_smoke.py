@@ -3,7 +3,9 @@
 
 This is a limited startup gate, not a rendering/gameplay test. A private RomFS
 fixture can be provided for startup resources. Time alone never counts
-as success: nnMain, a guest thread and 60 presentation requests are required.
+as success: nnMain, a guest thread, real GPU submission/completion and 60
+GPU-completed frame presentations are required. Request counts alone cannot
+prove that the GPU rendered or displayed a frame.
 """
 import argparse
 import json
@@ -51,13 +53,17 @@ def main():
         entry = "== 进入客体入口 nnMain" in data
         thread = "GUEST_THREAD_STARTED" in data
         frames = "GUEST_FRAME_PRESENT count=60" in data
+        gpu_submit = "NVN_GPU_SUBMITTED" in data
+        gpu_complete = "NVN_GPU_COMPLETED" in data
+        gpu_frames = "GUEST_GPU_FRAME_COMPLETED count=60" in data
         fatal = "FATAL" in data or "【红】" in data
-        passed = timed_out and entry and thread and frames and not fatal
-        result = dict(passed=passed, scope="nnMain + guest thread + 60 presentation requests; no rendering validation",
+        passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and not fatal
+        result = dict(passed=passed, scope="nnMain + guest thread + real GPU submit/completion + 60 GPU-completed frame presentations; image correctness still requires inspection",
                       romfs_fixture=bool(args.romfs),
                       seconds=args.seconds, timed_out=timed_out, exit_code=code,
                       entered_nnmain=entry, started_guest_thread=thread, presented_60_frames=frames, error_log=fatal,
                       fence_wait_observed="NVN_FENCE_WAIT" in data,
+                      gpu_submitted=gpu_submit, gpu_completed=gpu_complete, gpu_presented_60_frames=gpu_frames,
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))
         (args.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)
