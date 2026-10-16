@@ -74,3 +74,20 @@ iPhone and Switch use the same class of processor. Almost all of the Switch rele
 on an iPhone without changing a single byte, which is what makes smooth play possible; the PC release
 is built for a different kind of processor and cannot do that. The game data is not interchangeable
 either: textures, interface art and audio use different formats in the two releases.
+
+## 自签工具用户的更新流程（release IPA 直接可用）
+
+目标：release 产物就是**可直接自签安装的 IPA**（已含 Guest.framework），游戏资源固定在手机里，
+每次更新 = 下载 → 自签 → 覆盖安装。做法与参考项目 d2r-mobile-build 一致（私有 fork + 外部 URL 注入）：
+
+1. **建一个私有 fork**（GitHub → Fork → 设为 Private；公共仓不进游戏内容，注入只在你的私有仓发生）
+2. 本机生成 guest.zip 与校验值：
+   `python smo/ios/tools/prepare_phone_package.py --guest-zip out/guest.zip`
+3. 把 `out/guest.zip` 上传到任意有直链的地方（网盘 / 自有服务器 / IPFS）
+4. 私有 fork 的 Settings → Secrets and variables → Actions → **Variables**：
+   - `GUEST_URL` = guest.zip 的直链
+   - `GUEST_SHA256` = 脚本打印的 sha256（只有改写产物变了才需要重新生成与更新）
+5. 打 tag（如 v0.4.0）→ CI 下载校验注入 → **release 的 IPA 已含游戏程序** → 下载 → 你的自签工具签名 → 覆盖安装
+   （覆盖安装保留 App 沙盒：手机上的 ExeFS/RomFS 不用重拷；游戏资源固定不动）
+
+首跑仍需一次性：装 App（打开一次出现 SMOMobile 文件夹）→ 把 RomFS + ExeFS 拷进该文件夹。
