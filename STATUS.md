@@ -34,7 +34,7 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 若干卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0…5`（每卷 ≤1 GB，共 4636 文件）（第二十七轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.5.9 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.6.0 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -2144,3 +2144,29 @@ bss 对象。所以前几轮「构造函数用 TLS 就崩」的根因是：**SDK
 
 `host_boot()` 现在按上表逐步调用（每一步都打 `>>> 符号名` 日志，缺符号会红字点名），
 `SetHostArgc/Argv` 也给上（argv[0] = "SMO"）。
+
+## 2.118 真机第七崩：SDK 初始化真的跑起来了，崩在系统库的 abort（v0.6.0）
+
+v0.5.9 的六步 SDK 初始化生效后，日志第一次出现：
+
+```
+>>> _init_libc0
+>>> nnosInitialize(0x1001, 0)
+客体地址空间 0x7000000000 …（mem_init 打印：第一条 svc 进来）
+【崩溃】SIGABRT 地址 0x24cac31fc … ESR 0x56000080（BRK）
+PC 附近指令字 … 0xd4001001[0xd2802910] …（mov x16,#0x148; brk）
+```
+
+即：`nnosInitialize` 跑到了第一条 svc，然后**在系统库里 abort**（PC 在 dyld 共享缓存，不是任何客体映像）。
+
+关键判断依据：`die()` 是 `LOG("FATAL …"); abort();` —— **会写日志**，而日志里没有 FATAL 行，
+所以不是我们自己的 die；系统库的 abort 消息默认只走 stderr，真机上没有终端就丢了。
+
+v0.6.0 补三样诊断：
+- `svc_dispatch` 把前 120 条 svc 调用（号 + 前 5 个参数）写进日志 —— 崩在某条 svc 上时能指出是哪一条
+- `main.m` 启动时把 **stderr 重定向到 `Documents/SMO-stderr.txt`**：libsystem / malloc / musl 的
+  断言消息从此留得下（这是系统库 abort 唯一可得的文本证据）
+- 卷读不了时 `HexHead` 打印具体原因（而不是空字符串）
+
+顺带：卷那件事仍未解决 —— 日志显示 6 个卷**字节数完全正确**但「头」读不出来且展开时第 1 条 CRC 不符，
+说明打开 App 那一刻文件还读不到内容（拷贝/下载没真正落盘）。等拷贝彻底结束再开 App。

@@ -87,6 +87,18 @@ enum { MS_FREE = 0, MS_CODE = 3, MS_HEAP = 5, MS_STACK = 0xB };
 
 int svc_dispatch(unsigned num, uint64_t *regs) {
     mem_init();
+    // 每条 svc 都记进日志（前 120 条）：崩在某条 svc 上时，这是唯一能指出「哪一条」的线索。
+    // 真机第七崩（SIGABRT 在系统库里）就是靠这个下一轮定位的。
+    {
+        static unsigned logged;
+        if (logged < 120) {
+            logged++;
+            LOG("svc #%u(%#llx, %#llx, %#llx, %#llx, %#llx)", num,
+                (unsigned long long)regs[0], (unsigned long long)regs[1],
+                (unsigned long long)regs[2], (unsigned long long)regs[3],
+                (unsigned long long)regs[4]);
+        }
+    }
     if (svc_thread((int)num, regs)) return 0;
     switch (num) {
     case 0x01: {                                        // SetHeapSize(out_addr*, size)

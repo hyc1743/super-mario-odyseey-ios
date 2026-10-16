@@ -36,8 +36,13 @@ static void PackProgress(void *user, unsigned done, const char *name) {
 
 // 文件头若干字节的十六进制（拷坏时靠它对照：正确的大小与头字节写在 STATUS/说明里）
 static NSString *HexHead(NSString *path, NSUInteger n) {
+    NSError *err = nil;
     NSFileHandle *h = [NSFileHandle fileHandleForReadingAtPath:path];
-    if (!h) return @"（打不开）";
+    if (!h) {
+        NSDictionary *at = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:&err];
+        (void)at;
+        return [NSString stringWithFormat:@"（读不了：%@）", err.localizedDescription ?: @"原因不明"];
+    }
     NSData *d = [h readDataOfLength:n];
     [h closeFile];
     NSMutableString *s = [NSMutableString string];
@@ -334,6 +339,13 @@ static NSString *ScanDocuments(void) {
     NSString *liveLog = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject
                           stringByAppendingPathComponent:@"SMO-log-live.txt"];
     if (liveLog) dm_log_set_file(liveLog.UTF8String);
+    // 系统级 stderr 单独落一个文件：libsystem / malloc / musl 的断言消息默认只走 stderr，
+    // 真机上没有终端就永远看不到（真机第七崩的 SIGABRT 就是系统库发的，消息丢了）。
+    if (liveLog) {
+        NSString *errPath = [liveLog.stringByDeletingLastPathComponent
+                             stringByAppendingPathComponent:@"SMO-stderr.txt"];
+        if (errPath) freopen(errPath.UTF8String, "w", stderr);
+    }
     dm_crash_install();             // 崩溃也留现场（信号 + PC/LR + 帧链 → SMO-log-live.txt）
 
     self.window.rootViewController = [[SMOViewController alloc] init];
