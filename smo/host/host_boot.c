@@ -49,6 +49,7 @@ static void call2(const char *name, uint64_t a, uint64_t b) {
 }
 
 void *host_boot(const char *dir, const char *const *mods, unsigned nmods, const char *entry) {
+    dm_progress_stage(3, 6, "装载游戏程序（3 个模块）");
     host_thread_keys_create();
     load_modules(dir, mods, nmods);
 
@@ -67,11 +68,13 @@ void *host_boot(const char *dir, const char *const *mods, unsigned nmods, const 
     }
 
     // 主线程登记（句柄之后交给 SDK 的 nn::os；真机上 SDK 会拿它当主线程）—— **必须早于 run_module_inits**
+    dm_progress_stage(4, 6, "建立线程环境");
     uint32_t main_h = svc_thread_main_init();
     dm_boot_mark(1);
     LOG("主线程句柄 %#x", main_h);
     if (!svc_thread_main_ready()) {
         LOG("【红】主线程登记没生效（pthread_setspecific 失败？）—— 继续下去客体构造函数会崩");
+        dm_progress_finish(DM_RUN_FAIL, "线程环境没建起来");
         return NULL;
     }
 
@@ -87,6 +90,8 @@ void *host_boot(const char *dir, const char *const *mods, unsigned nmods, const 
     //   → nninitInitializeSdkModule → nninitStartup（游戏分配器 InitializeAllocator）→ _init_libc2
     // 这几步必须在模块 DT_INIT 之前：模块构造函数一上来就要用 nn::os 的 TLS，
     // 而 nnosInitialize 正是构造 g_OsResourceManagerStorage 的地方（真机第五/第六崩就缺它）。
+    dm_progress_stage(5, 6, "初始化游戏运行库（SDK）");
+    dm_progress_frac(0, "nn::init 六步");
     call0("_init_libc0");
     call2("nnosInitialize", main_h, 0);
     call0("_init_libc1");
@@ -95,6 +100,7 @@ void *host_boot(const char *dir, const char *const *mods, unsigned nmods, const 
     call0("_init_libc2");
 
     // 扮演 rtld 的 InitModules：按装载顺序调各模块 DT_INIT（模块自己的 init_array 在 _init 里跑）
+    dm_progress_frac(0.6, "模块构造函数");
     run_module_inits();
 
     // 游戏参数：真机由 nn::init 从进程参数区取，这里只给一个 argv[0]（SMO 不需要别的参数）
@@ -108,6 +114,7 @@ void *host_boot(const char *dir, const char *const *mods, unsigned nmods, const 
     void *fn = guest_sym(entry);
     if (!fn) {
         LOG("【红】找不到入口符号 %s", entry);
+        dm_progress_finish(DM_RUN_FAIL, "找不到游戏入口");
         return NULL;
     }
     module_t *m = module_of(fn);
@@ -115,5 +122,6 @@ void *host_boot(const char *dir, const char *const *mods, unsigned nmods, const 
         m ? (size_t)((const uint8_t *)fn - m->base) : 0);
 
     // （客体线程环境已在上面建好；跳到入口即可）
+    dm_progress_stage(6, 6, "运行游戏");
     return fn;
 }

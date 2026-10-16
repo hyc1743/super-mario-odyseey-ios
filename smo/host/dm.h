@@ -17,7 +17,8 @@
 // 全量写 stderr + 环形缓冲（logbuf.c）：真机没有终端，App 把缓冲显示在屏幕上
 void dm_log_emit(const char *fmt, ...);
 #define LOG(...) do { dm_log_emit(__VA_ARGS__); } while (0)
-#define die(...) do { LOG("FATAL " __VA_ARGS__); abort(); } while (0)
+void dm_progress_fatal(void);      // logbuf.c：把进度条标成「停下」（die/崩溃都走它）
+#define die(...) do { LOG("FATAL " __VA_ARGS__); dm_progress_fatal(); abort(); } while (0)
 
 typedef struct { uint32_t st_name; uint8_t st_info, st_other; uint16_t st_shndx; uint64_t st_value, st_size; } Elf64_Sym;
 typedef struct { int64_t d_tag; union { uint64_t d_val, d_ptr; } d_un; } Elf64_Dyn;

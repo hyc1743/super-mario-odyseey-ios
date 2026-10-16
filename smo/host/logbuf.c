@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #ifdef _WIN32
 #include <io.h>
 #else
@@ -27,6 +28,22 @@ static size_t utf8_trim(const char *s, size_t n) {
     }
     return n;
 }
+
+// 自启动以来的秒数：落盘的那份日志每行带时间戳（导出给人看时要知道「卡在哪一步卡了多久」）
+static double now_s(void) {
+    struct timespec ts;
+    timespec_get(&ts, TIME_UTC);
+    return (double)ts.tv_sec + ts.tv_nsec / 1e9;
+}
+static double g_t0;
+static double elapsed_s(void) {
+    if (g_t0 == 0) g_t0 = now_s();
+    return now_s() - g_t0;
+}
+
+// 进度状态。写方是宿主后台线程、读方是 UI 主线程：不加锁 —— 最坏情况是 UI 读到半句说明，
+// 下一秒就刷新掉；字符串都在固定缓冲里且以 0 结尾（UI 侧对非法 UTF-8 有兜底），不会越界。
+static dm_progress_t g_prog = { .frac = -1 };
 
 static char g_lines[LOGBUF_LINES][LOGBUF_LINE];
 static unsigned g_head, g_n;
@@ -57,10 +74,13 @@ void dm_log_emit(const char *fmt, ...) {
     slot[LOGBUF_LINE - 1] = 0;
     slot[utf8_trim(slot, strlen(slot))] = 0;      // 截断时别留下半个汉字
     fprintf(stderr, "[smo] %s\n", slot);
+    if (strstr(slot, "【红】")) g_prog.red++;
+    g_prog.lines++;
+    g_prog.last_log = elapsed_s();
     // 真机崩溃时环形缓冲会随进程消失 —— 每行同时写盘并 flush，崩溃后文件里一定留得下尾部。
     // （上一版这里只 fopen 没写过：所谓「实时落盘」是空的，第一次真机排查才发现。）
     if (g_file) {
-        fprintf(g_file, "%s\n", slot);
+        fprintf(g_file, "[%8.3f] %s\n", elapsed_s(), slot);   // 文件里带时间戳；屏上不带（省地方）
         fflush(g_file);
     }
     g_head = (g_head + 1) % LOGBUF_LINES;
@@ -88,3 +108,42 @@ size_t dm_log_dump(char *out, size_t cap) {
 
 unsigned dm_log_lines(void) { return g_n; }
 void dm_log_clear(void) { g_head = 0; g_n = 0; }
+
+// ---- 运行进度 ----
+static void copy_utf8(char *dst, size_t cap, const char *src) {
+    snprintf(dst, cap, "%s", src ? src : "");
+    dst[utf8_trim(dst, strlen(dst))] = 0;          // 截断处别留半个汉字（UI 侧 NSString 会给 nil）
+}
+
+void dm_progress_stage(int step, int steps, const char *name) {
+    g_prog.step = step;
+    g_prog.steps = steps;
+    g_prog.frac = -1;
+    g_prog.detail[0] = 0;
+    copy_utf8(g_prog.name, sizeof g_prog.name, name);
+    dm_log_emit("== 第 %d/%d 步：%s ==", step, steps, g_prog.name);   // 导出的日志里也看得到分段
+}
+
+void dm_progress_frac(double frac, const char *detail) {
+    g_prog.frac = frac > 1 ? 1 : frac;
+    if (detail) copy_utf8(g_prog.detail, sizeof g_prog.detail, detail);
+}
+
+void dm_progress_finish(dm_run_state st, const char *msg) {
+    // FAIL 一旦报出就不被后面的 WAIT 盖掉：先出错再「走到头」时，用户该看到的是出错
+    if (g_prog.state == DM_RUN_FAIL && st != DM_RUN_FAIL) return;
+    g_prog.state = st;
+    if (st == DM_RUN_WAIT) g_prog.frac = 1;
+    copy_utf8(g_prog.msg, sizeof g_prog.msg, msg);
+    dm_log_emit("%s %s", st == DM_RUN_FAIL ? "【红】【停下】" : "【到头】", g_prog.msg);
+}
+
+void dm_progress_fatal(void) { g_prog.state = DM_RUN_FAIL; }
+
+void dm_progress_get(dm_progress_t *out) {
+    if (!out) return;
+    *out = g_prog;
+    if (out->state == DM_RUN_FAIL && !out->msg[0])
+        snprintf(out->msg, sizeof out->msg, "程序在「%s」这一步崩了", out->name[0] ? out->name : "启动");
+    out->elapsed = elapsed_s();
+}

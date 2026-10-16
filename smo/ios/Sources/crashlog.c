@@ -97,6 +97,8 @@ static void CrashHandler(int sig, siginfo_t *info, void *uctx) {
     }
     dm_log_raw("（进程马上会被系统收走）\n");
 
+    dm_progress_fatal();                       // 来得及的话，屏上进度条变红
+
     // 还原默认处理并重发，保持系统的崩溃上报行为（设置 → 分析数据 里照样有 .ips）
     signal(sig, SIG_DFL);
     raise(sig);

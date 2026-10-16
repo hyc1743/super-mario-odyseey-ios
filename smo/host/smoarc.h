@@ -35,6 +35,9 @@ int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
 // 而且能一次数清「4636 条里坏了几条、第一条是哪个」，不用靠猜。
 int smoarc_verify_cb(const char *const *volumes, unsigned n, smoarc_progress_fn cb, void *user);
 
+// 已处理的数据字节数（展开/校验中实时增长；进度条用：除以各卷大小之和）。
+unsigned long long smoarc_bytes_done(void);
+
 // 卷组规划：在 docs 下找 RomFS.smoa.0 卷，返回卷数（0 = 没找到）。
 // 认三种形状（前两种是历史布局，第三种是 prepare_phone_package.py 打的包的形状）：
 //   docs/RomFS.smoa.N                 → target = docs/RomFS

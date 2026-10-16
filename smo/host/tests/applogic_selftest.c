@@ -94,6 +94,44 @@ int main(void) {
         dm_log_clear();
     }
 
+    // 进度接口：App 首屏的进度条与「该不该导出日志」提示全靠它
+    {
+        dm_log_clear();
+        dm_progress_t p;
+        dm_progress_get(&p);
+        CHK(p.state == DM_RUN_BUSY && p.steps == 0 && p.frac < 0, "初始：进行中、无步骤、进度不确定");
+        unsigned l0 = p.lines;
+        dm_progress_stage(2, 6, "解开资源");
+        dm_progress_frac(0.5, "1.0 / 2.0 GB");
+        dm_progress_get(&p);
+        CHK(p.step == 2 && p.steps == 6 && !strcmp(p.name, "解开资源"), "步号/步名记下了");
+        CHK(p.frac > 0.49 && p.frac < 0.51 && !strcmp(p.detail, "1.0 / 2.0 GB"), "本步进度与说明");
+        CHK(p.lines == l0 + 1, "进入新步骤会写一行日志（导出的日志里能看到分段）");
+        dm_progress_frac(3.0, NULL);
+        dm_progress_get(&p);
+        CHK(p.frac <= 1.0 && !strcmp(p.detail, "1.0 / 2.0 GB"), "进度封顶 1；说明传 NULL 不清掉");
+        dm_progress_stage(3, 6, "装载");
+        dm_progress_get(&p);
+        CHK(p.frac < 0 && p.detail[0] == 0, "换步骤：进度与说明归零");
+        unsigned r0 = p.red;
+        dm_progress_finish(DM_RUN_FAIL, "解开资源失败");
+        dm_progress_finish(DM_RUN_WAIT, "走到头");
+        dm_progress_get(&p);
+        CHK(p.state == DM_RUN_FAIL && !strcmp(p.msg, "解开资源失败"), "出错后不会被「走到头」盖掉");
+        CHK(p.red == r0 + 1, "出错那行算一条红色告警");
+        // 长中文说明：截断处必须是合法 UTF-8（UI 侧 NSString 拿到半个汉字会是 nil）
+        char big[600];
+        size_t o = 0;
+        for (int i = 0; i < 150 && o + 4 < sizeof big; i++) {
+            big[o++] = (char)0xE6; big[o++] = (char)0xB1; big[o++] = (char)0x89;
+        }
+        big[o] = 0;
+        dm_progress_frac(0.1, big);
+        dm_progress_get(&p);
+        CHK(utf8_ok(p.detail, strlen(p.detail)) && strlen(p.detail) > 100, "长说明截断在 UTF-8 边界上");
+        dm_log_clear();
+    }
+
     printf("== 2. RomFS / ExeFS 路径解析 ==\n");
     const char *root = "/tmp/smo_applogic_test";
     SMO_RMDIR(root);

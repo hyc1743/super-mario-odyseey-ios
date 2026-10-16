@@ -64,6 +64,8 @@ static int mkdirs(char *path) {
 
 // 失败原因：真机上只有一个「-2」时，分不清空间不够还是卷不完整（用户第一次展开就遇到这个）
 static char g_err[512];
+static volatile unsigned long long g_bytes;   // 已处理的数据字节，UI 线程读（进度条）
+unsigned long long smoarc_bytes_done(void) { return g_bytes; }
 const char *smoarc_error(void) { return g_err[0] ? g_err : "（没有错误）"; }
 static int fail(int code, const char *msg, const char *detail) {
     // 精度限死 380：详情可能是几千字节的路径，不限 gcc 会报 -Wformat-truncation（当错误）
@@ -75,6 +77,8 @@ static int fail(int code, const char *msg, const char *detail) {
 int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
                       smoarc_progress_fn cb, void *user) {
     char name[4096], full[8192];
+    g_bytes = 0;
+    crc_init();   // 下面直接查 crc_table：不先建表就是全 0 表，每条都「CRC 不符」（真机 v0.6.2 卷 0 第一条就挂）
     g_err[0] = 0;
     unsigned long long total = 0;
     unsigned done = 0;
@@ -133,6 +137,7 @@ int smoarc_extract_cb(const char *dir, const char *const *volumes, unsigned n,
                     return fail(-2, "写文件失败（空间不够？）", full);
                 }
                 left -= (unsigned)r;
+                g_bytes += r;
             }
             if (ferror(o) || fflush(o) != 0) {
                 fclose(o); fclose(f);
@@ -169,6 +174,8 @@ int smoarc_verify_cb(const char *const *volumes, unsigned n, smoarc_progress_fn 
     char name[4096];
     static uint8_t buf[1 << 16];
     unsigned done = 0, bad = 0;
+    g_bytes = 0;
+    crc_init();   // 同上：没建表时 4636 条全报坏
     g_err[0] = 0;
     for (unsigned v = 0; v < n; v++) {
         FILE *f = fopen(volumes[v], "rb");
@@ -200,6 +207,7 @@ int smoarc_verify_cb(const char *const *volumes, unsigned n, smoarc_progress_fn 
                 if (r == 0) { fclose(f); return fail(-1, "读卷没读到数据（卷被截断？）", name); }
                 for (size_t i = 0; i < r; i++) c = crc_table[(c ^ buf[i]) & 0xFF] ^ (c >> 8);
                 left -= (unsigned)r;
+                g_bytes += r;
             }
             if (crc != (int)~c) {
                 bad++;

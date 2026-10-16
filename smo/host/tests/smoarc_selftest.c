@@ -13,10 +13,19 @@
 static int fails;
 #define CHK(cond, msg) do { int _ok = (cond); printf("  %s %s\n", _ok ? "✅" : "【红】", msg); fflush(stdout); if (!_ok) fails++; } while (0)
 
-extern uint32_t crc_buf(const void *p, size_t n);   // 来自 smoarc.c（测试自己构造卷，共用同一份算法）
+// 测试自己的 CRC32（逐位算，不查表）。**不能**借用 smoarc.c 的 crc_buf：它会顺手把查表建好，
+// 而展开器自己忘了建表的 bug（真机 v0.6.2：4636 条全「CRC 不符」）就被掩盖了。
+static uint32_t ref_crc(const uint8_t *b, size_t n) {
+    uint32_t c = 0xFFFFFFFFu;
+    for (size_t i = 0; i < n; i++) {
+        c ^= b[i];
+        for (int k = 0; k < 8; k++) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+    }
+    return ~c;
+}
 
 static void put(FILE *f, const char *name, const uint8_t *data, size_t n) {
-    uint32_t c = crc_buf(data, n);
+    uint32_t c = ref_crc(data, n);
     uint16_t nl16 = (uint16_t)strlen(name);
     fwrite(&nl16, 2, 1, f);
     uint32_t sz = (uint32_t)n, crc = c;
