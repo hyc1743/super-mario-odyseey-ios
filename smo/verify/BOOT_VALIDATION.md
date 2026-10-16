@@ -77,3 +77,11 @@ Noto Sans Symbols 2，逐文件校验 SHA256，并随 App 附带 OFL 许可证�
 同时实现 MemoryPoolGetBufferAddress 的真实存储地址；ProgramSetShaders 按阶段数复制
 最多 6 个 shaderData 描述符，而非把数组当有长度的控制段。回放层不再扫描没有长度证据的
 control 指针，着色器控制结构的完整翻译仍未完成。尚未验证画面或可玩性。
+
+云端运行 `38939008710` 已实际加载 JP/SC/TC/KR/Symbols 开源字体，越过字体初始化，
+随后在音频初始化主动 svcBreak（退出 42）。日志确认 InitializeAudioRendererParameter 和
+IsValidAudioRendererParameter 仍被错误接到通用零返回桩。静态检查 SDK+0x173550 起的
+实现后，保留 4 个参数/配置本地函数；音频服务边界继续由宿主接管。增加回归断言，
+防止配置函数再被覆盖，同时保持 GetAudioRendererWorkBufferSize 的服务接管。
+LLDB 重放在 svcBreak 分派前条件断点，避免正常退出导致丢失调用栈。
+本地快速回归 7/7 通过；后续启动是否推进以新的云端结果为准。

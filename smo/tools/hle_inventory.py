@@ -68,6 +68,16 @@ LOCAL_SDK_FLAGS = {
     "_ZN2nn2fs29SetResultHandledByApplicationEb",
 }
 
+# Verified SDK+0x173550..0x173cdc: parameter validation, configuration sizing
+# and construction operate on caller memory. They do not contact audren.
+# Keep the service-facing work-buffer query/Open/RequestUpdate intercepted.
+LOCAL_AUDIO_CONFIG = {
+    "_ZN2nn5audio32InitializeAudioRendererParameterEPNS0_22AudioRendererParameterE",
+    "_ZN2nn5audio29IsValidAudioRendererParameterERKNS0_22AudioRendererParameterE",
+    "_ZN2nn5audio36GetAudioRendererConfigWorkBufferSizeERKNS0_22AudioRendererParameterE",
+    "_ZN2nn5audio29InitializeAudioRendererConfigEPNS0_19AudioRendererConfigERKNS0_22AudioRendererParameterEPvm",
+}
+
 
 def family_of(sym):
     """抽「顶层命名空间」：改编名第一个嵌套名组件（`_ZN2nn…` → nn、`_ZN2nv…` → nv、
@@ -128,7 +138,7 @@ def load_modules(exefs):
 
 def verdict(sym, provided_by):
     fam = family_of(sym)
-    if sym in LOCAL_SF_SYMBOLS | LOCAL_SDK_FLAGS and provided_by:
+    if sym in LOCAL_SF_SYMBOLS | LOCAL_SDK_FLAGS | LOCAL_AUDIO_CONFIG and provided_by:
         return "模块内", fam
     # 非 nn 命名空间：这几个是实测查出来的，列出来因为它们不是「服务客户端」那套
     if fam == "nv":

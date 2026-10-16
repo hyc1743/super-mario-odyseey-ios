@@ -74,7 +74,11 @@ def main():
                        "expression -f x -- (unsigned long long)g_mod[0].base",
                        "expression -f x -- (unsigned long long)g_mod[1].base",
                        "expression -f x -- (unsigned long long)g_mod[2].base"]
-            commands = ["xcrun", "lldb", "-b", "-o", interrupt, "-o", "run"]
+            # svcBreak exits with code 42, so LLDB's crash commands never run.
+            # Stop before that exit to retain guest registers and call stacks.
+            commands = ["xcrun", "lldb", "-b", "-o", interrupt,
+                        "-o", "breakpoint set -n svc_dispatch -c 'num == 0x26'",
+                        "-o", "run"]
             for flag in ("-o", "-k"):
                 for command in inspect:
                     commands.extend([flag, command])

@@ -250,6 +250,14 @@ def test_hle_policy():
     for sym in hle_inventory.LOCAL_SDK_FLAGS:
         check("SDK 本地 fs 开关保留：" + sym,
               hle_inventory.verdict(sym, ["sdk"]) == ("模块内", "fs") and sym not in forced)
+    for sym in hle_inventory.LOCAL_AUDIO_CONFIG:
+        check("SDK local audio config remains executable: " + sym,
+              hle_inventory.verdict(sym, ["sdk"]) == ("模块内", "audio")
+              and sym not in forced
+              and any(len(r) == 5 and r[1] == sym and r[3:] == ["sdk", "模块内"]
+                      for r in inventory))
+    check("audio renderer service boundary remains intercepted",
+          "_ZN2nn5audio30GetAudioRendererWorkBufferSizeERKNS0_22AudioRendererParameterE" in forced)
     for sym in gen_hle_force.SDK_STARTUP:
         check("SDK 内部初始化入口明确接管：" + sym, sym in forced and sym in generated)
     # 服务接管仍必须保留，不能通过关闭整个 HLE 表来修复本地库。
