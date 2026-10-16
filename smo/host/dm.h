@@ -124,6 +124,8 @@ uint64_t dm_guest_heap_cur(void);
 int dm_guest_heap_rejects(void);
 void host_thread_keys_create(void);
 void guest_thread_init(void);
+void *dm_gate_stack(const void *frame);
+void dm_set_gate_stack(void *native_sp);
 // 引导顺序的**唯一**入口（loader_core.c）：建键 → 装载 → 主线程登记 → 模块 inits → 找入口 → 客体线程环境。
 // CLI 宿主与 iOS App 都调它 —— 顺序写两份就会漂移（真机首跑实测：App 里 inits 排在主线程登记前面，必崩）。
 // 成功返回入口函数指针；失败（找不到符号）返回 NULL。

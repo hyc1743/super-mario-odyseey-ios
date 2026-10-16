@@ -12,3 +12,4 @@ uint64_t dm_guest_clock(void);
 // 服务层的 SystemEvent：在客体线程上绑定 SDK 的系统事件，之后宿主任何线程都能触发
 void hle_bind_system_event(void *ev);
 void hle_signal_system_event(void *ev);
+void hle_forget_system_event(void *ev);       // Stop service delivery; caller owns/destroys the SDK event.

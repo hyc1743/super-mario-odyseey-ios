@@ -90,6 +90,9 @@ pl_selftest: hle_pl.c hle.c hle_force_gen.c tests/pl_selftest.c dm.h hle.h
 audio_selftest: hle_audio.c hle.c hle_force_gen.c tests/audio_selftest.c dm.h hle.h
 	$(CC) $(CFLAGS) -I. -o $@ logbuf.c hle_audio.c hle.c hle_force_gen.c tests/audio_selftest.c
 
+gate_stack_selftest: thread.c entry.S logbuf.c tests/gate_stack_selftest.c tests/gate_stack_probe.S dm.h
+	$(CC) $(CFLAGS) -I. -o $@ thread.c entry.S logbuf.c tests/gate_stack_selftest.c tests/gate_stack_probe.S
+
 # 合成改写产物：装载器自检用。真产物是游戏内容，不能进 CI，所以自己造一份。
 # 路径是仓库根下的 work/synthetic（make 在 smo/host 里跑，所以要 ../..）。
 PY     ?= python3
@@ -118,7 +121,7 @@ $(EMBED_S): $(SYNDIR)/sdk.patched.bin ../ios/tools/gen_embed.py
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
-TEST_EXTRA = embed_selftest
+TEST_EXTRA = embed_selftest gate_stack_selftest
 endif
 
 test: $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
@@ -142,6 +145,7 @@ test: $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selfte
 	./texread_selftest
 ifeq ($(UNAME_S),Darwin)
 	./embed_selftest $(SYNDIR)/sdk.patched.bin
+	./gate_stack_selftest
 endif
 
 # 改写前后动态等价性校验（Unicorn；需要 work/rewrite 里有真实产物，所以不进 CI）
@@ -154,7 +158,7 @@ run: smo_host
 	./smo_host work/rewrite sdk subsdk0 main --list
 
 clean:
-	rm -f smo_host embed_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
+	rm -f smo_host embed_selftest gate_stack_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
 
 .PHONY: test run equiv clean
 

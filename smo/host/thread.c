@@ -90,7 +90,7 @@ void guest_thread_init(void) {
     pthread_setspecific(g_keyaspectui, (void *)0);
     // TLS 块与 TLR（+ 当前线程对象）并成一块申请，原始指针记在自己的键上，析构里释放。
     // 不能按键里的当前值 free：客体会改写这两把键指向的槽（它自己设线程指针）。
-    void **own = calloc(2, sizeof *own);
+    void **own = calloc(5, sizeof *own);
     uint8_t *tlr = calloc(1, TLR_SIZE + THREAD_OBJ_SIZE);
     own[0] = calloc(1, TLS_SIZE);
     own[1] = tlr;
@@ -98,4 +98,30 @@ void guest_thread_init(void) {
     pthread_setspecific(g_keytls, own[0]);
     pthread_setspecific(g_keytlr, tlr);
     pthread_setspecific(g_keyown, own);
+    // Record the native stack bounds. dm_thread_enter records a point below
+    // its live pthread frames before entering a guest stack. Host services
+    // can exceed a Horizon thread's 4 KiB allocation.
+    // Reuse this thread's real native stack; no heap stack is freed underneath
+    // pthread_exit's cleanup machinery.
+    own[4] = dm_host_stack_top();
+    own[3] = (uint8_t *)own[4] - dm_host_stack_size();
+}
+
+void dm_set_gate_stack(void *native_sp) {
+    void **own = pthread_getspecific(g_keyown);
+    if (!own || (uintptr_t)native_sp < (uintptr_t)own[3] ||
+        (uintptr_t)native_sp >= (uintptr_t)own[4]) die("Invalid native gate stack");
+    own[2] = native_sp;
+}
+
+// Called only after dm_gate has saved every guest register. Nested gates from
+// SDK calls made by a host service already run on the native stack and must
+// retain their current SP instead of overwriting the outer service frame.
+void *dm_gate_stack(const void *frame) {
+    void **own = pthread_getspecific(g_keyown);
+    if (!own) return NULL;
+    uintptr_t sp = (uintptr_t)frame;
+    if (sp >= (uintptr_t)own[3] && sp < (uintptr_t)own[4]) return NULL;
+    if (!own[2]) die("Missing native gate stack before guest thread entry");
+    return own[2];
 }

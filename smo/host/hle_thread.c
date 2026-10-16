@@ -501,3 +501,10 @@ void hle_signal_system_event(void *ev) {
     wake_sync_waiters();
     pthread_mutex_unlock(&G);
 }
+void hle_forget_system_event(void *ev) {
+    pthread_mutex_lock(&g_se_lock);
+    for (int i = 0; i < g_nse; i++) {
+        if (g_se[i].ev == ev) { g_se[i] = g_se[--g_nse]; break; }
+    }
+    pthread_mutex_unlock(&g_se_lock);
+}

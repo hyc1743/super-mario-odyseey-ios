@@ -81,9 +81,18 @@ _dm_gate:
     str x9, [sp, #776]
     mrs x9, fpcr
     str x9, [sp, #784]
-    mov x0, x30                     // 返回点 = 门标识
-    mov x1, sp                      // regs
+    // x19 is saved above and callee-saved across the host calls. Keep the
+    // register frame on the guest stack, execute C services on the native
+    // pthread stack, and restore the original SP before reloading registers.
+    mov x19, sp
+    mov x0, sp
+    bl _dm_gate_stack
+    cbz x0, 1f
+    mov sp, x0
+1:  ldr x0, [x19, #240]             // 返回点 = 门标识
+    mov x1, x19                     // regs
     bl _gate_dispatch
+    mov sp, x19
     ldr x9, [sp, #784]
     msr fpcr, x9
     ldr x9, [sp, #776]
@@ -130,6 +139,13 @@ _dm_gate:
     .globl _dm_thread_enter
     .p2align 2
 _dm_thread_enter:
+    stp x29, x30, [sp, #-48]!
+    stp x0, x1, [sp, #16]
+    str x2, [sp, #32]
+    mov x0, sp
+    bl _dm_set_gate_stack
+    ldp x0, x1, [sp, #16]
+    ldr x2, [sp, #32]
     mov sp, x2
     mov x29, #0
     mov x16, x0
