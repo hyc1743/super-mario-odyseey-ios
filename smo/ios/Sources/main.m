@@ -59,13 +59,16 @@ static void RunHost(void) {
             const char *volp[8];
             for (unsigned i = 0; i < nvols; i++) volp[i] = vols[i];
             NSString *targetS = [NSString stringWithUTF8String:target];
-            NSString *marker = [[NSString stringWithUTF8String:base]
+            // 标记放在 RomFS 的**父目录**：三种形状下 target 都是「.../RomFS」，父目录即包装目录。
+            // 不放进 RomFS 里面 —— 游戏会列举目录，树里多一个点文件是没必要的风险。
+            NSString *marker = [[targetS stringByDeletingLastPathComponent]
                                  stringByAppendingPathComponent:@".smoa-done"];
             if ([fm2 fileExistsAtPath:marker]) {
                 LOG("容器：%s 已展开过（.smoa-done），跳过", target);
-            } else if (CountRealEntries(fm2, targetS)) {
-                LOG("容器：%s 里已有内容（像是直接拷的目录树），跳过展开", target);
             } else {
+                // 走到这里就必定是「卷在、树没展开」：smoarc_plan 只在确实找到卷时才返回非 0。
+                // 上一版把「目录里有东西」当成「已展开」，用户手机上顶层有一个不相干的条目，
+                // 于是展开被跳过 —— RomFS 里一个游戏文件都没有。判据不能这么松。
                 [fm2 createDirectoryAtPath:targetS withIntermediateDirectories:YES attributes:nil error:nil];
                 LOG("首次运行：展开 RomFS 容器 %u 卷 → %s（5.5 GB，几分钟；每 100 个文件一行）",
                     nvols, target);
@@ -93,6 +96,12 @@ static void RunHost(void) {
         if (!n) {
             LOG("【红】RomFS 目录里没有展开的内容（只剩容器卷？）—— 见上面的展开日志");
             return;
+        }
+        // 完整的 RomFS 只有十几个顶层目录：少的时候把名字列出来，一眼看出是没展开还是拷少了
+        if (n <= 16) {
+            NSArray *es = [[fm contentsOfDirectoryAtPath:[NSString stringWithUTF8String:rp] error:nil]
+                           sortedArrayUsingSelector:@selector(compare:)];
+            for (NSString *e in es) LOG("   · %s", e.UTF8String);
         }
     }
     LOG("== SMO 宿主（App 内）：从 %s 装载 ==", ep);
