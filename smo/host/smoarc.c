@@ -6,6 +6,9 @@
 #include <string.h>
 #if defined(_WIN32)
 #include <direct.h>     // _mkdir
+#else
+#include <sys/stat.h>   // mkdir
+#include <unistd.h>
 #endif
 
 // CRC32（IEEE，查表法）：不依赖 zlib（mingw 没带头；iOS 上也无妨）
