@@ -10,6 +10,7 @@
 #include "audio_device_sink.h"
 static _Atomic(smo_audio_output_fn) speaker_output;
 static _Atomic int app_suspended;
+static _Atomic uint64_t renderer_updates,audio_event_ticks;
 void smo_audio_set_output(smo_audio_output_fn output) { atomic_store(&speaker_output, output); }
 void smo_audio_set_suspended(int suspended) { atomic_store(&app_suspended,!!suspended); }
 
@@ -197,7 +198,11 @@ static void *audio_tick(void *unused) {
         pthread_mutex_lock(&audio_lock);
         for (unsigned i = 0; i < SMO_ARRAY_LEN(sessions); i++) {
             renderer *r = sessions[i];
-            if (r && r->running && !r->manual && r->event) hle_signal_system_event(r->event);
+            if (r && r->running && !r->manual && r->event) {
+                hle_signal_system_event(r->event);
+                uint64_t count=atomic_fetch_add(&audio_event_ticks,1)+1;
+                if(count==1 || count%2000==0)LOG("AUDIO_RENDERER_EVENT_TICKS count=%llu",(unsigned long long)count);
+            }
         }
         pthread_mutex_unlock(&audio_lock);
     }
@@ -254,6 +259,8 @@ static uint32_t h_open(renderer_handle *out, void *event, const void *parameter,
     return 0;
 }
 static uint32_t h_update(renderer_handle handle, const void *config) {
+    uint64_t call=atomic_fetch_add(&renderer_updates,1)+1;
+    if(call==1 || call%2000==0)LOG("AUDIO_RENDERER_UPDATE_CALLS count=%llu",(unsigned long long)call);
     pthread_mutex_lock(&audio_lock);
     renderer *r = find_session(handle.object);
     uint32_t result = AUDIO_INVALID;

@@ -61,6 +61,8 @@ def main():
         api_gaps = "NVN_API_UNIMPLEMENTED" in data
         mapping_gap = "NVN_VIRTUAL_POOL_MAPPING_UNSUPPORTED" in data
         audio_counts = [int(n) for n in re.findall(r"AUDIO_DEVICE_PCM frames=(\d+)",data)]
+        audio_ticks = [int(n) for n in re.findall(r"AUDIO_RENDERER_EVENT_TICKS count=(\d+)",data)]
+        audio_updates = [int(n) for n in re.findall(r"AUDIO_RENDERER_UPDATE_CALLS count=(\d+)",data)]
         audio_pcm = bool(audio_counts)
         audio_clock = audio_pcm and max(audio_counts)<=args.seconds*220+200
         audio_gap = "AUDIO_DEVICE_SINK_UNSUPPORTED" in data
@@ -77,6 +79,8 @@ def main():
                       audio_device_pcm_observed=audio_pcm,
                       audio_frame_clock_bounded=audio_clock,
                       audio_max_reported_frames=max(audio_counts,default=0),
+                      audio_event_ticks_observed=max(audio_ticks,default=0),
+                      audio_update_calls_observed=max(audio_updates,default=0),
                       unsupported_audio_sink_observed=audio_gap,
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))
         (args.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
