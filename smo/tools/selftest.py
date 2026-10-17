@@ -89,7 +89,7 @@ def test_sarc():
     s = Sarc(make_sarc(files))
     # SystemData/AglResource nests a second SARC below the outer Yaz0/SARC.
     # Discover by magic even when the nested member has an unrelated suffix.
-    from sharcb import shader_members, extract_data
+    from sharcb import shader_members, embedded_shader_members, extract_data
     shader = bytearray(0x90)
     shader[:4] = b"BAHS"
     struct.pack_into("<I", shader, 8, 0x12345678)
@@ -111,6 +111,20 @@ def test_sarc():
         check("shader archive depth bound", False)
     except ValueError:
         check("shader archive depth bound", True)
+    embedded = bytearray(0xd0)
+    embedded[:8] = b"BNSH\0\0\0\0"
+    embedded[0xc:0xe] = b"\xff\xfe"
+    struct.pack_into("<I", embedded, 0x1c, len(embedded))
+    embedded[0x40:0x40 + len(shader) - 8] = shader[8:]
+    module = b"prefix" + embedded + b"unrelated module data"
+    found = list(embedded_shader_members(module, "main.bin"))
+    check("embedded BNSH bounded discovery", len(found) == 1 and found[0][1] == embedded)
+    with tempfile.TemporaryDirectory() as directory:
+        jobs, rows = extract_data(found[0][1], found[0][0], directory)
+        check("embedded BNSH shader extraction", len(jobs) == 1 and jobs[0]["stage"] == "vs")
+    struct.pack_into("<I", embedded, 0x1c, len(embedded) + 1000)
+    check("embedded BNSH rejects out-of-module size", not list(embedded_shader_members(bytes(embedded), "bad.bin")))
+    check("embedded BNSH rejects truncated header", not list(embedded_shader_members(b"BNSH\0\0\0\0", "short.bin")))
     check("SARC 项数与名字", sorted(n for n, _, _ in s.entries) == ["alBar.sharcb", "alFoo.sharc"])
     check("SARC 数据", s.read("alFoo.sharc") == files[0][1] and s.read("alBar.sharcb") == files[1][1])
 

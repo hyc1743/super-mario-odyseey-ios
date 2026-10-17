@@ -7,11 +7,17 @@
 iOS 显示层使用有界的最新帧队列，取得 drawable 和显示提交均在独立线程执行；
 `GUEST_DISPLAY_FRAME_PRESENTED` 来自 drawable 的实际呈现回调。
 
-`SMO_FRAME_CAPTURE_DIR` 保存前两次输出与第 60 个有效输出的 PPM，最多三张。
+`SMO_FRAME_CAPTURE_DIR` 保存前两次输出，并每 60 个有效输出覆盖最新 PPM，最多三张。
 这些图像与着色器诊断一起只上传私有仓库，不进入公开 artifact。
 通过自动启动检查后，必须检查当前代码版本的真实游戏图像；仓库变量
 `SMO_REVIEWED_RENDER_SHA` 与构建提交完全相同才允许生成真机包。
 这个变量只记录已完成的图像检查，不能用来绕过启动检查；iOS 显示、输入与稳定性仍需真机验证。
+
+运行 `38988067288` 已完成 60 个有新绘制的 GPU 离屏交付，但实际截图纯黑，
+随后因着色器未匹配退出，因此启动和图像检查均未通过。执行阶段采集定位到主程序
+内嵌的两个 BNSH，合计 40 个 VS/PS；缺失 VS 的 1824 字节完整解码跨度与内嵌代码一致。
+`sharcb.py --embedded` 按文件头边界提取这些容器，40 个全部转换成功后合并到私有资源包。
+这只证明资源提取与离线转换，后续运行和可见场景仍待验证。
 
 `build-shell-ipa.yml` 在注入私有程序后，构建 `smo_host_embedded`，运行
 `guest_boot_smoke.py`，通过才允许生成 IPA。它使用与 IPA 相同的 Embedded.S/C、

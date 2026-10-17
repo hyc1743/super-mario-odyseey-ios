@@ -50,7 +50,7 @@
     [_lock unlock];
 }
 - (BOOL)preparePipeline {
-    if(_pipeline)return YES;
+    if(_pipeline && _queue)return YES;
     CAMetalLayer *layer=(CAMetalLayer *)self.layer;
     /* This independently authored shader copies/scales the completed game
      * image. It never replaces guest scene shaders or creates game content. */

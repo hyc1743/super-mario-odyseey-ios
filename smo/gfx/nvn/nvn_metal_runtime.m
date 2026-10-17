@@ -255,6 +255,11 @@ static int poll(uint64_t sequence) {
 static void capture_frame(id<MTLTexture> texture,uint64_t ordinal) {
     const char *directory=getenv("SMO_FRAME_CAPTURE_DIR");
     if(!directory || texture.width*texture.height>4194304)return;
+    static pthread_mutex_t capture_lock=PTHREAD_MUTEX_INITIALIZER;
+    static uint64_t latest;
+    if(ordinal<=2)pthread_mutex_lock(&capture_lock);
+    else if(pthread_mutex_trylock(&capture_lock))return;
+    if(ordinal>2 && ordinal<=latest){pthread_mutex_unlock(&capture_lock);return;}
     @autoreleasepool {
         NSUInteger width=texture.width,height=texture.height;
         NSMutableData *rgba=[NSMutableData dataWithLength:width*height*4];
@@ -270,10 +275,14 @@ static void capture_frame(id<MTLTexture> texture,uint64_t ordinal) {
         }
         NSString *root=[NSString stringWithUTF8String:directory];
         [[NSFileManager defaultManager] createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:NULL];
-        NSString *path=[root stringByAppendingPathComponent:[NSString stringWithFormat:@"frame-%llu.ppm",(unsigned long long)ordinal]];
-        if([ppm writeToFile:path atomically:YES])
+        NSString *name=ordinal<=2?[NSString stringWithFormat:@"frame-%llu.ppm",(unsigned long long)ordinal]:@"frame-latest.ppm";
+        NSString *path=[root stringByAppendingPathComponent:name];
+        if([ppm writeToFile:path atomically:YES]){
+            if(ordinal>2)latest=ordinal;
             NVN_LOG("NVN_GPU_FRAME_CAPTURE ordinal=%llu width=%lu height=%lu",(unsigned long long)ordinal,(unsigned long)width,(unsigned long)height);
+        }
     }
+    pthread_mutex_unlock(&capture_lock);
 }
 static uint64_t present_on_worker(const nvn_present_request *request) {
     @autoreleasepool {
@@ -310,7 +319,7 @@ static uint64_t present_on_worker(const nvn_present_request *request) {
             BOOL capture=ordinal==1 || ordinal==2;
             if(fresh){
                 uint64_t count=atomic_fetch_add(&offscreen_frames,1)+1;
-                if(count==60)capture=YES;
+                if(count%60==0)capture=YES;
                 if(count==1 || count%60==0)
                     NVN_LOG("GUEST_GPU_FRAME_COMPLETED count=%llu delivery=offscreen",(unsigned long long)count);
             }

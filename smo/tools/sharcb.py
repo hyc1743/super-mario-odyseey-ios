@@ -82,7 +82,7 @@ def shader_members(data, name, depth=0):
         raise ValueError("shader archive nesting exceeds eight levels")
     if data[:4] == b"Yaz0":
         data = yaz0_decompress(data)
-    if data[:4] in (b"BAHS", b"FSHA"):
+    if data[:4] in (b"BAHS", b"FSHA", b"BNSH"):
         yield name, data
     elif data[:4] == b"SARC":
         archive = Sarc(data)
@@ -90,6 +90,28 @@ def shader_members(data, name, depth=0):
             if offset < 0 or size < 0 or offset + size > len(data):
                 raise ValueError("shader archive member exceeds container")
             yield from shader_members(data[offset:offset + size], name + "::" + member, depth + 1)
+
+
+def embedded_shader_members(data, name):
+    """Locate bounded BNSH files in an already decoded guest module.
+
+    CLI: sharcb.py decoded-main.bin output --embedded
+    BNSH uses the little-endian Nintendo binary file header: eight-byte magic,
+    BOM at 0x0c and total file size at 0x1c. Do not treat a bare magic inside
+    instructions as a container or extend a shader into unrelated module data.
+    """
+    at = 0
+    while True:
+        at = data.find(b"BNSH\0\0\0\0", at)
+        if at < 0:
+            return
+        if at + 0x20 <= len(data) and data[at + 0x0c:at + 0x0e] == b"\xff\xfe":
+            size = struct.unpack_from("<I", data, at + 0x1c)[0]
+            if 0x40 <= size <= len(data) - at:
+                yield name + "::BNSH@" + hex(at), data[at:at + size]
+                at += size
+                continue
+        at += 8
 
 
 def extract(path, outdir, stage_filter=None, facts=None):
@@ -100,7 +122,7 @@ def extract_data(d, path, outdir, stage_filter=None, facts=None):
     # 两种容器都收：`BAHS`（.sharcb，配套 .sharc 定义）与 `FSHA`（.bfsha，单文件）
     # 它们的**着色器槽位布局完全一样**（+0x00 标记 0x12345678 / +0x30 SPH 0x50 / +0x80 机器码），
     # 所以同一套切分即可；差别只在 .bfsha 没有 GLSL 定义（facts 拿不到，走缺省值）。
-    assert d[:4] in (b"BAHS", b"FSHA"), f"{path}: 既不是 .sharcb 也不是 .bfsha（magic {d[:4]!r}）"
+    assert d[:4] in (b"BAHS", b"FSHA", b"BNSH"), f"{path}: unsupported shader container magic {d[:4]!r}"
     jobs, rows = [], []
     for k, (p, e) in enumerate(blobs(d)):
         if e - p < CODE_OFF + 8:
@@ -141,15 +163,17 @@ def main():
     src, outdir = sys.argv[1], sys.argv[2]
     sf = sys.argv[sys.argv.index("--stage-filter") + 1] if "--stage-filter" in sys.argv else None
     archives = "--archives" in sys.argv
+    embedded = "--embedded" in sys.argv
     if os.path.isdir(src):      # 递归找：<输出>/<归档名>/X.sharcb
         files = [os.path.join(dp, f) for dp, _, fs in os.walk(src) for f in sorted(fs)
-                 if f.endswith((".sharcb", ".bfsha") + ((".szs", ".sarc") if archives else ()))]
+                 if f.endswith((".sharcb", ".bfsha", ".bnsh") + ((".szs", ".sarc") if archives else ()) + ((".bin",) if embedded else ()))]
     else:
         files = [src]
     facts = load_facts(sys.argv[sys.argv.index("--facts") + 1]) if "--facts" in sys.argv else {}
     all_jobs, all_rows = [], []
     for f in files:
-        members = shader_members(open(f, "rb").read(), f) if archives else [(f, open(f, "rb").read())]
+        data = open(f, "rb").read()
+        members = embedded_shader_members(data, f) if embedded else shader_members(data, f) if archives else [(f, data)]
         for name, data in members:
             j, r = extract_data(data, name, outdir, sf, facts)
             all_jobs += j
