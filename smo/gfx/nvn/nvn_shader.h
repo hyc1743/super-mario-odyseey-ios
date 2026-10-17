@@ -39,6 +39,7 @@ typedef struct {
     uint32_t bytes;
 } nvn_shader_match;
 const nvn_shader_ent *nvn_shader_find_gpu(uint64_t address, nvn_shader_match *match);
+void nvn_shader_capture_gpu(uint64_t address,uint64_t program,unsigned index);
 
 unsigned nvn_shader_count(void);
 unsigned nvn_shader_hits(void);

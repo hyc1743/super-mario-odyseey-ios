@@ -124,18 +124,7 @@ void nvn_CommandBufferBindProgram(NVNcommandBuffer *c,const NVNprogram *program,
                 (unsigned long long)nvn_shader_key((const uint8_t *)(uintptr_t)at,64),
                 (unsigned long long)(length-(at-base)));
         }
-        const char *capture=getenv("SMO_SHADER_CAPTURE_DIR");
-        if(!entry&&capture){
-            uint64_t address=p->resource.words[2+2*i],base,length;
-            if(nvn_st_pool_range(address,64,&base,&length)){
-                uint64_t start=address-base>=256?address-256:base;
-                uint64_t bytes=length-(start-base);if(bytes>65536)bytes=65536;
-                char path[1024];int n=snprintf(path,sizeof path,"%s/shader-%llu-%u.bin",capture,(unsigned long long)p->resource.words[15],i);
-                FILE *file=n>0&&n<(int)sizeof path?fopen(path,"wb"):NULL;
-                if(file){size_t wrote=fwrite((void *)(uintptr_t)start,1,(size_t)bytes,file);fclose(file);
-                    NVN_LOG("NVN_SHADER_PRIVATE_CAPTURE bytes=%zu entry_offset=%llu",wrote,(unsigned long long)(address-start));}
-            }
-        }
+        if(!entry)nvn_shader_capture_gpu(p->resource.words[2+2*i],p->resource.words[15],i);
     }
 }
 static void pool(NVNcommandBuffer *c,int kind,const void *object) {

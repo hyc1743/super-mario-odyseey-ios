@@ -67,7 +67,7 @@
     desc.colorAttachments[0].pixelFormat=layer.pixelFormat;
     if(library)_pipeline=[layer.device newRenderPipelineStateWithDescriptor:desc error:&error];
     _queue=[layer.device newCommandQueue];
-    if(!_pipeline || !_queue){LOG("NVN_DISPLAY_PIPELINE_FAILED domain=%s code=%ld",error.domain.UTF8String ?: "unknown",(long)error.code);return NO;}
+    if(!_pipeline || !_queue){dm_log_emit("NVN_DISPLAY_PIPELINE_FAILED domain=%s code=%ld",error.domain.UTF8String ?: "unknown",(long)error.code);return NO;}
     return YES;
 }
 - (void)drainFrames {
@@ -79,7 +79,7 @@
         [_lock unlock];
         if(![self preparePipeline])continue;
         CAMetalLayer *layer=(CAMetalLayer *)self.layer;
-        if(texture.device!=layer.device){LOG("NVN_DISPLAY_DEVICE_MISMATCH");continue;}
+        if(texture.device!=layer.device){dm_log_emit("NVN_DISPLAY_DEVICE_MISMATCH");continue;}
         id<CAMetalDrawable> drawable=[layer nextDrawable];if(!drawable)continue;
         MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];
         pass.colorAttachments[0].texture=drawable.texture;
@@ -97,14 +97,14 @@
         [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[encoder endEncoding];
         [drawable addPresentedHandler:^(id<MTLDrawable> shown){
             (void)shown;[self->_lock lock];uint64_t count=++self->_presented;[self->_lock unlock];
-            if(count==1 || count%60==0)LOG("GUEST_DISPLAY_FRAME_PRESENTED count=%llu",(unsigned long long)count);
+            if(count==1 || count%60==0)dm_log_emit("GUEST_DISPLAY_FRAME_PRESENTED count=%llu",(unsigned long long)count);
             if(count==1)dispatch_async(dispatch_get_main_queue(), ^{ if(self.onFirstFrame)self.onFirstFrame(); });
         }];
         if(interval>0)[command presentDrawable:drawable afterMinimumDuration:interval/refresh];
         else [command presentDrawable:drawable];
         [command commit];[command waitUntilCompleted];
         if(command.status!=MTLCommandBufferStatusCompleted)
-            LOG("NVN_DISPLAY_GPU_FAILED domain=%s code=%ld",command.error.domain.UTF8String ?: "unknown",(long)command.error.code);
+            dm_log_emit("NVN_DISPLAY_GPU_FAILED domain=%s code=%ld",command.error.domain.UTF8String ?: "unknown",(long)command.error.code);
       }
     }
 }

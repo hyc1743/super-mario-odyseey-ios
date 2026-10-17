@@ -425,7 +425,12 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
         if(p.stages&1)s.vs=nil;if(p.stages&2)s.fs=nil;
         for(unsigned i=0;i<count;i++){
             nvn_shader_match match;const nvn_shader_ent *entry=nvn_shader_find_gpu(p.resource.words[2+i*2],&match);
-            if(!entry)return reject("exact guest shader match");
+            if(!entry){
+                NVN_LOG("NVN_SHADER_EXEC_MATCH_FAILED program=%llu index=%u stages=%llu candidates=%u matches=%u",
+                    (unsigned long long)p.resource.words[15],i,(unsigned long long)p.stages,match.candidates,match.matches);
+                nvn_shader_capture_gpu(p.resource.words[2+i*2],p.resource.words[15],i);
+                return reject("exact guest shader match");
+            }
             unsigned stage=entry->stage==1?0:entry->stage==5?1:UINT_MAX;
             if(stage==UINT_MAX)return reject("geometry/tessellation/compute shader");
             if(!(p.stages&(1u<<stage)))continue;

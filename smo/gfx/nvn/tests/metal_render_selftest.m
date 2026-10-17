@@ -56,6 +56,11 @@ int main(void) {
         assert([[NSFileManager defaultManager] createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:NULL]);
         setenv("SMO_SHADER_DIR",root.UTF8String,1);NSString *idx=[root stringByAppendingPathComponent:@"shaders.idx"];
         setenv("SMO_FRAME_CAPTURE_DIR",root.UTF8String,1);
+        NSLock *deliveryLock=[NSLock new];
+        NSMutableDictionary<NSNumber *,id<MTLTexture>> *delivered=[NSMutableDictionary new];
+        nvn_metal_set_frame_sink(^(id<MTLTexture> texture,int interval,uint64_t ordinal){
+            assert(interval==1);[deliveryLock lock];delivered[@(ordinal)]=texture;[deliveryLock unlock];
+        });
         FILE *index=fopen(idx.fileSystemRepresentation,"wb");assert(index);
         NSString *vs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct Input{float2 p[[attribute(0)]];};\nvertex float4 main0(Input v[[stage_in]]){return float4(v.p,0,1);}\n";
         NSString *fs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct A{constant float4 *color[[id(0)]];texture2d<float> image[[id(1)]];sampler smp[[id(2)]];};\nfragment float4 main0(constant A &a[[buffer(0)]]){return *a.color*a.image.sample(a.smp,float2(0.5));}\n";
@@ -116,6 +121,12 @@ int main(void) {
             assert(pixel[0]==(inside?255:0)&&pixel[1]==0&&pixel[2]==(inside?0:255));
         }
         assert(nvn_metal_offscreen_frames()==1);
+        /* Reuse/mutation of the guest source cannot alter the delivered frame. */
+        [deliveryLock lock];id<MTLTexture> immutable=delivered[@1];[deliveryLock unlock];assert(immutable);
+        uint8_t green[16*16*4];for(unsigned i=0;i<16*16;i++){green[i*4]=0;green[i*4+1]=255;green[i*4+2]=0;green[i*4+3]=255;}
+        [tex replaceRegion:MTLRegionMake2D(0,0,16,16) mipmapLevel:0 withBytes:green bytesPerRow:64];
+        uint8_t preserved[12*12*4];[immutable getBytes:preserved bytesPerRow:48 fromRegion:MTLRegionMake2D(0,0,12,12) mipmapLevel:0];
+        for(unsigned i=0;i<12*12;i++)assert(!memcmp(preserved+i*4,rgb+i*3,3));
         /* A second request for the same unchanged draw cannot count as a new
          * game frame. It still copies actual pixels and completes on the GPU. */
         nvn_present_request repeat={snapshot,{2,2,12,12},1};
@@ -123,7 +134,10 @@ int main(void) {
         int status=0;for(unsigned retry=0;retry<5000 && !(status=nvn_gpu_poll(repeated));retry++)usleep(1000);assert(status==1);
         NSString *second=[root stringByAppendingPathComponent:@"frame-2.ppm"];
         for(unsigned retry=0;retry<5000 && ![[NSFileManager defaultManager] fileExistsAtPath:second];retry++)usleep(1000);
-        assert([[NSData dataWithContentsOfFile:second] isEqualToData:image]);assert(nvn_metal_offscreen_frames()==1);
+        NSData *secondImage=[NSData dataWithContentsOfFile:second];assert(secondImage.length==image.length);
+        const uint8_t *secondRGB=(const uint8_t *)secondImage.bytes+header.length;
+        for(unsigned i=0;i<12*12;i++)assert(secondRGB[i*3]==0&&secondRGB[i*3+1]==255&&secondRGB[i*3+2]==0);
+        assert(nvn_metal_offscreen_frames()==1);nvn_metal_set_frame_sink(nil);
         C(WindowFinalize,&window,0,0,0,0,0);
         C(QueueFinalize,&q,0,0,0,0,0);C(SyncFinalize,&sync,0,0,0,0,0);C(CommandBufferFinalize,&cb,0,0,0,0,0);
         C(TexturePoolFinalize,&tp,0,0,0,0,0);C(SamplerPoolFinalize,&sp,0,0,0,0,0);

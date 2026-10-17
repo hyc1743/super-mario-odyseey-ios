@@ -179,6 +179,23 @@ const nvn_shader_ent *nvn_shader_find_gpu(uint64_t address, nvn_shader_match *ou
     return found;
 }
 
+void nvn_shader_capture_gpu(uint64_t address,uint64_t program,unsigned index) {
+    const char *directory=getenv("SMO_SHADER_CAPTURE_DIR");
+    uint64_t base,length;
+    if(!directory || !nvn_st_pool_range(address,64,&base,&length))return;
+    /* Bind-time failures can occur long after startup diagnostics stop. Keep
+     * evidence bounded independently of the first few recording-time probes. */
+    static unsigned captures;
+    if(__atomic_fetch_add(&captures,1,__ATOMIC_RELAXED)>=24)return;
+    uint64_t start=address-base>=256?address-256:base;
+    uint64_t bytes=length-(start-base);if(bytes>65536)bytes=65536;
+    char path[1024];int n=snprintf(path,sizeof path,"%s/shader-%llu-%u.bin",directory,(unsigned long long)program,index);
+    FILE *file=n>0&&n<(int)sizeof path?fopen(path,"wb"):NULL;
+    if(file){size_t wrote=fwrite((void *)(uintptr_t)start,1,(size_t)bytes,file);fclose(file);
+        NVN_LOG("NVN_SHADER_PRIVATE_CAPTURE program=%llu index=%u bytes=%zu entry_offset=%llu prefix64=%016llx",
+            (unsigned long long)program,index,wrote,(unsigned long long)(address-start),
+            (unsigned long long)nvn_shader_key((const uint8_t *)(uintptr_t)address,64));}
+}
 unsigned nvn_shader_count(void) { return g_sh_n; }
 unsigned nvn_shader_hits(void)  { return g_sh_hits; }
 unsigned nvn_shader_collisions(void) { return g_sh_coll; }
