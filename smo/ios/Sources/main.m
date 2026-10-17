@@ -16,6 +16,7 @@
 #include "dm.h"
 #include "hle.h"
 #include "hle_thread.h"
+#include "nvn_shader.h"
 extern void dm_jump_guest(void *arg, void *fn);
 void dm_crash_install(void);        // crashlog.c：信号 → PC/LR/帧链写进日志
 
@@ -195,6 +196,23 @@ static void RunHost(void) {
     }
     NSString *fontDirectory = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"SharedFonts"];
     setenv("SMO_FONT_DIR", fontDirectory.fileSystemRepresentation, 1);
+    NSString *shaderDirectory = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"RuntimeShaders"];
+    NSString *shaderIndex = [shaderDirectory stringByAppendingPathComponent:@"shaders.idx"];
+    if (setenv("SMO_SHADER_DIR", shaderDirectory.fileSystemRepresentation, 1) ||
+        setenv("SMO_SHADER_IDX", shaderIndex.fileSystemRepresentation, 1)) {
+        dm_progress_finish(DM_RUN_FAIL, "无法设置着色器资源路径");
+        return;
+    }
+    /* C constructors run before NSBundle paths are available. Reload explicitly
+     * before entering any guest code; the CLI constructor keeps its own path. */
+    nvn_shader_reset();
+    int shaderCount = nvn_shader_load(shaderIndex.fileSystemRepresentation);
+    if (shaderCount <= 0) {
+        LOG("IOS_RUNTIME_SHADERS_MISSING");
+        dm_progress_finish(DM_RUN_FAIL, "安装包缺少着色器资源，请安装完整测试包");
+        return;
+    }
+    LOG("IOS_RUNTIME_SHADERS_LOADED rows=%d", shaderCount);
     LOG("== SMO 宿主（App 内）：从 %s 装载 ==", ep);
     // 不装 rtld：宿主自己扮演 rtld（映射/重定位/DT_INIT 都在 loader_core.c），而 rtld 的 32 条重定位
     // 落在代码段边界页里，按三段装不了（smo/ios/tools/x0_layout.py）。参考项目同样只装游戏模块。

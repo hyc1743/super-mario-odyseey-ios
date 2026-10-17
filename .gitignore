@@ -71,3 +71,4 @@ input/
 
 # Pinned OFL fonts are fetched and verified by prepare_shared_fonts.py.
 smo/ios/Resources/SharedFonts/
+smo/ios/Resources/RuntimeShaders/

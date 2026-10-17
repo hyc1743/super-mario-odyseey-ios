@@ -446,7 +446,49 @@ def test_shader_fixtures():
             check("depth variant input mismatch preserves existing output", depth_output.read_bytes() == original_depth)
 
 
+def test_ios_runtime_shaders():
+    import hashlib
+    import json
+    import tempfile
+    import zipfile
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ios" / "tools"))
+    from prepare_runtime_shaders import prepare
+    key = "0123456789abcdef"
+    source, clip = b"original vertex", b"converted vertex"
+    manifest = {"version": 1, "unsupported": [], "shaders": [{
+        "key": key, "stage": 1, "msl_sha256": hashlib.sha256(source).hexdigest(),
+        "depth_clip_sha256": hashlib.sha256(clip).hexdigest()}]}
+    files = {"manifest.json": json.dumps(manifest).encode(),
+             "shaders.idx": f"{key}\t1\t{key}.metal\n".encode(),
+             key + ".metal": source, key + ".clip.metal": clip,
+             key + ".bindings.json": json.dumps({"version": 1, "key": key, "stage": 1,
+                                                  "depth_clip_source": key + ".clip.metal"}).encode(),
+             "../must-not-extract": b"unrelated"}
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        archive = root / "fixture.zip"
+        def pack():
+            with zipfile.ZipFile(archive, "w") as z:
+                for name, data in files.items():
+                    z.writestr(name, data)
+        pack()
+        prepare(archive, root / "RuntimeShaders")
+        check("iOS package preserves original and converted shaders",
+              (root / "RuntimeShaders" / (key + ".metal")).read_bytes() == source and
+              (root / "RuntimeShaders" / (key + ".clip.metal")).read_bytes() == clip)
+        check("iOS package only copies selected flat runtime files", not (root / "must-not-extract").exists())
+        files[key + ".clip.metal"] = b"corrupt"
+        pack()
+        try:
+            prepare(archive, root / "rejected")
+            check("iOS package rejects corrupt depth shader", False)
+        except ValueError:
+            check("iOS shader validation precedes app mutation", not (root / "rejected").exists())
+
+
 def main():
+    test_ios_runtime_shaders()
     test_shader_fixtures()
     for name, fn in (("1. Yaz0", test_yaz0), ("2. SARC", test_sarc),
                      ("3. NSO 头", test_nso), ("4. 改写器端到端", test_rewriter),

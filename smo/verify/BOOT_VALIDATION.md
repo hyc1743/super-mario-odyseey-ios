@@ -343,3 +343,23 @@ Presentation uses a required backend callback, serializes with queue submission
 and updates the queue's completion sequence; a missing backend fails explicitly.
 The Metal present callback, image capture and iOS display layer remain to be
 implemented. No completed frame is claimed.
+## Verified startup image and device resource packaging (2026-10-17)
+
+Run `38992604808`, source `3b771dd`, passes the 30-second native startup gate
+and delivers more than 360 fresh GPU frames. The private latest frame was
+visually inspected: the genuine game controller instruction screen is complete,
+upright and legible. The initial system draw's GPU visibility changes from zero
+to one after applying compiler-generated vertex clip-depth conversion for the
+observed NVN depth mode zero. The native pixel regression also passes when the
+same bound program changes depth mode and changes back.
+
+This proves the observed startup screen, not 3D gameplay or physical iOS display.
+Device packaging must include the same private shader index, original Metal
+sources, binding metadata and all required vertex depth variants. The packaging
+tool verifies source hashes before writing runtime files. The iOS entry explicitly
+loads the bundled index before any guest code, because C constructors run before
+the entry sets the bundle resource paths. Missing shader resources stop startup
+with an explicit status. Embedded packaging without a shader archive is rejected.
+The IPA remains private. Physical display, device startup stability, audio output
+and the future input frontend still need separate validation.
+

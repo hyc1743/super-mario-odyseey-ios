@@ -112,6 +112,15 @@ du -sh "$APP"
 /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist" || true
 lipo -info "$APP/SMOMobile" || true
 
+# The private native startup fixture must accompany its embedded guest code.
+# Never publish an embedded app that only worked with CI's temporary shader paths.
+if [ -f "$EMBED_SRC" ] && [ -z "${SMO_SHADER_ARCHIVE:-}" ]; then
+  echo "Embedded device packaging requires SMO_SHADER_ARCHIVE"; exit 1
+fi
+if [ -n "${SMO_SHADER_ARCHIVE:-}" ]; then
+  "$PY" "$ROOT/smo/ios/tools/prepare_runtime_shaders.py" "$SMO_SHADER_ARCHIVE" "$APP/RuntimeShaders"
+fi
+
 # 未签名 IPA = Payload/<App>.app 打包成 zip。签名由使用者在自己的机器上做
 # （Sideloadly / AltStore + 自己的 Apple ID），与参考项目 docs/NO_XCODE.md 的口径一致。
 rm -rf "$OUT/Payload"

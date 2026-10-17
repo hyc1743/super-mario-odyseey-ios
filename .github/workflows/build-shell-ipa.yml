@@ -344,6 +344,7 @@ jobs:
         # 而 check-run 的 annotations 是公开可读的，所以失败时把日志尾部发成注解（见下一步）
         run: |
           set -o pipefail
+          if [ "${SMO_INJECTED:-}" = '1' ]; then export SMO_SHADER_ARCHIVE=/tmp/boot-shaders.zip; fi
           bash smo/ios/shell_build.sh 2>&1 | tee smo/ios/out_step.log
       - name: 失败时把报错发成注解（错误行优先）
         # 注释：这是维护者/协作方在拿不到仓库管理员权限时，唯一能直接看到真实报错的通道
