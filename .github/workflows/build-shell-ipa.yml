@@ -138,12 +138,12 @@ jobs:
             tail -15 /tmp/mtl.log | while IFS= read -r l; do echo "::error::[mtl] $l"; done
             exit 1
           fi
-          if ! xcrun -sdk macosx clang -fobjc-arc -framework Metal -framework Foundation               -Ismo/gfx/nvn -Ismo/host -o /tmp/mtl_replay_selftest smo/gfx/nvn/nvn_mtl.m               smo/gfx/nvn/nvn_state.c smo/gfx/nvn/nvn_core.c smo/gfx/nvn/nvn_cmd.c smo/gfx/nvn/nvn_cmd_render.c smo/gfx/nvn/nvn_resources.c smo/gfx/nvn/nvn_render_state.c smo/gfx/nvn/nvn_gpu.c smo/gfx/nvn/nvn_tex.c smo/gfx/nvn/nvn_shader.c               smo/gfx/nvn/nvn_replay.c smo/gfx/nvn/hle_nvn.c smo/gfx/nvn/nvn_table.c               smo/gfx/nvn/tests/mtl_replay_selftest.c               > /tmp/mtl2_build.log 2>&1; then
+          if ! make -C smo/host mtl_replay_selftest CC=clang > /tmp/mtl2_build.log 2>&1; then
             echo "::error::[mtl 合龙 编译] 失败"
             tail -20 /tmp/mtl2_build.log | while IFS= read -r l; do echo "::error::[mtl 合龙 编译] $l"; done
             exit 1
           fi
-          /tmp/mtl_replay_selftest > /tmp/mtl2.log 2>&1
+          smo/host/mtl_replay_selftest > /tmp/mtl2.log 2>&1
           rc=$?
           cat /tmp/mtl2.log
           if [ $rc -ne 0 ]; then
