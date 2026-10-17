@@ -76,7 +76,6 @@ struct renderer {
     void *event;
     int running, manual;
     uint64_t frames;
-    uint64_t next_frame_ns;
     uint8_t *scratch;
     size_t scratch_size;
     int16_t pcm[480];
@@ -100,19 +99,8 @@ static uint64_t audio_now_ns(void){
     struct timespec now;clock_gettime(CLOCK_MONOTONIC,&now);
     return (uint64_t)now.tv_sec*1000000000u+(uint64_t)now.tv_nsec;
 }
-static void pace_renderer(renderer *r){
-    uint64_t now=audio_now_ns();
-    while(r->next_frame_ns>now){
-        uint64_t delay=r->next_frame_ns-now;
-        struct timespec wait={(time_t)(delay/1000000000u),(long)(delay%1000000000u)};
-        nanosleep(&wait,NULL);now=audio_now_ns();
-    }
-    /* A signaled event must never turn repeated client updates into a mix loop. */
-    if(!r->next_frame_ns || now-r->next_frame_ns>=5000000u)r->next_frame_ns=now;
-    r->next_frame_ns+=5000000u;
-}
 /* SDK EventType::SignalEvent enters Horizon arbitration and needs a registered
- * guest thread. Call it only from guest-thread service paths. */
+ * guest thread. The audio worker attaches one before calling SDK processing. */
 static void server_event(renderer *r) {
     void (*signal)(void *) = sdk_function("_ZN2nn2os11SignalEventEPNS0_9EventTypeE");
     signal(r->server + 0x1d0);
@@ -189,11 +177,11 @@ static uint32_t update_service(renderer *r, const audio_buffer *out,
 }
 static const void *const renderer_vtable[16] = { [8] = (void *)update_service };
 
-// Host thread delivers the renderer's completion event. SDK audio processing
-// stays on the guest thread because its kernel EventType operations require
-// guest thread identity.
+// SDK audio processing uses thread-local Horizon state. Attach a guest identity
+// to this host worker once, then drive the automatic renderer on the 5 ms clock.
 static void *audio_tick(void *unused) {
     (void)unused;
+    hle_thread_attach_host_worker();
     const uint64_t period_ns=5000000u;
     uint64_t deadline=audio_now_ns();
     for (;;) {
@@ -210,10 +198,15 @@ static void *audio_tick(void *unused) {
         pthread_mutex_lock(&audio_lock);
         for (unsigned i = 0; i < SMO_ARRAY_LEN(sessions); i++) {
             renderer *r = sessions[i];
-            if (r && r->running && !r->manual && r->event) {
-                hle_signal_system_event(r->event);
+            if (r && r->running && !r->manual) {
+                uint32_t result=render_frame(r);
+                if(result){
+                    LOG("AUDIO_RENDERER_TICK_FAILED result=%#x frames=%llu",result,(unsigned long long)r->frames);
+                    continue;
+                }
                 uint64_t count=atomic_fetch_add(&audio_event_ticks,1)+1;
                 if(count==1 || count%100==0)LOG("AUDIO_RENDERER_EVENT_TICKS count=%llu",(unsigned long long)count);
+                if(r->event)hle_signal_system_event(r->event);
             }
         }
         pthread_mutex_unlock(&audio_lock);
@@ -280,7 +273,6 @@ static uint32_t h_update(renderer_handle handle, const void *config) {
         uint32_t (*client)(renderer_handle, const void *) = sdk_function(
             "_ZN2nn5audio26RequestUpdateAudioRendererENS0_19AudioRendererHandleEPKNS0_19AudioRendererConfigE");
         result = client(handle, config);
-        if(!result && r->running && !r->manual){pace_renderer(r);result=render_frame(r);}
     }
     pthread_mutex_unlock(&audio_lock);
     return result;
@@ -292,7 +284,7 @@ static uint32_t h_start(renderer_handle handle) {
     if (r) {
         uint32_t (*start)(void *) = SERVER_FN("5StartEv");
         result = start(r->server);
-        if (!result){r->running=1;r->next_frame_ns=0;LOG("AUDIO_RENDERER_START event=%p manual=%d",r->event,r->manual);}
+        if (!result){r->running=1;LOG("AUDIO_RENDERER_START event=%p manual=%d",r->event,r->manual);}
     }
     pthread_mutex_unlock(&audio_lock);
     return result;

@@ -5,6 +5,8 @@
 int svc_thread(int num, uint64_t *regs);      // 返回 1 = 处理了，0 = 不是这一族
 uint32_t svc_thread_main_init(void);          // 主线程登记，返回其句柄（交给 nn::os 当主线程句柄）
 int svc_thread_main_ready(void);              // 主线程是否已登记（run_module_inits 之前必须为真）
+uint32_t hle_thread_attach_host_worker(void); // Give a host worker guest TSD/kernel identity before calling SDK code.
+void hle_thread_detach_host_worker(void);
 void dm_thread_returned(void);
 unsigned dm_thread_waiting(int kind);       // 当前在等的线程数（kind 0=全部）                // 客体线程入口返回（违规）
 void dm_guest_clock_set(uint64_t ns);         // hle_os.c 维护客体时钟（超时口径用）

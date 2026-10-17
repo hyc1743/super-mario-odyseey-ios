@@ -202,6 +202,39 @@ int svc_thread_main_ready(void) {
     return g_keythr != 0 && pthread_getspecific(g_keythr) != NULL;
 }
 
+uint32_t hle_thread_attach_host_worker(void) {
+    if (!g_keythr || pthread_getspecific(g_keythr))
+        die("Host worker guest-thread attach requires an initialized thread key and an unattached pthread");
+    pthread_mutex_lock(&G);
+    thr_t *t = calloc(1, sizeof *t);
+    if (!t) die("Host worker guest-thread allocation failed");
+    t->handle = h_new(O_THREAD, t);
+    t->id = g_next_id++;
+    t->prio = 16; t->core = -1; t->mask = 1; t->started = 1;
+    if (pthread_cond_init(&t->cv, NULL) || pthread_setspecific(g_keythr, t))
+        die("Host worker guest-thread initialization failed");
+    pthread_mutex_unlock(&G);
+    guest_thread_init();
+    LOG("HOST_GUEST_WORKER_READY handle=%#x", t->handle);
+    return t->handle;
+}
+
+void hle_thread_detach_host_worker(void) {
+    thr_t *t = g_keythr ? pthread_getspecific(g_keythr) : NULL;
+    if (!t) return;
+    pthread_mutex_lock(&G);
+    t->exited = 1;
+    wake_sync_waiters(t->handle);
+    unsigned slot = t->handle - H_BASE;
+    if (slot > 0 && slot < MAX_H && g_h[slot].type == O_THREAD && g_h[slot].obj == t) {
+        g_h[slot].type = O_FREE; g_h[slot].obj = NULL;
+    }
+    pthread_mutex_unlock(&G);
+    pthread_setspecific(g_keythr, NULL);
+    pthread_cond_destroy(&t->cv);
+    free(t);
+}
+
 // ---------------------------------------------------------------- 同步对象（事件）
 
 static int sig_obj(uint32_t h, int *bad) {                // 该句柄是否处于「已触发」
