@@ -11,10 +11,12 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <unistd.h>
+#include <dispatch/dispatch.h>
 
 static id<MTLDevice> device;
 static id<MTLCommandQueue> metal_queue;
 static NSObject *render_state;
+static dispatch_queue_t encoding_worker;
 id<MTLDevice> nvn_metal_device(void) { return device; }
 static uint64_t submitted;
 static _Atomic uint64_t completed;
@@ -149,7 +151,7 @@ static int encode(void *context, uint32_t op, const void *payload, size_t size) 
     [blit copyFromBuffer:staging sourceOffset:0 toBuffer:dst destinationOffset:offset size:(NSUInteger)bytes];
     return 1;
 }
-static uint64_t submit(int count, const uint64_t *handles) {
+static uint64_t submit_on_worker(int count, const uint64_t *handles) {
     @autoreleasepool {
         SMOGuestEncoder *e=[SMOGuestEncoder new];
         e.device=device;e.renderState=render_state;
@@ -205,6 +207,20 @@ static uint64_t submit(int count, const uint64_t *handles) {
         return sequence;
     }
 }
+static uint64_t submit(int count,const uint64_t *handles) {
+    /* Guest NVN callbacks run on guest-provided stacks, sometimes only 16 KiB.
+     * Metal compilation/commit enters CoreFoundation and needs a native stack.
+     * dispatch_sync may execute inline on the caller, so use async + a wait.
+     * The caller keeps command memory alive until encoding has completed. */
+    __block uint64_t sequence=0;
+    dispatch_semaphore_t finished=dispatch_semaphore_create(0);
+    dispatch_async(encoding_worker, ^{
+        sequence=submit_on_worker(count,handles);
+        dispatch_semaphore_signal(finished);
+    });
+    dispatch_semaphore_wait(finished,DISPATCH_TIME_FOREVER);
+    return sequence;
+}
 static int poll(uint64_t sequence) {
     uint64_t done=atomic_load(&completed);
     uint64_t failed=atomic_load(&first_failure);
@@ -212,15 +228,23 @@ static int poll(uint64_t sequence) {
     return done>=sequence;
 }
 static void initialize(void) {
-    @autoreleasepool {
+    encoding_worker=dispatch_queue_create("smo.gpu.encoding",DISPATCH_QUEUE_SERIAL);
+    dispatch_semaphore_t finished=dispatch_semaphore_create(0);
+    dispatch_async(encoding_worker, ^{
+      @autoreleasepool {
         device=MTLCreateSystemDefaultDevice();
         metal_queue=[device newCommandQueue];
-        if (!metal_queue) { NVN_LOG("NVN_GPU_UNAVAILABLE: Metal device/queue unavailable"); return; }
-        render_state=nvn_metal_render_state();
-        static const nvn_gpu_backend backend={submit,poll};
-        nvn_gpu_install_backend(&backend);
-        NVN_LOG("NVN_GPU_BACKEND device=%s",device.name.UTF8String);
-    }
+        if (!metal_queue) { NVN_LOG("NVN_GPU_UNAVAILABLE: Metal device/queue unavailable"); }
+        else {
+            render_state=nvn_metal_render_state();
+            static const nvn_gpu_backend backend={submit,poll};
+            nvn_gpu_install_backend(&backend);
+            NVN_LOG("NVN_GPU_BACKEND device=%s worker=native",device.name.UTF8String);
+        }
+      }
+      dispatch_semaphore_signal(finished);
+    });
+    dispatch_semaphore_wait(finished,DISPATCH_TIME_FOREVER);
 }
 void nvn_metal_runtime_init(void) {
     static pthread_once_t once=PTHREAD_ONCE_INIT;

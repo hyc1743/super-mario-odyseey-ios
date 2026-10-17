@@ -9,6 +9,7 @@
 #include "../nvn_render_state.h"
 #include <assert.h>
 #include <unistd.h>
+#include <pthread.h>
 #define P(x) ((uint64_t)(uintptr_t)(x))
 #define API(n,t) ((t)(uintptr_t)nvn_lookup("nvn" #n))
 static uint64_t call(const char *name,void *obj,uint64_t a,uint64_t b,uint64_t c,uint64_t d,uint64_t f) {
@@ -16,6 +17,13 @@ static uint64_t call(const char *name,void *obj,uint64_t a,uint64_t b,uint64_t c
     return fn(P(obj),a,b,c,d,f,0,0);
 }
 #define C(n,o,a,b,c,d,f) call("nvn" #n,o,a,b,c,d,f)
+typedef struct { NVNqueue *queue;NVNsync *sync;uint64_t handle; } small_stack_submission;
+static void *submit_small_stack(void *context) {
+    small_stack_submission *s=context;
+    C(QueueSubmitCommands,s->queue,1,P(&s->handle),0,0,0);
+    C(QueueFenceSync,s->queue,P(s->sync),0,0,0,0);
+    return NULL;
+}
 static void write_shader(NSString *root,FILE *index,uint8_t *code,unsigned seed,int stage,NSString *source,NSArray *args,NSArray *inputs) {
     for(unsigned i=0;i<256;i++)code[i]=(uint8_t)(i*13+seed);
     uint64_t key=nvn_shader_key(code,256);
@@ -73,7 +81,12 @@ int main(void) {
         C(CommandBufferReportCounter,&cb,0,P(memory+page*5+128),0,0,0);
         uint64_t handle=C(CommandBufferEndRecording,&cb,0,0,0,0,0);
         C(QueueBuilderSetDefaults,&qb,0,0,0,0,0);assert(C(QueueInitialize,&q,P(&qb),0,0,0,0));assert(C(SyncInitialize,&sync,0,0,0,0,0));
-        C(QueueSubmitCommands,&q,1,P(&handle),0,0,0);C(QueueFenceSync,&q,P(&sync),0,0,0,0);
+        small_stack_submission submission={&q,&sync,handle};
+        pthread_attr_t attr;pthread_t thread;assert(!pthread_attr_init(&attr));
+        size_t stack=16384;if(stack<PTHREAD_STACK_MIN)stack=PTHREAD_STACK_MIN;
+        assert(!pthread_attr_setstacksize(&attr,stack));
+        assert(!pthread_create(&thread,&attr,submit_small_stack,&submission));
+        assert(!pthread_attr_destroy(&attr));assert(!pthread_join(thread,NULL));
         uint64_t wait=C(SyncWait,&sync,UINT64_C(5000000000),0,0,0,0);assert(wait<2);
         nvn_resource_snapshot snapshot;assert(nvn_resources_snapshot(&target,12,&snapshot));
         id<MTLTexture> tex=nvn_metal_texture(nvn_metal_device(),&snapshot,NULL,0);assert(tex);

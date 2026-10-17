@@ -276,7 +276,7 @@ Maxwell c3..c16 to 0..13; c0..c2 remain unresolved driver banks. Native guest
 rendering and completed presentation still require validation.
 The merged private fixture contains 21,076 unique converted shaders and 42,158
 deduplicated exact-span index rows. Its pinned SHA-256 is
-`384f5d6030abb59822ce82126425f36542221d45ed92dd21bc91a33e92e14886`.
+`ba60fe5cf7e633e57c6b9ed0a8db392abaed354449cbb614c59ebb4b341fbf66`.
 
 Run `38985156780` confirms both first bound shaders resolve and compile on
 Metal. Actual drawing reaches the fragment texture argument, which still lacks
@@ -285,6 +285,22 @@ immediates 8,10,...,70: SMO's c2 table begins at 0x20 with eight bytes per slot.
 Fixture metadata now maps only this observed immediate/combined form to slots
 0..31; other handle forms remain unresolved. The translator's sampler-type
 queries also use this SMO layout instead of the reference game's 0x168 base.
-Full texture-type fixture regeneration is underway; the current pinned fixture
-has updated binding metadata, and its first draw uses a 2D texture. Correct
-cube/3D/array rendering is not yet proven.
+All 21,076 shaders were retranslated after correcting those queries. Their
+SPIR-V bytes are unchanged: this corpus already carries sufficient instruction
+type information. Metal conversion reuse requires identical SPIR-V, identical
+compiler options, and a verified cached Metal source digest. Legacy fixtures
+require an explicit trusted baseline SPIR-V directory; missing identities do
+not reuse. The regenerated fixture carries SPIR-V hashes for subsequent builds.
+Correct cube/3D/array rendering is still not proven.
+
+Run `38985701003` confirms the first guest render submission completes on the
+real GPU. Its first fragment texture is actually bound at NVN stage 1, slot 0,
+matching immediate handle 8. The 30-second startup gate still fails. In the
+diagnostic rerun, a later Metal commit enters CoreFoundation and faults in
+`___chkstk_darwin` on a guest thread's small stack. Metal initialization and
+submission now use async dispatch to a native worker, with a semaphore retaining
+synchronous encoding semantics. `dispatch_sync` is intentionally avoided because
+it may run inline on the guest stack. The hardware render regression now submits
+its triangle and GPU fence from a 16 KiB pthread stack (or platform minimum).
+Native validation of this stack fix is pending. Window acquisition/presentation
+remain recording stubs and no completed frame is claimed.

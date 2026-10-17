@@ -292,6 +292,7 @@ def test_hle_policy():
 
 
 def test_shader_fixtures():
+    import hashlib
     import json
     import pathlib
     import zipfile
@@ -320,7 +321,8 @@ def test_shader_fixtures():
         def fixture(name, key, source):
             path = root / name
             with zipfile.ZipFile(path, "w") as z:
-                z.writestr("manifest.json", json.dumps({"msl_flags": [], "shaders": [{"key": key}], "unsupported": []}))
+                z.writestr("manifest.json", json.dumps({"msl_flags": [], "shaders": [{"key": key,
+                    "msl_sha256": hashlib.sha256(source.encode()).hexdigest()}], "unsupported": []}))
                 z.writestr("shaders.idx", "0000000000000001\t1\t" + key + ".metal\n")
                 for suffix, data in ((".metal", source), (".bindings.json", "{}"), (".reflection.json", "{}")):
                     z.writestr(key + suffix, data)
@@ -339,6 +341,22 @@ def test_shader_fixtures():
         except ValueError:
             check("conflicting merge preserves previous fixture", output.read_bytes() == original and
                   not output.with_suffix(".zip.partial").exists())
+        compiled = root / "msl"
+        compiled.mkdir()
+        (compiled / "a.spv").write_bytes(b"synthetic compiled identity")
+        (compiled / "a.res.json").write_text(json.dumps({"key": "a", "cbufs": []}))
+        with zipfile.ZipFile(a) as old:
+            manifest = {"a": json.loads(old.read("manifest.json"))["shaders"][0]}
+            row = (1, 1, "a.metal", 88)
+            reused = shader_fixture.translate(row, root, "compiler-must-not-run", (old, manifest, [root]))
+            check("Metal reuse requires identical compiled input", reused[2] == "source a" and
+                  reused[3]["resources"]["key"] == "a" and "spirv_sha256" in reused[3])
+            # No digest and no baseline must call the compiler, never reuse.
+            try:
+                shader_fixture.translate(row, root, "compiler-must-not-run", (old, manifest, []))
+                check("unknown compiled input cannot reuse Metal", False)
+            except FileNotFoundError:
+                check("unknown compiled input cannot reuse Metal", True)
 
 
 def main():

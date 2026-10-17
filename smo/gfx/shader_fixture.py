@@ -119,18 +119,35 @@ def repack(archive, output, index=None, spans=None):
           f"sha256={hashlib.sha256(output.read_bytes()).hexdigest()}")
 
 
-def translate(row, unpack, cross):
+def translate(row, unpack, cross, reuse=None):
     key = Path(row[2]).stem
     spv = unpack / "msl" / (key + ".spv")
     facts = unpack / "msl" / (key + ".res.json")
     resource = json.loads(facts.read_text(encoding="utf-8"))
     if resource["key"] != key:
         raise ValueError("resource reflection key mismatch: " + key)
+    digest = hashlib.sha256(spv.read_bytes()).hexdigest()
+    if reuse and key in reuse[1]:
+        old, manifest, baselines = reuse
+        metadata = json.loads(old.read(key + ".reflection.json"))
+        previous = metadata.get("spirv_sha256")
+        if previous is None:
+            baseline = next((root / "msl" / (key + ".spv") for root in baselines
+                             if (root / "msl" / (key + ".spv")).is_file()), None)
+            if baseline:
+                previous = hashlib.sha256(baseline.read_bytes()).hexdigest()
+        if previous == digest:
+            source = old.read(key + ".metal").decode()
+            if hashlib.sha256(source.encode()).hexdigest() != manifest[key]["msl_sha256"]:
+                raise ValueError("cached Metal source digest mismatch: " + key)
+            metadata["resources"] = resource
+            metadata["spirv_sha256"] = digest
+            return row, key, source, metadata
     source = subprocess.check_output([cross, str(spv), *MSL_FLAGS]).decode("utf-8")
     source = source.replace("\r\n", "\n")
     reflection = json.loads(subprocess.check_output([cross, str(spv), "--reflect"]))
     metadata = {"resources": resource, "spirv": reflection,
-                "metal_arguments": metal_arguments(source)}
+                "metal_arguments": metal_arguments(source), "spirv_sha256": digest}
     return row, key, source, metadata
 
 
@@ -176,7 +193,7 @@ def merge(archives, output):
           f"sha256={hashlib.sha256(output.read_bytes()).hexdigest()}")
 
 
-def build(unpack, output, cross, keys=None, jobs=8):
+def build(unpack, output, cross, keys=None, jobs=8, reuse_path=None, baselines=(), index=None):
     rows = shader_index.build(str(unpack))
     selected = [r for r in rows if keys is None or Path(r[2]).stem in keys]
     if not selected or keys and len(selected) != len(keys):
@@ -189,11 +206,19 @@ def build(unpack, output, cross, keys=None, jobs=8):
     output.parent.mkdir(parents=True, exist_ok=True)
     # Build atomically: a failed conversion must not leave a usable-looking ZIP.
     temporary = output.with_suffix(output.suffix + ".partial")
+    old = None
     try:
+        reuse = None
+        if reuse_path:
+            old = zipfile.ZipFile(reuse_path)
+            previous = json.loads(old.read("manifest.json"))
+            if previous["msl_flags"] != MSL_FLAGS:
+                raise ValueError("cached Metal compiler options differ")
+            reuse = old, {s["key"]: s for s in previous["shaders"]}, baselines
         with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
-            z.writestr("shaders.idx", shader_index.render(rows))
+            z.writestr("shaders.idx", index.read_bytes() if index else shader_index.render(rows))
             with ThreadPoolExecutor(max_workers=jobs) as workers:
-                converted = workers.map(lambda row: translate(row, unpack, cross), selected)
+                converted = workers.map(lambda row: translate(row, unpack, cross, reuse), selected)
                 for count, (row, key, source, metadata) in enumerate(converted, 1):
                     write_shader(z, row, key, source, metadata)
                     manifest["shaders"].append({"key": key, "span": row[3], "stage": row[1],
@@ -203,6 +228,8 @@ def build(unpack, output, cross, keys=None, jobs=8):
             z.writestr("manifest.json", json.dumps(manifest, sort_keys=True))
         temporary.replace(output)
     finally:
+        if old:
+            old.close()
         temporary.unlink(missing_ok=True)
     print(f"shaders={len(selected)} unsupported={len(unsupported)} zip_bytes={output.stat().st_size} "
           f"sha256={hashlib.sha256(output.read_bytes()).hexdigest()}")
@@ -216,6 +243,9 @@ def main():
     parser.add_argument("--merge", nargs="+", type=Path, help="merge flat fixtures, reject conflicting assets")
     parser.add_argument("--index", type=Path, help="replace the exact-span index while repacking")
     parser.add_argument("--spans", type=Path, help="validate and preserve decoded span metadata while repacking")
+    parser.add_argument("--reuse", type=Path, help="reuse Metal only for identical SPIR-V and compiler options")
+    parser.add_argument("--baseline-unpack", nargs="+", type=Path, default=[],
+                        help="trusted original SPIR-V directories for legacy fixtures without SPIR-V hashes")
     parser.add_argument("--spirv-cross", default="spirv-cross")
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--keys", nargs="+", help="optional SHA256-prefix shader keys; default all")
@@ -226,7 +256,8 @@ def main():
     if args.repack:
         repack(args.repack, args.out, args.index, args.spans)
         return
-    build(args.unpack, args.out, args.spirv_cross, set(args.keys) if args.keys else None, args.jobs)
+    build(args.unpack, args.out, args.spirv_cross, set(args.keys) if args.keys else None, args.jobs,
+          args.reuse, args.baseline_unpack, args.index)
 
 
 if __name__ == "__main__":
