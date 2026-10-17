@@ -7,13 +7,13 @@ Switch 系统服务与图形接口。**自带游戏文件（bring your own game 
 技术路径完全照搬 [jhaizhou-ops/d2r-mobile](https://github.com/jhaizhou-ops/d2r-mobile)（MIT）。
 协议：MIT · 主语言：中文 · English: [README.en.md](README.en.md)
 
-> ## ⚠️ 现在的状态：早期基础设施阶段，**还不能玩**
+> ## ⚠️ 现在的状态：启动页已验证，完整游戏仍在验证
 >
-> 这是一个正在进行中的移植项目，不是可玩版本。已经做完并验证的是「读懂这个游戏 + 把程序改写成
-> 能在苹果系统上执行的形式」这一半；**宿主（系统服务 HLE）、图形层（NVN→Metal）、触屏输入都还没开始动**。
+> 真机与 ARM64 启动检查已到达游戏的手柄说明/Start 页面；iOS 里已有双摇杆与 16 键触屏手柄，并接入游戏 HID 输入。
+> 当前重点是确认真机按键、持续音频和长时间运行温度。完整关卡游玩与长时间稳定性还没有验证通过。
 >
+> 真机手柄和性能说明见 [DEVICE_CONTROLS.md](docs/DEVICE_CONTROLS.md)，参考项目的取舍见 [REFERENCE_NXNATIVE.md](docs/REFERENCE_NXNATIVE.md)。
 > 想看每一步做到哪、依据是什么：**[STATUS.md](STATUS.md)**（带实测输出与复现命令）。
-> 想自己出包：见下面「构建」。**别指望现在装上去能进游戏** —— 现在装上去只会看到一个状态页。
 
 ---
 
@@ -56,12 +56,13 @@ Switch 系统服务与图形接口。**自带游戏文件（bring your own game 
 | 重放记账 + 管线键（不含 Metal） | ✅ 16 条断言 | `nvn_replay.c` |
 | 纹理块线性布局（尺寸 + 解交错，不含 Metal） | ✅ 36 条断言 + **真实贴图 123/123 对上** | `nvn_tex.c`（尺寸算法移植自 deko3d）；`tex_layout_check.py` 对游戏自己的 BNTX 记录逐张核对 |
 | 验证层（回归总入口 + 设计前提核验） | ✅ 通过 12 · 跳过 2 | `smo/verify/regress.sh`；NVN 不透明性 1012/1706 调用点 **0 反例** |
-| **Metal 重放（真正调 Metal 的那一半）** | ❌ 未开始（需 macOS / 真机） | |
-| iOS 三段内嵌出包 | 🚧 生成 + 校验已做（本机可验）；装载分支与链接参数待做 | `gen_embed.py`、`check_embed.py` |
-| iOS App 壳 + 未签名 IPA（CI） | 🚧 待重新验证 | 10-14 起 ubuntu job 有 2 个 C 单测链不上，已修（STATUS 2.80），待 push 确认 |
-| 触屏 / 手柄输入 | 🚧 状态层与布局已验证（hid / oe），前端未接 | `hle_hid.c`、`hle_oe.c` |
+| Metal 渲染 | ✅ Joy-Con 手柄说明页已由真实 ARM64 客体提交 GPU 并完成多帧呈现 | 完整关卡与真机持续表现仍需验证 |
+| iOS 三段内嵌出包 | ✅ 装载器、嵌入载荷与签名包检查已接入 CI | `gen_embed.py`、`check_embed.py` |
+| iOS App 壳 + 私有诊断 IPA（CI） | ✅ 已有私有构建路径；音频修复版正在重新验证 | `.github/workflows/build-shell-ipa.yml` |
+| 触屏手柄 | ✅ 双摇杆、16 键、多点触摸与 HID 输入已接入 | 首次真机按键测试见 [DEVICE_CONTROLS.md](docs/DEVICE_CONTROLS.md) |
+| 音频与温控 | 🚧 RemoteIO、混音节流和温控降帧已接入；持续出声/长时间温度仍需真机验证 | [DEVICE_CONTROLS.md](docs/DEVICE_CONTROLS.md) |
 
-**能不能玩：现在还不能** —— 缺的是 Metal 重放那一半与 iOS 内嵌装载分支（两者都需要 macOS / 真机）。
+**能不能完整游玩：还未确认** —— 已到达真实游戏启动页，但完整关卡运行、持续声音和长时间设备稳定性仍需验证。
 细节与每一轮的实测记录在 [STATUS.md](STATUS.md)。
 
 ## 关于这个游戏，实测出来的事实

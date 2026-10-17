@@ -9,23 +9,24 @@ module_t g_mod[MAX_MOD];
 int g_nmod = 2;
 void unimpl_stubs(void) {}
 int svc_dispatch(unsigned n, uint64_t *r) { (void)n; (void)r; return -1; }
-static int fails, valid_calls, size_calls, accept;
+static _Atomic int fails;
+static int valid_calls, size_calls, accept;
 static const void *expected_parameter;
 static uint8_t expected_internal[0x34];
 static int constructed, initialized, finalized, destroyed, started, stopped;
-static int client_calls, server_calls, processed, bound, forgotten;
+static int client_calls, server_calls, bound, forgotten;
+static _Atomic int processed,output_calls,device_commands;
 static void *last_bound;
 static uint32_t server_result, init_result;
 static int budget;
 static uint8_t commands[1024];
-static int device_commands,output_calls;
-static unsigned symbol_lookups;
+static _Atomic unsigned symbol_lookups;
 static int32_t sink_mix[240*2];
 static const uint8_t *process_list;
 static const void *expected_config;
-#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
+#define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); atomic_fetch_add(&fails,1); } } while (0)
 static void output_pcm(const int16_t *pcm,size_t frames){
-    output_calls++;CHECK(frames==240 && pcm[0]==output_calls*100 && pcm[1]==output_calls*100);
+    int call=atomic_fetch_add(&output_calls,1)+1;CHECK(frames==240 && pcm[0]==call*100 && pcm[1]==call*100);
 }
 static smo_audio_ring test_ring;
 static void *ring_producer(void *unused){
@@ -90,7 +91,7 @@ static void *get_buffer(const void *p) { CHECK(p); return commands; }
 static size_t capacity(const void *p) { CHECK(p); return sizeof commands; }
 static size_t generate(void *p, void *b, size_t n) {
     CHECK(p && b == commands && n == sizeof commands);
-    if(device_commands){
+    if(atomic_load(&device_commands)){
         memset(commands,0,sizeof commands);uint32_t v=4;memcpy(commands+4,&v,4);
         v=2;memcpy(commands+0x10,&v,4);v=240;memcpy(commands+0x14,&v,4);v=48000;memcpy(commands+0x18,&v,4);
         size_t at=32;
@@ -106,10 +107,10 @@ static size_t generate(void *p, void *b, size_t n) {
     return 32;
 }
 static void setup(void *p, const void *b, size_t n) {
-    CHECK(p);if(!device_commands)CHECK(b==commands && n==32);else CHECK(n==32+0x18+0x130);process_list=b;
+    CHECK(p);if(!atomic_load(&device_commands))CHECK(b==commands && n==32);else CHECK(n==32+0x18+0x130);process_list=b;
 }
 static void process(void *p) {
-    CHECK(p);processed++;if(device_commands){
+    CHECK(p);atomic_fetch_add(&processed,1);if(atomic_load(&device_commands)){
         size_t at=32;for(uint32_t i=0;i<smo_audio_u32(process_list+4);i++){
             if(smo_audio_u16(process_list+at+6)==20)for(unsigned s=0;s<480;s++)sink_mix[s]=(int32_t)smo_audio_u32(process_list+at+0x14);
             at+=smo_audio_u16(process_list+at+4);
@@ -209,16 +210,21 @@ int main(void) {
     CHECK(!open_renderer(&handle, &event, parameter, work, 0x8000) && handle.object && handle.event == &event && bound == 1);
     expected_config = commands + 32;
     CHECK(!update_renderer(handle, expected_config) && client_calls == 1 && server_calls == 1 && !processed);
+    int automatic_before;
     CHECK(!start_renderer(handle) && started == 1);
-    CHECK(!update_renderer(handle, expected_config) && processed == 1);
+    CHECK(!update_renderer(handle, expected_config));
     server_result = 0x5299;
-    CHECK(update_renderer(handle, expected_config) == server_result && processed == 1);
+    CHECK(update_renderer(handle, expected_config) == server_result);
     server_result = 0;
     CHECK(execute(handle) != 0); // explicit execution is only valid in manual mode
     CHECK(!set_budget(handle, 65) && get_budget(handle) == 65);
     CHECK(set_budget(handle, 101) != 0 && get_budget(handle) == 65);
+    automatic_before=atomic_load(&processed);
+    struct timespec auto_wait={0,30000000};nanosleep(&auto_wait,NULL);
+    CHECK(atomic_load(&processed)-automatic_before>=4);
     stop_renderer(handle);
-    CHECK(!update_renderer(handle, expected_config) && processed == 1 && stopped == 1);
+    automatic_before=atomic_load(&processed);
+    CHECK(!update_renderer(handle, expected_config) && atomic_load(&processed)==automatic_before && stopped == 1);
     close_renderer(handle);
     CHECK(finalized == 1 && destroyed == 6 && forgotten == 1);
     CHECK(start_renderer(handle) != 0 && update_renderer(handle, expected_config) != 0);
@@ -229,22 +235,24 @@ int main(void) {
     expected_internal[0x22] = expected_internal[0x23] = 1;
     CHECK(!open_renderer(&handle, NULL, parameter, work, 0x8000));
     CHECK(!start_renderer(handle));
-    CHECK(!update_renderer(handle, expected_config) && processed == 1);
-    CHECK(!execute(handle) && processed == 2);
-    unsigned lookups_before=symbol_lookups;
-    device_commands=1;smo_audio_set_output(output_pcm);
-    CHECK(!execute(handle) && processed==4 && output_calls==2);
-    CHECK(symbol_lookups==lookups_before); // no symbol table scans in recurring audio frames
-    device_commands=0;smo_audio_set_output(NULL);
+    int manual_before=atomic_load(&processed);
+    CHECK(!update_renderer(handle, expected_config) && atomic_load(&processed)==manual_before);
+    CHECK(!execute(handle) && atomic_load(&processed)==manual_before+1);
+    unsigned lookups_before=atomic_load(&symbol_lookups);
+    atomic_store(&device_commands,1);smo_audio_set_output(output_pcm);
+    CHECK(!execute(handle) && atomic_load(&processed)==manual_before+2 && output_calls==2);
+    CHECK(atomic_load(&symbol_lookups)==lookups_before); // no symbol table scans in recurring audio frames
+    atomic_store(&device_commands,0);smo_audio_set_output(NULL);
     close_renderer(handle);
     parameter[11]=0;expected_internal[0x22]=0;
     memset(commands,0,sizeof commands);
-    CHECK(!open_renderer(&handle,NULL,parameter,work,0x8000));CHECK(!start_renderer(handle));
-    struct timespec before,after;clock_gettime(CLOCK_MONOTONIC,&before);
+    CHECK(!open_renderer(&handle,NULL,parameter,work,0x8000));
+    int prior=atomic_load(&processed);
+    CHECK(!start_renderer(handle));
     for(int i=0;i<10;i++)CHECK(!update_renderer(handle,expected_config));
-    clock_gettime(CLOCK_MONOTONIC,&after);
-    double elapsed=(after.tv_sec-before.tv_sec)+(after.tv_nsec-before.tv_nsec)/1e9;
-    CHECK(elapsed>=0.04); // already-signaled guest events cannot busy-mix
+    struct timespec wait={0,100000000};nanosleep(&wait,NULL);
+    int auto_frames=atomic_load(&processed)-prior;
+    CHECK(auto_frames>=8 && auto_frames<=30); // paced service clock, independent of config update frequency
     close_renderer(handle);
     free(allocation);
     // Native boot previously aborted while polling this uninitialized event.

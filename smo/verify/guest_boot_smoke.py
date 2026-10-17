@@ -62,9 +62,14 @@ def main():
         mapping_gap = "NVN_VIRTUAL_POOL_MAPPING_UNSUPPORTED" in data
         audio_counts = [int(n) for n in re.findall(r"AUDIO_DEVICE_PCM frames=(\d+)",data)]
         audio_ticks = [int(n) for n in re.findall(r"AUDIO_RENDERER_EVENT_TICKS count=(\d+)",data)]
+        audio_mix = [int(n) for n in re.findall(r"AUDIO_RENDERER_MIX_FRAMES count=(\d+)",data)]
         audio_updates = [int(n) for n in re.findall(r"AUDIO_RENDERER_UPDATE_CALLS count=(\d+)",data)]
         audio_pcm = bool(audio_counts)
-        audio_clock = audio_pcm and max(audio_counts)<=args.seconds*220+200
+        audio_min_frames = max(20,args.seconds*40)
+        audio_clock = (audio_pcm and max(audio_counts)<=args.seconds*220+200 and
+                       max(audio_counts,default=0)>=audio_min_frames and
+                       max(audio_mix,default=0)>=audio_min_frames and
+                       max(audio_ticks,default=0)>=audio_min_frames)
         audio_gap = "AUDIO_DEVICE_SINK_UNSUPPORTED" in data
         fatal = "FATAL" in data or "【红】" in data or api_gaps
         passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and audio_clock and not audio_gap and not fatal and not mapping_gap
@@ -79,6 +84,7 @@ def main():
                       audio_device_pcm_observed=audio_pcm,
                       audio_frame_clock_bounded=audio_clock,
                       audio_max_reported_frames=max(audio_counts,default=0),
+                      audio_mix_frames_observed=max(audio_mix,default=0),
                       audio_event_ticks_observed=max(audio_ticks,default=0),
                       audio_update_calls_observed=max(audio_updates,default=0),
                       unsupported_audio_sink_observed=audio_gap,
