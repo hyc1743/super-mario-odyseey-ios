@@ -204,6 +204,14 @@ static void texture_transfer_test(void) {
     API(TextureWriteTexels,PFNNVNTEXTUREWRITETEXELSPROC)(&texture,NULL,&r,block);
     CHK(nvn_tex_detile(blocks,sizeof blocks,0,memory+128,sizeof memory-128,2,2,8,0)==sizeof blocks&&
         !memcmp(blocks+24,block,8)&&blocks[0]==0&&blocks[23]==0,"compressed edge texels write one complete BC block");
+    memset(memory,0,sizeof memory);
+    s->v[1]=s->v[2]=9;s->v[3]=5;s->v[4]=1;s->v[5]=0x25;s->v[7]=2;
+    r=(NVNcopyRegion){0,0,1,1,9,2};uint8_t volume[72];
+    for(unsigned i=0;i<sizeof volume;i++)volume[i]=(uint8_t)(i+1);
+    API(TextureWriteTexels,PFNNVNTEXTUREWRITETEXELSPROC)(&texture,NULL,&r,volume);
+    CHK(!memcmp(memory+128+512,volume,4)&&!memcmp(memory+128+1024,volume+36,4)&&
+        !memcmp(memory+128+2560,volume+32,4)&&!memcmp(memory+128+3072,volume+68,4)&&memory[128]==0,
+        "volume texture writes address interleaved depth tiles and GOB rows");
     nvn_st_del(&texture,12);nvn_st_del(&pool,4);
 }
 int main(void) {

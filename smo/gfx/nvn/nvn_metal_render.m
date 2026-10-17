@@ -42,6 +42,7 @@
 @property(nonatomic,strong) NSMutableDictionary<NSString *,SMOMetalShader *> *shaders;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,id<MTLRenderPipelineState>> *pipelines;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,NSNumber *> *drawGenerations;
+@property(nonatomic,strong) NSMutableSet<NSString *> *diagnosedDrawStates;
 @property(nonatomic) uint64_t nextDrawGeneration;
 @end
 @implementation SMORenderState
@@ -58,6 +59,7 @@ NSObject *nvn_metal_render_state(void) {
     for(unsigned i=0;i<16;i++)s->depth_ranges[i][1]=1;
     s.shaders=[NSMutableDictionary new];s.pipelines=[NSMutableDictionary new];
     s.drawGenerations=[NSMutableDictionary new];
+    s.diagnosedDrawStates=[NSMutableSet new];
     return s;
 }
 void nvn_metal_render_end(SMOGuestEncoder *e) { [e.render endEncoding];e.render=nil; }
@@ -375,7 +377,21 @@ static int prepare_draw(SMOGuestEncoder *e) {
         if(!buffer)return reject("unbound vertex buffer");
         [e.render setVertexBuffer:buffer offset:offset atIndex:stream+1];
     }
-    return arguments_for(e,s.vs,0)&&arguments_for(e,s.fs,1);
+    if(!arguments_for(e,s.vs,0)||!arguments_for(e,s.fs,1))return 0;
+    if(getenv("SMO_FRAME_CAPTURE_DIR")&&s.diagnosedDrawStates.count<32){
+        NSString *identity=[NSString stringWithFormat:@"%@:%@:%u:%u:%u:%u:%u",s.vs.bindings[@"key"],
+            s.fs.bindings[@"key"]?:@"depth",s->polygon.cull,s->polygon.front,s->channel.mask,s->color.blend_en,s->depth.dt];
+        if(![s.diagnosedDrawStates containsObject:identity]){
+            [s.diagnosedDrawStates addObject:identity];
+            NVN_LOG("NVN_METAL_DRAW_STATE vs=%s fs=%s target=%lux%lu mask=%#x blend=%u cull=%u front=%u depth=%u/%u viewport=%.1f,%.1f,%.1f,%.1f scissor=%lld,%lld,%lld,%lld",
+                [s.vs.bindings[@"key"] UTF8String],[s.fs.bindings[@"key"] UTF8String]?:"depth",
+                (unsigned long)target.width,(unsigned long)target.height,s->channel.mask,s->color.blend_en,
+                s->polygon.cull,s->polygon.front,s->depth.dt,s->depth.df,
+                viewport.originX,viewport.originY,viewport.width,viewport.height,
+                (long long)x,(long long)y,(long long)(right-x),(long long)(bottom-y));
+        }
+    }
+    return 1;
 }
 static int primitive_type(int primitive,MTLPrimitiveType *out) {
     switch(primitive){

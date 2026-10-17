@@ -26,6 +26,7 @@ int nvn_texture_transfer_prepare(const nvn_resource_snapshot *s,const nvn_view_s
     switch(w[7]) {
     case 0:l->dims=1;l->height=1;break;
     case 1:case 7:break;
+    case 2:l->dims=3;l->depth=(uint32_t)w[3];break;
     case 3:l->dims=1;l->layers=l->height;l->height=1;break;
     case 4:l->layers=(uint32_t)w[3];break;
     case 8:l->layers=6;break;
@@ -34,13 +35,14 @@ int nvn_texture_transfer_prepare(const nvn_resource_snapshot *s,const nvn_view_s
     }
     l->linear=!!(w[6]&0x10);l->stride=(uint32_t)w[11];
     if(l->linear) {
-        if(l->mip_levels!=1)return 0;
+        if(l->mip_levels!=1||l->dims==3)return 0;
         uint32_t row=tex_div_ceil(l->width,f.bw)*f.bpb;
         if(!l->stride){uint32_t a=w[6]&0x40?128:32;l->stride=(row+a-1)&~(a-1);}
         if(l->stride<row)return 0;
         t.layer_stride=(uint64_t)l->stride*tex_div_ceil(l->height,f.bh);
     } else {
         if(l->dims==2)l->tile_h_log2=nvn_tex_default_tile_h(l->height,1,f.bh);
+        if(l->dims==3)l->tile_d_log2=tex_pick_tile_size(l->depth+l->depth/2);
         if(!nvn_tex_package_tile_h(w,&l->tile_h_log2))return 0;
         t.layer_stride=nvn_tex_level_offset(l,l->mip_levels);
         if(l->layers>1)t.layer_stride=tex_align_layer_size(t.layer_stride,l->height,1,f.bh,l->tile_h_log2,0);
@@ -54,6 +56,7 @@ int nvn_texture_transfer_prepare(const nvn_resource_snapshot *s,const nvn_view_s
             t.level=(uint32_t)v->base_level;
         }
         if(v->flags&NVN_VIEW_LAYERS){
+            if(l->dims==3)return 0;
             if(v->base_layer<0||v->layer_count<=0||(uint32_t)v->base_layer>=l->layers||
                (uint32_t)v->layer_count>l->layers-(uint32_t)v->base_layer)return 0;
             base_layer=(uint32_t)v->base_layer;layer_count=(uint32_t)v->layer_count;
@@ -62,6 +65,7 @@ int nvn_texture_transfer_prepare(const nvn_resource_snapshot *s,const nvn_view_s
             if(vf.bpb!=f.bpb||vf.bw!=f.bw||vf.bh!=f.bh)return 0;}
         if((v->flags&NVN_VIEW_TARGET)&&(uint64_t)v->target!=w[7])return 0;
     }
+    if(l->dims==3)layer_count=tex_mip_size(l->depth,t.level);
     t.width=tex_mip_size(l->width,t.level);t.height=tex_mip_size(l->height,t.level);
     if(r->xoffset<0||r->yoffset<0||r->zoffset<0||r->width<=0||r->height<=0||r->depth<=0||
        (uint32_t)r->xoffset>=t.width||(uint32_t)r->width>t.width-(uint32_t)r->xoffset||
@@ -86,6 +90,14 @@ static uint64_t byte_offset(const nvn_texture_transfer *t,uint32_t xbyte,uint32_
     if(l->linear)return offset+(uint64_t)y*l->stride+xbyte;
     uint32_t row=tex_div_ceil(t->width,l->block_w)*l->bytes_per_block;
     uint8_t h=tex_adjust_tile_size(l->tile_h_log2,8,tex_div_ceil(t->height,l->block_h));
+    if(l->dims==3){
+        uint8_t d=tex_adjust_tile_size(l->tile_d_log2,1,tex_mip_size(l->depth,t->level));
+        uint64_t tile=UINT64_C(512)<<(h+d);
+        uint32_t columns=tex_div_ceil(row,64),tile_rows=tex_div_ceil(tex_div_ceil(t->height,l->block_h),8u<<h);
+        return t->mip_offset+((uint64_t)(layer>>d)*tile_rows+y/(8u<<h))*columns*tile+
+            (uint64_t)(xbyte/64)*tile+((uint64_t)(layer&((1u<<d)-1))<<(9+h))+
+            (uint64_t)((y%(8u<<h))/8)*512+nvn_tex_gob_offset(xbyte,y);
+    }
     return offset+nvn_tex_block_offset(xbyte,y,row,1,h);
 }
 static void flush_checked(const nvn_texture_transfer *t) {
@@ -94,10 +106,17 @@ static void flush_checked(const nvn_texture_transfer *t) {
 }
 void nvn_TextureWriteTexelsStrided(const NVNtexture *texture,const NVNtextureView *view,
         const NVNcopyRegion *r,const void *data,ptrdiff_t row_stride,ptrdiff_t image_stride) {
-    nvn_resource_snapshot s;nvn_view_state v;nvn_texture_transfer t;
+    nvn_resource_snapshot s={0};nvn_view_state v;nvn_texture_transfer t;
     nvn_resources_view(view,&v);
     if(!data||row_stride<0||image_stride<0||!nvn_resources_snapshot(texture,12,&s)||
-       !nvn_texture_transfer_prepare(&s,&v,r,&t))NVN_DIE("NVN_TEXTURE_TRANSFER_UNSUPPORTED operation=write");
+       !nvn_texture_transfer_prepare(&s,&v,r,&t)){
+        NVN_LOG("NVN_TEXTURE_TRANSFER_STATE format=%llu target=%llu extent=%llux%llux%llu levels=%llu samples=%llu flags=%llu view=%u region=%d,%d,%d,%d,%d,%d",
+            (unsigned long long)s.words[5],(unsigned long long)s.words[7],(unsigned long long)s.words[1],
+            (unsigned long long)s.words[2],(unsigned long long)s.words[3],(unsigned long long)s.words[4],
+            (unsigned long long)s.words[8],(unsigned long long)s.words[6],v.flags,
+            r?r->xoffset:0,r?r->yoffset:0,r?r->zoffset:0,r?r->width:0,r?r->height:0,r?r->depth:0);
+        NVN_DIE("NVN_TEXTURE_TRANSFER_UNSUPPORTED operation=write");
+    }
     uint32_t bpb=t.layout.bytes_per_block,bw=t.layout.block_w,bh=t.layout.block_h;
     uint32_t row=tex_div_ceil((uint32_t)r->width,bw)*bpb,rows=tex_div_ceil((uint32_t)r->height,bh);
     uint64_t pitch=row_stride?(uint64_t)row_stride:row;
