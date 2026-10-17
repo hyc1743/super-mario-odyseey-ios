@@ -23,6 +23,8 @@ enum { NVN_FALSE = 0, NVN_TRUE = 1 }; // NVNboolean is not an nn::Result.
 
 typedef uint64_t (*nvn_fn)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
 int nvn_is_missing_command(nvn_fn fn);
+int nvn_is_unimplemented(nvn_fn fn);
+uint64_t nvn_unimplemented_named(const char *name);
 typedef struct { const char *name; nvn_fn fn; } nvn_ent;
 
 extern const nvn_ent g_nvn_table[];

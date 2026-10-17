@@ -19,7 +19,7 @@ int main(void) {
     for (unsigned i = 0; i < g_nvn_table_n; i++) {
         if (!nvn_BootstrapLoader(g_nvn_table[i].name)) miss++;
         /* Named fail-fast command diagnostics are not implementations. */
-        if (g_nvn_table[i].fn != (nvn_fn)nvn_unimplemented &&
+        if (!nvn_is_unimplemented(g_nvn_table[i].fn) &&
             !nvn_is_missing_command(g_nvn_table[i].fn)) impl++;
     }
     CHK(miss == 0, "每个名字都能按名取到函数地址");
@@ -47,6 +47,12 @@ int main(void) {
     unsigned long long before = nvn_unimpl_calls();
     nvn_unimplemented(0, 0, 0, 0, 0, 0, 0, 0);
     CHK(nvn_unimpl_calls() == before + 1, "未实现调用计数 +1");
+    unsigned kinds=nvn_unimpl_kinds();
+    nvn_fn gap=NULL;
+    for(unsigned i=0;i<g_nvn_table_n;i++)if(nvn_is_unimplemented(g_nvn_table[i].fn)){gap=g_nvn_table[i].fn;break;}
+    CHK(gap!=NULL,"named missing API remains identifiable");
+    if(gap){gap(0,0,0,0,0,0,0,0);gap(0,0,0,0,0,0,0,0);}
+    CHK(nvn_unimpl_calls()==before+3 && nvn_unimpl_kinds()==kinds+1,"named missing APIs count calls and distinct names");
 
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");
     return fails != 0;

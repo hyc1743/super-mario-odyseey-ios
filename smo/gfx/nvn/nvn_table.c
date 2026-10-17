@@ -1,8 +1,8 @@
 // 【自动生成，不要手改】由 smo/tools/gen_nvn.py 从 smo/gfx/nvn/names.txt 生成。
 //
 // 游戏通过 nvnBootstrapLoader(名字) 按名取接口；这张表就是「名字 → 宿主实现」。
-// 未实现的名字统一指向 nvn_unimplemented（首次调用打印一行、返回 0），
-// 真机日志里出现哪个名字就是下一批要补的。
+// Named missing-API wrappers preserve each invoked name in runtime diagnostics.
+// Missing command wrappers retain their existing submission rejection behavior.
 #include "nvn_host.h"
 #include "nvn_cmd.h"
 
@@ -457,6 +457,144 @@ NVN_MISSING_COMMAND(nvnCommandBufferSetViewportSwizzles)
 NVN_MISSING_COMMAND(nvnCommandBufferTiledDownsample)
 NVN_MISSING_COMMAND(nvnCommandBufferWaitSync)
 #undef NVN_MISSING_COMMAND
+
+static uint64_t missing_nvnBootstrapLoader(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnBootstrapLoader");
+}
+static uint64_t missing_nvnDebugCallbackE22NVNdebugCallbackSource20N(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnDebugCallbackE22NVNdebugCallbackSource20N");
+}
+static uint64_t missing_nvnLoadCProcs(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnLoadCProcs");
+}
+static uint64_t missing_nvnMultisampleStateGetAlphaToCoverageDither(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetAlphaToCoverageDither");
+}
+static uint64_t missing_nvnMultisampleStateGetAlphaToCoverageEnable(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetAlphaToCoverageEnable");
+}
+static uint64_t missing_nvnMultisampleStateGetCoverageModulationMode(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetCoverageModulationMode");
+}
+static uint64_t missing_nvnMultisampleStateGetCoverageToColorEnable(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetCoverageToColorEnable");
+}
+static uint64_t missing_nvnMultisampleStateGetCoverageToColorOutput(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetCoverageToColorOutput");
+}
+static uint64_t missing_nvnMultisampleStateGetMultisampleEnable(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetMultisampleEnable");
+}
+static uint64_t missing_nvnMultisampleStateGetRasterSamples(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetRasterSamples");
+}
+static uint64_t missing_nvnMultisampleStateGetSampleLocationsEnable(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetSampleLocationsEnable");
+}
+static uint64_t missing_nvnMultisampleStateGetSampleLocationsGrid(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetSampleLocationsGrid");
+}
+static uint64_t missing_nvnMultisampleStateGetSampleLocationsGridEna(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetSampleLocationsGridEna");
+}
+static uint64_t missing_nvnMultisampleStateGetSamples(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateGetSamples");
+}
+static uint64_t missing_nvnMultisampleStateSetAlphaToCoverageDither(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetAlphaToCoverageDither");
+}
+static uint64_t missing_nvnMultisampleStateSetAlphaToCoverageEnable(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetAlphaToCoverageEnable");
+}
+static uint64_t missing_nvnMultisampleStateSetCoverageModulationMode(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetCoverageModulationMode");
+}
+static uint64_t missing_nvnMultisampleStateSetCoverageToColorEnable(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetCoverageToColorEnable");
+}
+static uint64_t missing_nvnMultisampleStateSetCoverageToColorOutput(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetCoverageToColorOutput");
+}
+static uint64_t missing_nvnMultisampleStateSetDefaults(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetDefaults");
+}
+static uint64_t missing_nvnMultisampleStateSetMultisampleEnable(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetMultisampleEnable");
+}
+static uint64_t missing_nvnMultisampleStateSetRasterSamples(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetRasterSamples");
+}
+static uint64_t missing_nvnMultisampleStateSetSampleLocations(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetSampleLocations");
+}
+static uint64_t missing_nvnMultisampleStateSetSampleLocationsEnable(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetSampleLocationsEnable");
+}
+static uint64_t missing_nvnMultisampleStateSetSampleLocationsGridEna(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetSampleLocationsGridEna");
+}
+static uint64_t missing_nvnMultisampleStateSetSamples(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return nvn_unimplemented_named("nvnMultisampleStateSetSamples");
+}
+static const nvn_fn missing_apis[] = {
+    missing_nvnBootstrapLoader,
+    missing_nvnDebugCallbackE22NVNdebugCallbackSource20N,
+    missing_nvnLoadCProcs,
+    missing_nvnMultisampleStateGetAlphaToCoverageDither,
+    missing_nvnMultisampleStateGetAlphaToCoverageEnable,
+    missing_nvnMultisampleStateGetCoverageModulationMode,
+    missing_nvnMultisampleStateGetCoverageToColorEnable,
+    missing_nvnMultisampleStateGetCoverageToColorOutput,
+    missing_nvnMultisampleStateGetMultisampleEnable,
+    missing_nvnMultisampleStateGetRasterSamples,
+    missing_nvnMultisampleStateGetSampleLocationsEnable,
+    missing_nvnMultisampleStateGetSampleLocationsGrid,
+    missing_nvnMultisampleStateGetSampleLocationsGridEna,
+    missing_nvnMultisampleStateGetSamples,
+    missing_nvnMultisampleStateSetAlphaToCoverageDither,
+    missing_nvnMultisampleStateSetAlphaToCoverageEnable,
+    missing_nvnMultisampleStateSetCoverageModulationMode,
+    missing_nvnMultisampleStateSetCoverageToColorEnable,
+    missing_nvnMultisampleStateSetCoverageToColorOutput,
+    missing_nvnMultisampleStateSetDefaults,
+    missing_nvnMultisampleStateSetMultisampleEnable,
+    missing_nvnMultisampleStateSetRasterSamples,
+    missing_nvnMultisampleStateSetSampleLocations,
+    missing_nvnMultisampleStateSetSampleLocationsEnable,
+    missing_nvnMultisampleStateSetSampleLocationsGridEna,
+    missing_nvnMultisampleStateSetSamples,
+};
+int nvn_is_unimplemented(nvn_fn fn) {
+    if(fn==nvn_unimplemented)return 1;
+    for(unsigned i=0;i<sizeof missing_apis/sizeof *missing_apis;i++)if(fn==missing_apis[i])return 1;
+    return 0;
+}
 
 static const nvn_fn missing_commands[] = {
     (nvn_fn)missing_nvnCommandBufferBarrierEPNS_11DrawContextENS,
@@ -934,7 +1072,7 @@ const nvn_ent g_nvn_table[] = {
     {"nvnBlendStateSetBlendFunc", (nvn_fn)nvn_BlendStateSetBlendFunc},
     {"nvnBlendStateSetBlendTarget", (nvn_fn)nvn_BlendStateSetBlendTarget},
     {"nvnBlendStateSetDefaults", (nvn_fn)nvn_BlendStateSetDefaults},
-    {"nvnBootstrapLoader", (nvn_fn)nvn_unimplemented},
+    {"nvnBootstrapLoader", (nvn_fn)missing_nvnBootstrapLoader},
     {"nvnBufferBuilderGetMemoryOffset", (nvn_fn)nvn_BufferBuilderGetMemoryOffset},
     {"nvnBufferBuilderGetMemoryPool", (nvn_fn)nvn_BufferBuilderGetMemoryPool},
     {"nvnBufferBuilderGetSize", (nvn_fn)nvn_BufferBuilderGetSize},
@@ -1100,7 +1238,7 @@ const nvn_ent g_nvn_table[] = {
     {"nvnCommandBufferTiledDownsample", (nvn_fn)missing_nvnCommandBufferTiledDownsample},
     {"nvnCommandBufferUpdateUniformBuffer", (nvn_fn)nvn_CommandBufferUpdateUniformBuffer},
     {"nvnCommandBufferWaitSync", (nvn_fn)missing_nvnCommandBufferWaitSync},
-    {"nvnDebugCallbackE22NVNdebugCallbackSource20N", (nvn_fn)nvn_unimplemented},
+    {"nvnDebugCallbackE22NVNdebugCallbackSource20N", (nvn_fn)missing_nvnDebugCallbackE22NVNdebugCallbackSource20N},
     {"nvnDepthStencilStateGetDepthFunc", (nvn_fn)nvn_DepthStencilStateGetDepthFunc},
     {"nvnDepthStencilStateGetDepthTestEnable", (nvn_fn)nvn_DepthStencilStateGetDepthTestEnable},
     {"nvnDepthStencilStateGetDepthWriteEnable", (nvn_fn)nvn_DepthStencilStateGetDepthWriteEnable},
@@ -1141,7 +1279,7 @@ const nvn_ent g_nvn_table[] = {
     {"nvnDeviceSetIntermediateShaderCache", (nvn_fn)nvn_DeviceSetIntermediateShaderCache},
     {"nvnDeviceSetWindowOriginMode", (nvn_fn)nvn_DeviceSetWindowOriginMode},
     {"nvnDeviceWalkDebugDatabase", (nvn_fn)nvn_DeviceWalkDebugDatabase},
-    {"nvnLoadCProcs", (nvn_fn)nvn_unimplemented},
+    {"nvnLoadCProcs", (nvn_fn)missing_nvnLoadCProcs},
     {"nvnMemoryPoolBuilderGetFlags", (nvn_fn)nvn_MemoryPoolBuilderGetFlags},
     {"nvnMemoryPoolBuilderGetMemory", (nvn_fn)nvn_MemoryPoolBuilderGetMemory},
     {"nvnMemoryPoolBuilderGetSize", (nvn_fn)nvn_MemoryPoolBuilderGetSize},
@@ -1160,29 +1298,29 @@ const nvn_ent g_nvn_table[] = {
     {"nvnMemoryPoolMap", (nvn_fn)nvn_MemoryPoolMap},
     {"nvnMemoryPoolMapVirtual", (nvn_fn)nvn_MemoryPoolMapVirtual},
     {"nvnMemoryPoolSetDebugLabel", (nvn_fn)nvn_MemoryPoolSetDebugLabel},
-    {"nvnMultisampleStateGetAlphaToCoverageDither", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetAlphaToCoverageEnable", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetCoverageModulationMode", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetCoverageToColorEnable", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetCoverageToColorOutput", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetMultisampleEnable", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetRasterSamples", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetSampleLocationsEnable", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetSampleLocationsGrid", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetSampleLocationsGridEna", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateGetSamples", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetAlphaToCoverageDither", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetAlphaToCoverageEnable", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetCoverageModulationMode", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetCoverageToColorEnable", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetCoverageToColorOutput", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetDefaults", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetMultisampleEnable", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetRasterSamples", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetSampleLocations", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetSampleLocationsEnable", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetSampleLocationsGridEna", (nvn_fn)nvn_unimplemented},
-    {"nvnMultisampleStateSetSamples", (nvn_fn)nvn_unimplemented},
+    {"nvnMultisampleStateGetAlphaToCoverageDither", (nvn_fn)missing_nvnMultisampleStateGetAlphaToCoverageDither},
+    {"nvnMultisampleStateGetAlphaToCoverageEnable", (nvn_fn)missing_nvnMultisampleStateGetAlphaToCoverageEnable},
+    {"nvnMultisampleStateGetCoverageModulationMode", (nvn_fn)missing_nvnMultisampleStateGetCoverageModulationMode},
+    {"nvnMultisampleStateGetCoverageToColorEnable", (nvn_fn)missing_nvnMultisampleStateGetCoverageToColorEnable},
+    {"nvnMultisampleStateGetCoverageToColorOutput", (nvn_fn)missing_nvnMultisampleStateGetCoverageToColorOutput},
+    {"nvnMultisampleStateGetMultisampleEnable", (nvn_fn)missing_nvnMultisampleStateGetMultisampleEnable},
+    {"nvnMultisampleStateGetRasterSamples", (nvn_fn)missing_nvnMultisampleStateGetRasterSamples},
+    {"nvnMultisampleStateGetSampleLocationsEnable", (nvn_fn)missing_nvnMultisampleStateGetSampleLocationsEnable},
+    {"nvnMultisampleStateGetSampleLocationsGrid", (nvn_fn)missing_nvnMultisampleStateGetSampleLocationsGrid},
+    {"nvnMultisampleStateGetSampleLocationsGridEna", (nvn_fn)missing_nvnMultisampleStateGetSampleLocationsGridEna},
+    {"nvnMultisampleStateGetSamples", (nvn_fn)missing_nvnMultisampleStateGetSamples},
+    {"nvnMultisampleStateSetAlphaToCoverageDither", (nvn_fn)missing_nvnMultisampleStateSetAlphaToCoverageDither},
+    {"nvnMultisampleStateSetAlphaToCoverageEnable", (nvn_fn)missing_nvnMultisampleStateSetAlphaToCoverageEnable},
+    {"nvnMultisampleStateSetCoverageModulationMode", (nvn_fn)missing_nvnMultisampleStateSetCoverageModulationMode},
+    {"nvnMultisampleStateSetCoverageToColorEnable", (nvn_fn)missing_nvnMultisampleStateSetCoverageToColorEnable},
+    {"nvnMultisampleStateSetCoverageToColorOutput", (nvn_fn)missing_nvnMultisampleStateSetCoverageToColorOutput},
+    {"nvnMultisampleStateSetDefaults", (nvn_fn)missing_nvnMultisampleStateSetDefaults},
+    {"nvnMultisampleStateSetMultisampleEnable", (nvn_fn)missing_nvnMultisampleStateSetMultisampleEnable},
+    {"nvnMultisampleStateSetRasterSamples", (nvn_fn)missing_nvnMultisampleStateSetRasterSamples},
+    {"nvnMultisampleStateSetSampleLocations", (nvn_fn)missing_nvnMultisampleStateSetSampleLocations},
+    {"nvnMultisampleStateSetSampleLocationsEnable", (nvn_fn)missing_nvnMultisampleStateSetSampleLocationsEnable},
+    {"nvnMultisampleStateSetSampleLocationsGridEna", (nvn_fn)missing_nvnMultisampleStateSetSampleLocationsGridEna},
+    {"nvnMultisampleStateSetSamples", (nvn_fn)missing_nvnMultisampleStateSetSamples},
     {"nvnPolygonStateGetCullFace", (nvn_fn)nvn_PolygonStateGetCullFace},
     {"nvnPolygonStateGetFrontFace", (nvn_fn)nvn_PolygonStateGetFrontFace},
     {"nvnPolygonStateGetPolygonMode", (nvn_fn)nvn_PolygonStateGetPolygonMode},

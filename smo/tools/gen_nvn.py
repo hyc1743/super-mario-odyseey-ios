@@ -75,8 +75,8 @@ WINDOW_IMPLEMENTED = {"nvnWindow" + suffix for suffix in (
 HEAD = """// 【自动生成，不要手改】由 smo/tools/gen_nvn.py 从 smo/gfx/nvn/names.txt 生成。
 //
 // 游戏通过 nvnBootstrapLoader(名字) 按名取接口；这张表就是「名字 → 宿主实现」。
-// 未实现的名字统一指向 nvn_unimplemented（首次调用打印一行、返回 0），
-// 真机日志里出现哪个名字就是下一批要补的。
+// Named missing-API wrappers preserve each invoked name in runtime diagnostics.
+// Missing command wrappers retain their existing submission rejection behavior.
 #include "nvn_host.h"
 #include "nvn_cmd.h"
 
@@ -109,6 +109,19 @@ def main():
     ])
     out.extend(f"NVN_MISSING_COMMAND({n})" for n in missing_commands)
     out.extend(["#undef NVN_MISSING_COMMAND", ""])
+    missing_apis = sorted(set(names) - impl - set(missing_commands))
+    for n in missing_apis:
+        out.extend([
+            f"static uint64_t missing_{n}(uint64_t a0,uint64_t a1,uint64_t a2,uint64_t a3,uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {{",
+            "    (void)a0;(void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;",
+            f'    return nvn_unimplemented_named("{n}");', "}",
+        ])
+    out.append("static const nvn_fn missing_apis[] = {")
+    out.extend(f"    missing_{n}," for n in missing_apis)
+    out.extend(["};", "int nvn_is_unimplemented(nvn_fn fn) {",
+                "    if(fn==nvn_unimplemented)return 1;",
+                "    for(unsigned i=0;i<sizeof missing_apis/sizeof *missing_apis;i++)if(fn==missing_apis[i])return 1;",
+                "    return 0;", "}", ""])
     out.append("static const nvn_fn missing_commands[] = {")
     out.extend(f"    (nvn_fn)missing_{n}," for n in missing_commands)
     out.extend([
@@ -138,7 +151,7 @@ def main():
         elif n in missing_commands:
             out.append(f'    {{"{n}", (nvn_fn)missing_{n}}},')
         else:
-            out.append(f'    {{"{n}", (nvn_fn)nvn_unimplemented}},')
+            out.append(f'    {{"{n}", (nvn_fn)missing_{n}}},')
     out.append("};")
     out.append(f"const unsigned g_nvn_table_n = {len(names)};")
     out.append(f"const unsigned g_nvn_impl_n = {len(impl)};")

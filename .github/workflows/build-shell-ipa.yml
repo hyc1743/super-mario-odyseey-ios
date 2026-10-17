@@ -292,6 +292,17 @@ jobs:
             BOOT_ARGS=(--romfs /tmp/smo-boot-romfs)
             curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
               -H "Accept: application/vnd.github.raw+json" \
+              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-audio-streams.zip?ref=8abbb07d7df9ee0feb687aa355f7717d53cc845b" \
+              -o /tmp/boot-audio-streams.zip
+            python3 - <<'PY'
+          import hashlib, zipfile
+          path = '/tmp/boot-audio-streams.zip'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == 'd4e70395d7935b9336ce60967e2fe05ff225c1d71017ff3e810152778757fd30'
+          with zipfile.ZipFile(path) as archive:
+              archive.extractall('/tmp/smo-boot-romfs')
+          PY
+            curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
+              -H "Accept: application/vnd.github.raw+json" \
               "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-shaders.zip?ref=e753fa3adca332fc6cd337ee19aff0f815d07fdc" \
               -o /tmp/boot-shaders.zip
             python3 - <<'PY'

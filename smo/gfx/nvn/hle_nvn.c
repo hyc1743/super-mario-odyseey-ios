@@ -10,6 +10,7 @@
 // 留给各函数自己的实现；在只有记录桩的阶段，参数原样进记录。
 #include "nvn_host.h"
 #include <stdarg.h>
+#include <pthread.h>
 
 static void (*g_log_handler)(const char *);
 void nvn_set_log_handler(void (*handler)(const char *)) { g_log_handler = handler; }
@@ -67,18 +68,26 @@ uint64_t nvn_record_call(const char *name, uint64_t a0, uint64_t a1, uint64_t a2
 static const char *g_unimpl[SEEN_MAX];
 static unsigned g_unimpl_n;
 static unsigned long long g_unimpl_calls;
+static pthread_mutex_t g_unimpl_lock=PTHREAD_MUTEX_INITIALIZER;
+
+uint64_t nvn_unimplemented_named(const char *name) {
+    int first=1;
+    pthread_mutex_lock(&g_unimpl_lock);
+    g_unimpl_calls++;
+    for(unsigned i=0;i<g_unimpl_n;i++)if(!strcmp(g_unimpl[i],name)){first=0;break;}
+    if(first && g_unimpl_n<SEEN_MAX)g_unimpl[g_unimpl_n++]=name;
+    pthread_mutex_unlock(&g_unimpl_lock);
+    if(first)NVN_LOG("NVN_API_UNIMPLEMENTED name=%s",name);
+    return 0;
+}
 
 uint64_t nvn_unimplemented(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
                           uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a0; (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-    g_unimpl_calls++;
-    // 未实现的名字没法从参数里认出来（NVN 不传名字），只报总数与首个调用的次数
-    if (g_unimpl_n < SEEN_MAX && g_unimpl_calls == 1) { g_unimpl[0] = "（首个未实现调用）"; g_unimpl_n = 1; }
-    if (g_unimpl_calls == 1) NVN_LOG("未实现的 NVN 调用（第一次；总数会在收尾时报出）");
-    return 0;
+    return nvn_unimplemented_named("unknown");
 }
-unsigned nvn_unimpl_kinds(void) { return g_unimpl_n; }
-unsigned long long nvn_unimpl_calls(void) { return g_unimpl_calls; }
+unsigned nvn_unimpl_kinds(void) { pthread_mutex_lock(&g_unimpl_lock);unsigned value=g_unimpl_n;pthread_mutex_unlock(&g_unimpl_lock);return value; }
+unsigned long long nvn_unimpl_calls(void) { pthread_mutex_lock(&g_unimpl_lock);unsigned long long value=g_unimpl_calls;pthread_mutex_unlock(&g_unimpl_lock);return value; }
 
 // ---------------------------------------------------------------- bootstrap
 const nvn_ent *nvn_lookup_ent(const char *name);
