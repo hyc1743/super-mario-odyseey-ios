@@ -13,6 +13,10 @@
 @property(nonatomic,strong) NSMutableDictionary<NSString *,id<MTLBuffer>> *buffers;
 @property(nonatomic,strong) id<MTLBuffer> visibilityBuffer;
 @property(nonatomic) NSUInteger visibilityCursor;
+/* 本遍渲染已放弃（某个附件解析不出来时置位）：后续绘制命令直接丢掉，直到下一次 SetRenderTargets。
+ * 为什么要这个：场景切换时游戏会重建资源，录下的命令仍引用旧纹理；以前这种失败会让整个提交失败
+ * （NVN_GPU_SUBMIT_FAILED → abort → 闪退）。真机上 NVN 不校验生命周期，我们也不该因此杀进程。 */
+@property(nonatomic) int skipPass;
 @end
 id<MTLBuffer> nvn_metal_buffer(SMOGuestEncoder *,uint64_t,uint64_t,NSUInteger *);
 id<MTLDevice> nvn_metal_device(void);

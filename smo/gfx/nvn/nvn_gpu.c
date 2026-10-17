@@ -33,7 +33,9 @@ uint64_t nvn_gpu_submit(int count, const uint64_t *handles) {
     preflight checked={0};
     for (int i=0;i<count;++i)
         if (!nvn_cmd_walk(handles[i],check_command,&checked)) return 0;
-    if (checked.missing) return 0;
+    /* 有未实现的命令时以前直接拒掉整单 → 上层 NVN_DIE → 闪退。现在降级：照常提交，
+     * 缺的那几条在录制时就已跳过（NVN_COMMAND_UNSUPPORTED 已逐条记过）。 */
+    if (checked.missing) NVN_LOG("NVN_SUBMIT_DEGRADED 有 %u 个未实现命令（继续提交）", checked.count);
     pthread_mutex_lock(&submit_lock);
     uint64_t sequence = gpu.submit(count, handles);
     pthread_mutex_unlock(&submit_lock);

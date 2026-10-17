@@ -29,8 +29,8 @@ int main(void) {
     assert(!call("QueueInitialize",&q,(uintptr_t)&b,0,0));
     nvn_gpu_install_backend(&backend);
     assert(call("QueueInitialize",&q,(uintptr_t)&b,0,0));
-    /* An unknown recorded GPU command rejects the entire batch before the
-     * backend sees it, rather than dropping a draw and signaling its fence. */
+    /* 未实现的命令现在**降级**：照常提交（backend 看得到），缺的那几条在录制时就已跳过。
+     * 以前整单拒掉 → 上层 NVN_DIE → 真机在场景切换时闪退（第九轮改成降级）。 */
     NVNcommandBuffer cb;
     NVNmemoryPool pool;
     _Alignas(8) unsigned char command_memory[256];
@@ -47,7 +47,8 @@ int main(void) {
     call("CommandBufferDispatchComputeIndirect",&cb,0,0,3);
     call("CommandBufferResolveDepthBuffer",&cb,0,0,0);
     uint64_t unknown=call("CommandBufferEndRecording",&cb,0,0,0);
-    assert(!nvn_gpu_submit(1,&unknown) && submitted==0);
+    assert(nvn_gpu_submit(1,&unknown) && submitted==1);   /* 降级：仍然提交 */
+    submitted=0;                                          /* 后面的断言按自己的计数来 */
     call("CommandBufferFinalize",&cb,0,0,0);
     NVNcommandBuffer safe_cb;
     assert(call("CommandBufferInitialize",&safe_cb,0,0,0));

@@ -384,7 +384,19 @@ static int prepare_draw(SMOGuestEncoder *e) {
         nvn_shader_ent entry=s.vs.sourceEntry;
         s.vs=load_shader(e,&entry,depthMode);if(!s.vs)return 0;
     }
-    MTLRenderPassDescriptor *pass=pass_for(e);if(!pass)return reject("render attachments");
+    MTLRenderPassDescriptor *pass=pass_for(e);
+    if(!pass){
+        /* 附件解析不出来（典型：场景切换时游戏重建了纹理，而录下的命令还引用旧的）：
+         * 放弃这一遍绘制、继续跑，而不是让整帧提交失败（那会 NVN_DIE → 闪退）。
+         * 真机上 NVN 按地址访问、不校验生命周期，我们也不该因为生命周期而杀进程。 */
+        if(!e.skipPass){
+            static unsigned logged;
+            if(logged<16){logged++;NVN_LOG("NVN_RENDER_PASS_SKIPPED attachments（本遍绘制丢弃，继续运行）");}
+        }
+        e.skipPass=1;
+        nvn_metal_render_end(e);
+        return 1;
+    }
     id<MTLRenderPipelineState> pipeline=pipeline_for(e,pass);if(!pipeline)return reject("render pipeline");
     if(!e.render){
         [e.blit endEncoding];e.blit=nil;

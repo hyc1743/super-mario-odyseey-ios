@@ -80,6 +80,8 @@ static id<MTLBlitCommandEncoder> blit_for(SMOGuestEncoder *e) {
 }
 static int encode(void *context, uint32_t op, const void *payload, size_t size) {
     SMOGuestEncoder *e = (__bridge SMOGuestEncoder *)context;
+    if (op == NVN_CMD_SET_RT) e.skipPass = 0;          /* 新目标：重新尝试 */
+    else if (e.skipPass && op >= NVN_CMD_SET_RT) return 1;  /* 本遍已放弃：丢掉这条渲染命令 */
     if(op==NVN_CMD_UNSUPPORTED){
         if(size!=sizeof(nvn_cmd_missing))return 0;
         nvn_cmd_missing missing;memcpy(&missing,payload,sizeof missing);
@@ -231,8 +233,11 @@ static uint64_t submit_on_worker(int count, const uint64_t *handles) {
             if (!nvn_cmd_walk(handles[i],encode,(__bridge void *)e)) {
                 [e.blit endEncoding];
                 nvn_metal_render_end(e);
-                NVN_LOG("NVN_GPU_ENCODING_FAILED handle_index=%d",i);
-                return 0;
+                /* 降级：跳过这一条命令缓冲继续提交。以前这里 return 0 → 上层 NVN_DIE → 闪退；
+                 * 而失败往往只是某遍渲染的附件在场景切换时被重建过（一帧缺画面，不该杀进程）。 */
+                static _Atomic unsigned failed;
+                unsigned k=atomic_fetch_add(&failed,1);
+                if(k<16)NVN_LOG("NVN_GPU_ENCODING_FAILED handle_index=%d（降级：跳过该命令缓冲，继续提交）",i);
             }
         }
         [e.blit endEncoding]; e.blit=nil;

@@ -185,12 +185,27 @@ id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapsho
         const uint64_t *w=s->words;pixel_info p=pixel((uint32_t)w[5]);MTLTextureType type;
         nvn_tex_layout l;uint64_t layer_stride=0,storage=0;
         nvn_st_ent *pool=nvn_st_get((const void *)(uintptr_t)w[9],4);
-        if(p.metal==MTLPixelFormatInvalid||!texture_type((uint32_t)w[7],&type)||
-           !layout(w,&l,&layer_stride,&storage)||!pool||!pool->v[1]||w[10]>pool->v[2]||
-           storage>pool->v[2]-w[10]||pool->v[1]>UINT64_MAX-pool->v[2]||
-           (p.compressed&&render_target)||(p.depth&&!render_target)||
-           (w[8]>1&&(!render_target||![device supportsTextureSampleCount:(NSUInteger)w[8]]))||
-           (p.compressed==2&&(l.dims!=2||![device supportsFamily:MTLGPUFamilyApple1])))goto failure;
+        /* 失败判据逐条拆开记原因：以前只有一个「UNSUPPORTED」，看不出是格式、布局还是存储池，
+         * 真机上只能猜（第八/第九轮都卡在这里）。 */
+        const char *why=NULL;
+        if(p.metal==MTLPixelFormatInvalid)why="pixel format";
+        else if(!texture_type((uint32_t)w[7],&type))why="texture type";
+        else if(!layout(w,&l,&layer_stride,&storage))why="layout";
+        else if(!pool)why="pool not registered";
+        else if(!pool->v[1])why="pool has no memory";
+        else if(w[10]>pool->v[2])why="offset beyond pool";
+        else if(storage>pool->v[2]-w[10])why="storage beyond pool";
+        else if(pool->v[1]>UINT64_MAX-pool->v[2])why="pool address overflow";
+        else if(p.compressed&&render_target)why="compressed as render target";
+        else if(p.depth&&!render_target)why="depth only as render target";
+        else if(w[8]>1&&(!render_target||![device supportsTextureSampleCount:(NSUInteger)w[8]]))why="sample count";
+        else if(p.compressed==2&&(l.dims!=2||![device supportsFamily:MTLGPUFamilyApple1]))why="astc constraints";
+        if(why){
+            static unsigned rejected;
+            if(rejected<24){rejected++;NVN_LOG("NVN_METAL_TEXTURE_REJECT %s format=%llu target=%llu samples=%llu render=%d pool=%u",
+                why,(unsigned long long)w[5],(unsigned long long)w[7],(unsigned long long)w[8],render_target,pool?1:0);}
+            goto failure;
+        }
         MTLTextureDescriptor *d=[MTLTextureDescriptor new];d.textureType=type;d.pixelFormat=p.metal;
         d.width=l.width;d.height=l.height;d.depth=1;d.mipmapLevelCount=l.mip_levels;
         d.arrayLength=(type==MTLTextureTypeCubeArray)?l.layers/6:(type==MTLTextureTypeCube?1:l.layers);

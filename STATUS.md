@@ -34,7 +34,7 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 若干卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0…5`（每卷 ≤1 GB，共 4636 文件）（第二十七轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.6.5 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.6.6 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -2389,3 +2389,42 @@ SDK 的事件布局由测试替身提供，内核句柄/等待使用实际 hle_t
 不能据此宣称完整游戏或真机启动成功。
 
 Windows 快速回归 7/7 通过（含新增 vi_selftest，共 16 个 C 自检）。
+
+## 2.123 真机第九轮：按 Start 后闪退 = 渲染附件缺失把整帧提交搞失败（v0.6.6）
+
+用户推进到 r258（渲染、音频、触屏、帧节奏都接上了），日志 2657 行，最后停在：
+
+```
+[nvn] NVN_RESOURCE_MISS type=12 object=0x70f5197ce8（render command skipped）× 多次
+[nvn] NVN_METAL_RESOURCE_UNSUPPORTED texture=0x16b2f4370 format=52 target=1 samples=0 render=1
+[nvn] NVN_GPU_RENDER_ENCODING_FAILED op=105 size=16
+[nvn] NVN_GPU_ENCODING_FAILED handle_index=0
+[nvn] FATAL NVN_GPU_SUBMIT_FAILED count=1     → SIGABRT
+```
+
+即：场景切换时游戏重建了纹理（录下的命令仍引用旧对象，注册表里查不到）→ 某个深度附件
+（`format=52 = NVN_FORMAT_DEPTH32F`）解析不出来 → 这一帧编码失败 → 整单提交失败 →
+`nvn_QueueSubmitCommands` 里的 `NVN_DIE` → 闪退。
+
+**真机上 NVN 按地址访问、不校验生命周期**；我们却因为「注册表里没有」把进程杀了。改成降级：
+
+- `nvn_metal_render.c`：附件解析不出来时**放弃这一遍渲染**（`skipPass`），后续绘制命令丢掉，
+  直到下一次 `SetRenderTargets` —— 缺一帧画面，不再杀进程
+- `nvn_metal_runtime.m`：单条命令缓冲编码失败 → 记日志后**继续提交**（以前 return 0 → 上层 NVN_DIE）
+- `nvn_gpu.c`：提交前的「有未实现命令」不再拒整单（`NVN_SUBMIT_DEGRADED`）
+- `nvn_metal_resources.m`：纹理创建失败把**具体判据**写出来
+  （pixel format / texture type / layout / pool 未注册 / 超出池 / 压缩当渲染目标 / depth 用途 / 采样数 …）
+- `queue_selftest` 的契约随之改为降级语义（未实现命令仍提交）
+
+## 2.124 音频：DSP 处理后的输出是 0（v0.6.6 加诊断）
+
+`AUDIO_DEVICE_PCM … audible=0 peak=0 input_peak=0`：渲染器被正常驱动
+（`AUDIO_RENDERER_MIX_FRAMES` 每秒 200 次），但取出来的 PCM 全是 0。
+`input_peak` 是在 DSP 处理**前**读的（本来就该是 0），所以「游戏没出声」与「我们读错位置/时机」
+两种可能长得一样。v0.6.6 增加：
+
+- `AUDIO_SINK_LAYOUT`（地址/声道/缓冲数/帧数/声道映射/命令长度，只打一次）
+- `AUDIO_SINK_POST_PROCESS peak=…`（DSP 处理**后**再读同一个缓冲区，最多 64 行）
+
+有这两条，下一轮就能判定是「客体 DSP 真没混音」（→ 查 guest 侧音频命令/音量/是否还没开始播）
+还是「宿主读错了缓冲区或读得太早」（→ 查 sink 命令字段与转换）。

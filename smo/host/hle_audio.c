@@ -172,6 +172,36 @@ static uint32_t render_frame(renderer *r) {
         limit(r->processor,UINT32_MAX);
         setup(r->processor,r->scratch,0x20+offset-begin);process(r->processor);
         if(sink){
+            /* DSP 处理之后再读一次 sink 缓冲区：这是「游戏真没出声」与「我们读错位置/时机」的分水岭。
+             * 真机上以前只有 peak=0，两边的日志长得一样，只能猜。 */
+            {
+                uint64_t addr=smo_audio_u64(cmd+0x118);uint32_t ch=smo_audio_u32(cmd+0x120);
+                uint32_t bufs=smo_audio_u32(list+0x10),frames=smo_audio_u32(list+0x14);
+                static unsigned layout_logged;
+                if(!layout_logged && addr){
+                    layout_logged=1;
+                    LOG("AUDIO_SINK_LAYOUT addr=%#llx channels=%u buffers=%u frames=%u rate=%u "
+                                  "map=%u,%u,%u,%u,%u,%u cmd_bytes=%zu",
+                                  (unsigned long long)addr,ch,bufs,frames,smo_audio_u32(list+0x18),
+                                  (unsigned char)cmd[0x124],(unsigned char)cmd[0x125],(unsigned char)cmd[0x126],
+                                  (unsigned char)cmd[0x127],(unsigned char)cmd[0x128],(unsigned char)cmd[0x129],length);
+                }
+                if(addr && ch>=1 && ch<=6 && frames && frames<=240 && bufs<=16){
+                    const int32_t *mix=(const int32_t *)(uintptr_t)addr;unsigned post_peak=0;
+                    for(uint32_t c=0;c<ch;c++){
+                        uint32_t index=(uint8_t)cmd[0x124+c];if(index>=bufs)continue;
+                        for(uint32_t f=0;f<frames;f++){
+                            int32_t sample=mix[index*frames+f];
+                            unsigned v=sample<0?(unsigned)(-(int64_t)sample):(unsigned)sample;
+                            if(v>post_peak)post_peak=v;
+                        }
+                    }
+                    static unsigned post_logged;
+                    if(post_logged<8 || (post_peak && post_logged<64)){post_logged++;
+                        LOG("AUDIO_SINK_POST_PROCESS peak=%u frames=%u channels=%u buffers=%u",
+                                      post_peak,frames,ch,bufs);}
+                }
+            }
             int samples=smo_audio_device_pcm(list,cmd,length,r->pcm,240);
             if(samples<0){LOG("AUDIO_DEVICE_SINK_UNSUPPORTED frames=%u rate=%u channels=%u",smo_audio_u32(list+0x14),smo_audio_u32(list+0x18),length>=0x124?smo_audio_u32(cmd+0x120):0);return AUDIO_INVALID;}
             unsigned peak=0;for(int s=0;s<samples*2;s++){unsigned value=r->pcm[s]<0?-(int)r->pcm[s]:r->pcm[s];if(value>peak)peak=value;}
