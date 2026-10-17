@@ -70,6 +70,7 @@ targets:
       - path: ../gfx/nvn/nvn_metal_render.m
       - path: ../gfx/nvn/nvn_metal_resources.m
       - path: ../gfx/nvn/nvn_shader.c
+      - path: ../gfx/nvn/nvn_shader_archive.c
       - path: ../gfx/nvn/nvn_replay.c
       - path: ../gfx/nvn/nvn_tex.c
       - path: ../gfx/nvn/nvn_bcdec.c

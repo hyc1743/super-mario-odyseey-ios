@@ -363,3 +363,26 @@ with an explicit status. Embedded packaging without a shader archive is rejected
 The IPA remains private. Physical display, device startup stability, audio output
 and the future input frontend still need separate validation.
 
+## Device payload and signing regression (2026-10-17)
+
+Device logs from version 0.1.233 confirm that shader index loading succeeds,
+but module loading falls back to a missing Guest.framework and aborts before
+entering the game. embed_inject.py skipped enabling SMO_EMBED whenever any
+GCC_PREPROCESSOR_DEFINITIONS key already existed, including the newer target
+Metal definition. Native CI supplied SMO_EMBED explicitly and did not cover
+this App build setting. A synthetic regression now exercises that exact case.
+
+Generated Embedded.xcconfig is passed directly to xcodebuild and includes both
+required compile switches and guest writable-segment linker settings. Project
+generation follows generated source creation. The actual final executable must
+contain an embedded-loader marker from loader_apple.c and all nine module
+sections with the expected alignment, RX/RW protections and input digests.
+The new verifier rejects the previously delivered IPA.
+
+Signing previously processed 45,225 individual shader resources. A single SMOA
+archive and standalone shader index reduce this to two signed resources. The
+renderer reads requested members directly, without extraction or copying the
+whole archive into memory. Bounds, duplicate names, complete footer and member
+CRC are checked. Native game startup uses the same archive reader as the App.
+Actual signing duration and physical iOS behavior require device validation.
+

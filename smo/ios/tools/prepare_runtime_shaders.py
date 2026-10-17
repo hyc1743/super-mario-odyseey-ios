@@ -4,7 +4,9 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import struct
 import zipfile
+import zlib
 
 
 def prepare(archive, destination):
@@ -54,9 +56,23 @@ def prepare(archive, destination):
                 raise ValueError("shader index references unavailable source")
         # Validate every input before writing the app. Only flat runtime paths
         # selected above are copied; reflection and unrelated archive files stay out.
-        destination.mkdir(parents=True, exist_ok=False)
         for name, data in files.items():
-            (destination / name).write_bytes(data)
+            if len(name.encode("ascii")) >= 64 or len(data) > 16 * 1024 * 1024:
+                raise ValueError("runtime archive member exceeds reader bounds")
+        destination.mkdir(parents=True, exist_ok=False)
+        (destination / "shaders.idx").write_bytes(files["shaders.idx"])
+        # One signed resource replaces tens of thousands of small bundle files.
+        # Runtime reads only requested members, without extracting a second copy.
+        with (destination / "shaders.smoa").open("wb") as target:
+            target.write(b"SMOA\0\1")
+            total = 0
+            for name, data in sorted(files.items()):
+                encoded = name.encode("ascii")
+                target.write(struct.pack("<HII", len(encoded), len(data), zlib.crc32(data)))
+                target.write(encoded)
+                target.write(data)
+                total += len(data)
+            target.write(b"END!" + struct.pack("<Q", total))
     print(f"IOS_RUNTIME_SHADERS shaders={len(manifest['shaders'])} depth_variants={variants}")
 
 

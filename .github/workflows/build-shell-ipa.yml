@@ -309,11 +309,11 @@ jobs:
           import hashlib, zipfile
           path = '/tmp/boot-shaders.zip'
           assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '97cfbed25e77df064fe0c564a7f56495f73d3f727c4e210d1f395e0e863c1951'
-          with zipfile.ZipFile(path) as archive:
-              archive.extractall('/tmp/smo-boot-shaders')
           PY
-            export SMO_SHADER_IDX=/tmp/smo-boot-shaders/shaders.idx
-            export SMO_SHADER_DIR=/tmp/smo-boot-shaders
+            python3 smo/ios/tools/prepare_runtime_shaders.py /tmp/boot-shaders.zip /tmp/smo-device-shaders
+            export SMO_SHADER_IDX=/tmp/smo-device-shaders/shaders.idx
+            export SMO_SHADER_DIR=/tmp/smo-device-shaders
+            export SMO_SHADER_BUNDLE=/tmp/smo-device-shaders/shaders.smoa
           fi
           python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded "${BOOT_ARGS[@]}"
       - name: Preserve unmatched shader evidence privately

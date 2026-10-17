@@ -66,7 +66,6 @@ mkdir -p Gen "$OUT"
 # 在当前目录生成工程（**不是** Gen/）：xcodegen 把 --project 指定的目录当作相对基准，
 # 若生成到 Gen/，project.yml 里的 info.path(Sources/Resources) 都会被拼成 Gen/Gen/Info.plist、
 # Gen/Sources 之类 —— CI 上就是这么报的：Build input file cannot be found: .../Gen/Gen/Info.plist
-xcodegen generate --spec project.yml --project .
 
 # 构建日志同时落到文件：CI 在失败时把它传成 artifact，否则只有管理员能看日志
 LOG="$OUT/xcodebuild.log"
@@ -88,8 +87,18 @@ else
   echo "== 跳过三段内嵌（没有 work/rewrite/*.patched.bin；壳仍然能编，只是没有客体映像）=="
 fi
 
+BUILD_OPTIONS=()
+if [ -f "$EMBED_SRC" ]; then
+  EMBED_CONFIG="${EMBED_SRC%.*}.xcconfig"
+  [ -f "$EMBED_CONFIG" ] || { echo "Missing embedded build configuration"; exit 1; }
+  BUILD_OPTIONS=(-xcconfig "$EMBED_CONFIG")
+fi
+# Enumerate generated C/assembly only after they exist.
+xcodegen generate --spec project.yml --project .
+
 set +e
 xcodebuild \
+  "${BUILD_OPTIONS[@]}" \
   -project SMOMobile.xcodeproj \
   -scheme SMOMobile \
   -configuration Release \
@@ -119,6 +128,9 @@ if [ -f "$EMBED_SRC" ] && [ -z "${SMO_SHADER_ARCHIVE:-}" ]; then
 fi
 if [ -n "${SMO_SHADER_ARCHIVE:-}" ]; then
   "$PY" "$ROOT/smo/ios/tools/prepare_runtime_shaders.py" "$SMO_SHADER_ARCHIVE" "$APP/RuntimeShaders"
+fi
+if [ -f "$EMBED_SRC" ]; then
+  "$PY" "$ROOT/smo/ios/tools/check_device_payload.py" "$APP/SMOMobile" "$EMBED_SRC.manifest.tsv"
 fi
 
 # 未签名 IPA = Payload/<App>.app 打包成 zip。签名由使用者在自己的机器上做

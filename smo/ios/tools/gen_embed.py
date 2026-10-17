@@ -182,6 +182,12 @@ def main():
     c.append("}")
     cpath = os.path.splitext(dst)[0] + ".c"
     open(cpath, "w", encoding="utf-8", newline=chr(10)).write(chr(10).join(c) + chr(10))
+    # Pass this file directly to xcodebuild: target-level Metal definitions must
+    # not suppress or override the embedded loader's required compile switch.
+    config = os.path.splitext(dst)[0] + ".xcconfig"
+    with open(config, "w", encoding="utf8", newline="\n") as f:
+        f.write("GCC_PREPROCESSOR_DEFINITIONS = $(inherited) SMO_METAL_RUNTIME=1 SMO_EMBED=1\n")
+        f.write("OTHER_LDFLAGS = $(inherited) " + " ".join(flags) + "\n")
     print(f"已生成 {dst}（{len(names)} 个模块，{len(rows)} 段）、{man} 与 {cpath}")
     print(" ".join(flags))
     return 0

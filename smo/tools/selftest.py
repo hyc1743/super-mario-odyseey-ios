@@ -451,6 +451,8 @@ def test_ios_runtime_shaders():
     import json
     import tempfile
     import zipfile
+    import struct
+    import zlib
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ios" / "tools"))
     from prepare_runtime_shaders import prepare
@@ -474,10 +476,22 @@ def test_ios_runtime_shaders():
                     z.writestr(name, data)
         pack()
         prepare(archive, root / "RuntimeShaders")
+        packed = (root / "RuntimeShaders" / "shaders.smoa").read_bytes()
+        unpacked = {}
+        position = 6
+        while packed[position:position+4] != b"END!":
+            namesize, size, crc = struct.unpack_from("<HII", packed, position)
+            position += 10
+            name = packed[position:position+namesize].decode()
+            position += namesize
+            data = packed[position:position+size]
+            position += size
+            assert zlib.crc32(data) == crc
+            unpacked[name] = data
         check("iOS package preserves original and converted shaders",
-              (root / "RuntimeShaders" / (key + ".metal")).read_bytes() == source and
-              (root / "RuntimeShaders" / (key + ".clip.metal")).read_bytes() == clip)
-        check("iOS package only copies selected flat runtime files", not (root / "must-not-extract").exists())
+              unpacked[key + ".metal"] == source and unpacked[key + ".clip.metal"] == clip)
+        check("iOS package reduces signed shader files to two", len(list((root / "RuntimeShaders").iterdir())) == 2)
+        check("iOS package only copies selected flat runtime files", "../must-not-extract" not in unpacked)
         files[key + ".clip.metal"] = b"corrupt"
         pack()
         try:

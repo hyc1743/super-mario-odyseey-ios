@@ -4,6 +4,8 @@
 //      这是「运行时算的键 == 离线算的键」的直接验证（CI 里跑合成那部分即可）。
 #include "../nvn_host.h"
 #include "../nvn_shader.h"
+#include "../nvn_shader_archive.h"
+#include <assert.h>
 #include "../nvn_state.h"
 
 static int fails;
@@ -85,7 +87,41 @@ static void span_variant_test(void) {
     remove(path);nvn_st_del(object,4);nvn_shader_reset();
 }
 
+static void archive_fixture(const char *path,int duplicate,int corrupt,int footer) {
+    FILE *f=fopen(path,"wb");assert(f);
+    fwrite("SMOA\0\1",1,6,f);
+    for(int i=0;i<(duplicate?2:1);i++){
+        const uint8_t header[]={7,0,5,0,0,0,0x86,0xa6,0x10,0x36};
+        fwrite(header,1,sizeof header,f);fwrite("a.metal",1,7,f);fwrite(corrupt?"wrong":"hello",1,5,f);
+    }
+    if(footer){
+        uint8_t end[12]={'E','N','D','!',duplicate?10:5,0,0,0,0,0,0,0};fwrite(end,1,sizeof end,f);
+    }
+    fclose(f);
+}
+static void archive_test(void) {
+    const char *good="shader-archive-good.tmp",*bad="shader-archive-bad.tmp";
+    archive_fixture(good,0,0,1);
+    CHK(nvn_shader_archive_open(good)==1,"single-file shader archive opens and indexes members");
+    size_t size=0;char *data=nvn_shader_archive_read("a.metal",&size);
+    CHK(data&&size==5&&!strcmp(data,"hello"),"archive returns exact shader bytes and terminator");free(data);
+    CHK(!nvn_shader_archive_read("../a.metal",&size)&&size==0,"archive lookup cannot escape the bundle");
+    archive_fixture(bad,1,0,1);
+    CHK(nvn_shader_archive_open(bad)<0,"duplicate archive names are rejected");
+    archive_fixture(bad,0,0,0);
+    CHK(nvn_shader_archive_open(bad)<0,"incomplete archive is rejected");
+    data=nvn_shader_archive_read("a.metal",&size);
+    CHK(data&&size==5&&!memcmp(data,"hello",5),"failed archive replacement preserves current resource");free(data);
+    nvn_shader_archive_close();
+    archive_fixture(bad,0,1,1);
+    CHK(nvn_shader_archive_open(bad)==1&&!nvn_shader_archive_read("a.metal",&size),"corrupt member fails CRC on demand");
+    nvn_shader_archive_close();
+    CHK(!nvn_shader_archive_active(),"closed archive releases the active resource");
+    remove(good);remove(bad);
+}
+
 int main(int argc, char **argv) {
+    archive_test();
     printf("== 1. 合成：自己造的 blob 与索引 ==\n");
     fill(g_blobA, sizeof g_blobA, 7);
     fill(g_blobB, sizeof g_blobB, 99);

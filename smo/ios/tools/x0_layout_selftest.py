@@ -14,6 +14,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+import zipfile
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -92,6 +94,29 @@ def main():
         check(f"guest_dylib.py 拒绝（退出码 {rc}）", rc != 0 and "边界页" in out)
         check("guest_dylib.py 没写出 Guest",
               not os.path.exists(os.path.join(d, "g", "Guest.framework", "Guest")))
+
+    print("== 4. Existing Metal definitions must not suppress embedded loader configuration ==")
+    with tempfile.TemporaryDirectory(prefix="embedcfg_") as d:
+        root = Path(d)
+        source = root / "smo" / "ios" / "Sources"
+        source.mkdir(parents=True)
+        project = source.parent / "project.yml"
+        original = 'settings:\n  base:\n    GCC_PREPROCESSOR_DEFINITIONS: ["SMO_METAL_RUNTIME=1"]\n'
+        project.write_text(original, encoding="utf8")
+        img, hdr = make_image(0x4008)
+        write_artifacts(d, "good", img, hdr)
+        package = root / "input.zip"
+        with zipfile.ZipFile(package, "w") as z:
+            for suffix in ("patched.bin", "fixups.tsv", "gates.tsv"):
+                z.write(root / ("good." + suffix), "good." + suffix)
+        rc, out = run([os.path.join(HERE, "embed_inject.py"), str(package), d, "good"])
+        config = source / "Embedded.xcconfig"
+        check("embedded injection succeeds with pre-existing target definitions", rc == 0 and config.is_file())
+        text = config.read_text(encoding="utf8") if config.is_file() else ""
+        check("generated build configuration enables both embedded loader and Metal",
+              "SMO_EMBED=1" in text and "SMO_METAL_RUNTIME=1" in text and "$(inherited)" in text)
+        check("generated configuration sets writable guest segments", "-Wl,-segprot,__DMgoodW,rw,rw" in text)
+        check("injection preserves the repository project template", project.read_text(encoding="utf8") == original)
 
     print()
     if FAILS:

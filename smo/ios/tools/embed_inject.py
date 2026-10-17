@@ -13,7 +13,7 @@
 脚本做的事：
   1. 解到临时目录
   2. `gen_embed.py` 生成 `<仓库根>/smo/ios/Sources/Embedded.S` 与同名的 `.c`（内嵌表）
-  3. 把 `GCC_PREPROCESSOR_DEFINITIONS: SMO_EMBED=1` 与 `OTHER_LDFLAGS: <-segprot …>` 写进 project.yml
+  3. 生成 Embedded.xcconfig，由 shell_build.sh 显式传给 xcodebuild，启用内嵌加载和三段权限
 """
 import os
 import subprocess
@@ -62,18 +62,11 @@ def main():
         return 3
     flags = out.splitlines()[-1].strip()
 
-    p = os.path.join(root, "smo", "ios", "project.yml")
-    s = open(p, encoding="utf-8").read()
-    if "GCC_PREPROCESSOR_DEFINITIONS" not in s:
-        add = ('    GCC_PREPROCESSOR_DEFINITIONS: "SMO_EMBED=1"\n'
-               f'    OTHER_LDFLAGS: "{flags}"\n')
-        anchor = '    CLANG_ENABLE_OBJC_ARC: "YES"\n'
-        if anchor not in s:
-            print("🔴 project.yml 里找不到插入点")
-            return 4
-        s = s.replace(anchor, anchor + add, 1)
-        open(p, "w", encoding="utf-8", newline="\n").write(s)
-    print(f"已写入 {dst} 与 .c 表；工程设置注入 SMO_EMBED=1、{flags}")
+    config = os.path.splitext(dst)[0] + ".xcconfig"
+    if not os.path.isfile(config):
+        print("Missing generated embedded build configuration")
+        return 4
+    print(f"已写入 {dst}、.c 表与构建配置 {config}；SMO_EMBED=1、{flags}")
     return 0
 
 

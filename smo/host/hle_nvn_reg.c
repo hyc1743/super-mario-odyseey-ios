@@ -24,8 +24,15 @@ static void __attribute__((constructor)) nvn_reg(void) {
 // 索引与 MSL 都是**从游戏着色器派生出来的**，所以不进仓库：由使用者在本机用
 // smo/gfx/shader_index.py 生成（见 docs/GAME_FILES.md）。
 #include "../gfx/nvn/nvn_shader.h"
+#include "../gfx/nvn/nvn_shader_archive.h"
 #include <stdlib.h>
 static void __attribute__((constructor)) nvn_shader_reg(void) {
+    const char *bundle=getenv("SMO_SHADER_BUNDLE");
+    if(bundle){
+        int count=nvn_shader_archive_open(bundle);
+        if(count<=0)die("NVN_SHADER_ARCHIVE_INVALID");
+        LOG("NVN_SHADER_ARCHIVE_READY entries=%d",count);
+    }
     const char *p = getenv("SMO_SHADER_IDX");
     if (!p) p = "shaders.idx";
     int n = nvn_shader_load(p);

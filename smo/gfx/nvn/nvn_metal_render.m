@@ -5,6 +5,7 @@
 #include "nvn_cmd_render.h"
 #include "nvn_render_state.h"
 #include "nvn_shader.h"
+#include "nvn_shader_archive.h"
 #include "nvn_state.h"
 #include "nvn_host.h"
 #include <math.h>
@@ -129,6 +130,18 @@ static int guest_depth_mode(SMORenderState *s) {
     nvn_st_ent *device=nvn_st_get((void *)(uintptr_t)s->programDevice,1);
     return device?(int)device->v[5]:1; /* synthetic host shaders already use Metal depth */
 }
+static NSData *shader_data(NSString *root,NSString *name) {
+    if(nvn_shader_archive_active()){
+        size_t length=0;void *bytes=nvn_shader_archive_read(name.UTF8String,&length);
+        if(!bytes)return nil;
+        return [NSData dataWithBytesNoCopy:bytes length:length freeWhenDone:YES];
+    }
+    return [NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:name]];
+}
+static NSString *shader_source(NSString *root,NSString *name) {
+    NSData *data=shader_data(root,name);
+    return data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+}
 static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entry,int depthMode) {
     SMORenderState *s=(SMORenderState *)e.renderState;
     NSString *filename=[NSString stringWithUTF8String:entry->msl];
@@ -142,9 +155,8 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
     NSString *root=[NSString stringWithUTF8String:directory];
     if(![filename.lastPathComponent isEqualToString:filename])return nil;
     NSError *error=nil;
-    NSString *source=[NSString stringWithContentsOfFile:[root stringByAppendingPathComponent:filename]
-        encoding:NSUTF8StringEncoding error:&error];
-    NSData *data=[NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:[key stringByAppendingString:@".bindings.json"]]];
+    NSString *source=shader_source(root,filename);
+    NSData *data=shader_data(root,[key stringByAppendingString:@".bindings.json"]);
     NSDictionary *bindings=data?[NSJSONSerialization JSONObjectWithData:data options:0 error:&error]:nil;
     if(!source || ![bindings isKindOfClass:[NSDictionary class]] || [bindings[@"version"] intValue]!=1 ||
        ![bindings[@"key"] isEqualToString:key] || [bindings[@"stage"] intValue]!=entry->stage ||
@@ -156,7 +168,7 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
         if(![variant isKindOfClass:NSString.class]||![variant.lastPathComponent isEqualToString:variant]){
             NVN_LOG("NVN_METAL_SHADER_DEPTH_VARIANT_MISSING key=%s",key.UTF8String);return nil;
         }
-        source=[NSString stringWithContentsOfFile:[root stringByAppendingPathComponent:variant] encoding:NSUTF8StringEncoding error:&error];
+        source=shader_source(root,variant);
         if(!source)return nil;
     }
     MTLCompileOptions *options=[MTLCompileOptions new];

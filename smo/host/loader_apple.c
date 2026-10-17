@@ -46,6 +46,12 @@
 // 内嵌表只在**链接了生成表**的构建里存在（embed 自检、iOS App）。Mach-O 的弱导入对数据符号
 // 不生效、对函数也不可靠（ld64 仍报 undefined），所以干脆用显式宏开关 —— 最不折腾、必能链接。
 #ifdef SMO_EMBED
+#if TARGET_OS_IPHONE
+/* The final Mach-O verifier checks the actual loader translation unit, rather
+ * than inferring its compile mode from generated source files or CI flags. */
+__attribute__((used,section("__DATA_CONST,__smo_boot")))
+static const unsigned char dm_embedded_loader_contract[8] = {'S','M','O','E','M','B',1,0};
+#endif
 const dm_embed_mod *dm_embed_table(unsigned *n);     // 由 gen_embed.py 生成的 .c 提供
 
 const dm_embed_mod *dm_embed_find(const char *name) {

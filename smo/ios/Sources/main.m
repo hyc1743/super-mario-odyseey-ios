@@ -17,6 +17,7 @@
 #include "hle.h"
 #include "hle_thread.h"
 #include "nvn_shader.h"
+#include "nvn_shader_archive.h"
 extern void dm_jump_guest(void *arg, void *fn);
 void dm_crash_install(void);        // crashlog.c：信号 → PC/LR/帧链写进日志
 
@@ -198,6 +199,14 @@ static void RunHost(void) {
     setenv("SMO_FONT_DIR", fontDirectory.fileSystemRepresentation, 1);
     NSString *shaderDirectory = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"RuntimeShaders"];
     NSString *shaderIndex = [shaderDirectory stringByAppendingPathComponent:@"shaders.idx"];
+    NSString *shaderArchive = [shaderDirectory stringByAppendingPathComponent:@"shaders.smoa"];
+    int shaderFiles=nvn_shader_archive_open(shaderArchive.fileSystemRepresentation);
+    if(shaderFiles<=0){
+        LOG("IOS_RUNTIME_SHADER_ARCHIVE_INVALID");
+        dm_progress_finish(DM_RUN_FAIL, "着色器资源包不完整，请重新安装测试包");
+        return;
+    }
+    LOG("IOS_RUNTIME_SHADER_ARCHIVE_READY entries=%d",shaderFiles);
     if (setenv("SMO_SHADER_DIR", shaderDirectory.fileSystemRepresentation, 1) ||
         setenv("SMO_SHADER_IDX", shaderIndex.fileSystemRepresentation, 1)) {
         dm_progress_finish(DM_RUN_FAIL, "无法设置着色器资源路径");
