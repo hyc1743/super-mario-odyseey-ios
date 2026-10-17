@@ -35,6 +35,11 @@ static int32_t g_lx, g_ly, g_rx, g_ry;
 static uint32_t g_style = STYLE_HANDHELD | STYLE_FULLKEY;   // 默认两种样式都算接着
 static int g_touch_count;
 static uint8_t g_touch[16][0x28];
+void dm_input_set_state(uint64_t buttons,int32_t lx,int32_t ly,int32_t rx,int32_t ry) {
+    pthread_mutex_lock(&g_in_lock);
+    g_buttons=buttons;g_lx=lx;g_ly=ly;g_rx=rx;g_ry=ry;
+    pthread_mutex_unlock(&g_in_lock);
+}
 
 void dm_input_set_buttons(uint64_t buttons) {
     pthread_mutex_lock(&g_in_lock);

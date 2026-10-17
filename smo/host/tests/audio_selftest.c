@@ -3,6 +3,7 @@
 #include "../audio_device_sink.h"
 #include "../audio_output.h"
 #include <pthread.h>
+#include <time.h>
 
 module_t g_mod[MAX_MOD];
 int g_nmod = 2;
@@ -18,6 +19,7 @@ static uint32_t server_result, init_result;
 static int budget;
 static uint8_t commands[1024];
 static int device_commands,output_calls;
+static unsigned symbol_lookups;
 static int32_t sink_mix[240*2];
 static const uint8_t *process_list;
 static const void *expected_config;
@@ -133,6 +135,7 @@ static uint32_t client(handle_t handle, const void *config) {
     return call(handle.object, &out, &performance, &in);
 }
 void *module_sym(module_t *module, const char *name) {
+    symbol_lookups++;
     CHECK(module == &g_mod[1]);
     if (strstr(name, "IsValidAudioRendererParameter")) return (void *)valid;
     if (strstr(name, "AudioRenderSystem17GetWorkBufferSize")) return (void *)size;
@@ -228,9 +231,20 @@ int main(void) {
     CHECK(!start_renderer(handle));
     CHECK(!update_renderer(handle, expected_config) && processed == 1);
     CHECK(!execute(handle) && processed == 2);
+    unsigned lookups_before=symbol_lookups;
     device_commands=1;smo_audio_set_output(output_pcm);
     CHECK(!execute(handle) && processed==4 && output_calls==2);
+    CHECK(symbol_lookups==lookups_before); // no symbol table scans in recurring audio frames
     device_commands=0;smo_audio_set_output(NULL);
+    close_renderer(handle);
+    parameter[11]=0;expected_internal[0x22]=0;
+    memset(commands,0,sizeof commands);
+    CHECK(!open_renderer(&handle,NULL,parameter,work,0x8000));CHECK(!start_renderer(handle));
+    struct timespec before,after;clock_gettime(CLOCK_MONOTONIC,&before);
+    for(int i=0;i<10;i++)CHECK(!update_renderer(handle,expected_config));
+    clock_gettime(CLOCK_MONOTONIC,&after);
+    double elapsed=(after.tv_sec-before.tv_sec)+(after.tv_nsec-before.tv_nsec)/1e9;
+    CHECK(elapsed>=0.04); // already-signaled guest events cannot busy-mix
     close_renderer(handle);
     free(allocation);
     // Native boot previously aborted while polling this uninitialized event.

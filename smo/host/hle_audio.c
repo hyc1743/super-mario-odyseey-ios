@@ -75,6 +75,7 @@ struct renderer {
     void *event;
     int running, manual;
     uint64_t frames;
+    uint64_t next_frame_ns;
     uint8_t *scratch;
     size_t scratch_size;
     int16_t pcm[480];
@@ -93,6 +94,23 @@ static renderer *find_session(renderer *object) {
     for (unsigned i = 0; i < SMO_ARRAY_LEN(sessions); i++)
         if (sessions[i] && sessions[i] == object) return object;
     return NULL;
+}
+static uint64_t audio_now_ns(void){
+    struct timespec now;clock_gettime(CLOCK_MONOTONIC,&now);
+    return (uint64_t)now.tv_sec*1000000000u+(uint64_t)now.tv_nsec;
+}
+static void pace_renderer(renderer *r){
+    uint64_t now=audio_now_ns();
+    while(r->next_frame_ns>now){
+        uint64_t delay=r->next_frame_ns-now;
+        struct timespec wait={(time_t)(delay/1000000000u),(long)(delay%1000000000u)};
+        nanosleep(&wait,NULL);now=audio_now_ns();
+    }
+    /* Event delivery alone is insufficient: the SDK can immediately return
+     * from an already-signaled event. Advance one 240-sample / 48 kHz period
+     * per mix, and discard missed deadlines instead of rendering a burst. */
+    if(!r->next_frame_ns || now-r->next_frame_ns>=5000000u)r->next_frame_ns=now;
+    r->next_frame_ns+=5000000u;
 }
 static void server_event(renderer *r) {
     void (*signal)(void *) = sdk_function("_ZN2nn2os11SignalEventEPNS0_9EventTypeE");
@@ -243,7 +261,7 @@ static uint32_t h_update(renderer_handle handle, const void *config) {
         uint32_t (*client)(renderer_handle, const void *) = sdk_function(
             "_ZN2nn5audio26RequestUpdateAudioRendererENS0_19AudioRendererHandleEPKNS0_19AudioRendererConfigE");
         result = client(handle, config);
-        if (!result && r->running && !r->manual) result = render_frame(r);
+        if (!result && r->running && !r->manual){pace_renderer(r);result=render_frame(r);}
     }
     pthread_mutex_unlock(&audio_lock);
     return result;
@@ -255,7 +273,7 @@ static uint32_t h_start(renderer_handle handle) {
     if (r) {
         uint32_t (*start)(void *) = SERVER_FN("5StartEv");
         result = start(r->server);
-        if (!result) r->running = 1;
+        if (!result){r->running=1;r->next_frame_ns=0;}
     }
     pthread_mutex_unlock(&audio_lock);
     return result;

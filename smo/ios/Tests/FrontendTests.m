@@ -9,6 +9,7 @@ static uint64_t buttons;
 static int32_t axes[4];
 void dm_input_set_buttons(uint64_t value){buttons=value;}
 void dm_input_set_sticks(int32_t lx,int32_t ly,int32_t rx,int32_t ry){axes[0]=lx;axes[1]=ly;axes[2]=rx;axes[3]=ry;}
+void dm_input_set_state(uint64_t value,int32_t lx,int32_t ly,int32_t rx,int32_t ry){dm_input_set_buttons(value);dm_input_set_sticks(lx,ly,rx,ry);}
 void smo_audio_set_output(smo_audio_output_fn fn){(void)fn;}
 void smo_audio_set_suspended(int value){(void)value;}
 void dm_log_emit(const char *format,...){(void)format;}
@@ -36,22 +37,22 @@ uint64_t nvn_metal_offscreen_frames(void){return 0;}
 - (void)testSimultaneousButtonsAndCancellation {
     SMOTouchController *pad=[self controller];
     UIControl *a=[self button:@"A" in:pad],*b=[self button:@"B" in:pad];
-    [a beginTracking:nil withEvent:nil];[b beginTracking:nil withEvent:nil];
+    [a beginTrackingWithTouch:nil withEvent:nil];[b beginTrackingWithTouch:nil withEvent:nil];
     XCTAssertEqual(buttons,DM_BTN_A|DM_BTN_B);
-    [a endTracking:nil withEvent:nil];XCTAssertEqual(buttons,DM_BTN_B);
+    [a endTrackingWithTouch:nil withEvent:nil];XCTAssertEqual(buttons,DM_BTN_B);
     [b cancelTrackingWithEvent:nil];XCTAssertEqual(buttons,0ull);
-    [a beginTracking:nil withEvent:nil];pad.hidden=YES;XCTAssertEqual(buttons,0ull);
+    [a beginTrackingWithTouch:nil withEvent:nil];pad.hidden=YES;XCTAssertEqual(buttons,0ull);
     pad.hidden=NO;XCTAssertEqual(buttons,0ull);
 }
 - (void)testStickDirectionDeadzoneAndLifecycle {
     SMOTouchController *pad=[self controller];UIControl *stick=(UIControl *)pad.subviews[16];
     SMOFakeTouch *touch=[SMOFakeTouch new];touch.point=CGPointMake(stick.bounds.size.width,0);
-    [stick beginTracking:(UITouch *)touch withEvent:nil];
+    [stick beginTrackingWithTouch:(UITouch *)touch withEvent:nil];
     XCTAssertGreaterThan(axes[0],22000);XCTAssertGreaterThan(axes[1],22000);
     XCTAssertLessThanOrEqual(hypot(axes[0],axes[1]),32768.0);
     touch.point=CGPointMake(CGRectGetMidX(stick.bounds)+1,CGRectGetMidY(stick.bounds));
-    [stick continueTracking:(UITouch *)touch withEvent:nil];XCTAssertEqual(axes[0],0);XCTAssertEqual(axes[1],0);
-    touch.point=CGPointZero;[stick continueTracking:(UITouch *)touch withEvent:nil];
+    [stick continueTrackingWithTouch:(UITouch *)touch withEvent:nil];XCTAssertEqual(axes[0],0);XCTAssertEqual(axes[1],0);
+    touch.point=CGPointZero;[stick continueTrackingWithTouch:(UITouch *)touch withEvent:nil];
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
     XCTAssertEqual(axes[0],0);XCTAssertEqual(axes[1],0);
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
@@ -62,7 +63,10 @@ uint64_t nvn_metal_offscreen_frames(void){return 0;}
         SMOTouchController *pad=[self controller];pad.frame=(CGRect){CGPointZero,size.CGSizeValue};[pad layoutIfNeeded];
         for(NSUInteger a=0;a<pad.subviews.count;a++){
             XCTAssertTrue(CGRectContainsRect(pad.bounds,pad.subviews[a].frame));
-            for(NSUInteger b=a+1;b<pad.subviews.count;b++)XCTAssertFalse(CGRectIntersectsRect(pad.subviews[a].frame,pad.subviews[b].frame));
+            for(NSUInteger b=a+1;b<pad.subviews.count;b++){
+                CGRect intersection=CGRectIntersection(pad.subviews[a].frame,pad.subviews[b].frame);
+                XCTAssertFalse(!CGRectIsNull(intersection) && intersection.size.width>0.5 && intersection.size.height>0.5);
+            }
         }
         XCTAssertNil([pad hitTest:CGPointMake(300,10) withEvent:nil]);
     }

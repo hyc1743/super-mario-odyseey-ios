@@ -13,6 +13,7 @@ import json
 import os
 import pathlib
 import platform
+import re
 import subprocess
 import tempfile
 
@@ -59,8 +60,12 @@ def main():
         gpu_frames = "GUEST_GPU_FRAME_COMPLETED count=60" in data
         api_gaps = "NVN_API_UNIMPLEMENTED" in data
         mapping_gap = "NVN_VIRTUAL_POOL_MAPPING_UNSUPPORTED" in data
+        audio_counts = [int(n) for n in re.findall(r"AUDIO_DEVICE_PCM frames=(\d+)",data)]
+        audio_pcm = bool(audio_counts)
+        audio_clock = audio_pcm and max(audio_counts)<=args.seconds*220+200
+        audio_gap = "AUDIO_DEVICE_SINK_UNSUPPORTED" in data
         fatal = "FATAL" in data or "【红】" in data or api_gaps
-        passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and not fatal and not mapping_gap
+        passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and audio_clock and not audio_gap and not fatal and not mapping_gap
         result = dict(passed=passed, scope="nnMain + guest thread + real GPU submit/completion + 60 fresh-draw offscreen frame deliveries; image correctness and physical iOS display require separate verification",
                       romfs_fixture=bool(args.romfs),
                       seconds=args.seconds, timed_out=timed_out, exit_code=code,
@@ -69,6 +74,10 @@ def main():
                       gpu_submitted=gpu_submit, gpu_completed=gpu_complete, gpu_presented_60_frames=gpu_frames,
                       unimplemented_api_observed=api_gaps,
                       unsupported_mapping_observed=mapping_gap,
+                      audio_device_pcm_observed=audio_pcm,
+                      audio_frame_clock_bounded=audio_clock,
+                      audio_max_reported_frames=max(audio_counts,default=0),
+                      unsupported_audio_sink_observed=audio_gap,
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))
         (args.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)

@@ -20,14 +20,14 @@
 - (void)setHighlighted:(BOOL)value {
     [super setHighlighted:value];self.backgroundColor=[UIColor colorWithWhite:value?0.6:0.12 alpha:value?0.7:0.4];
 }
-- (BOOL)beginTracking:(UITouch *)touch withEvent:(UIEvent *)event {
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     (void)touch;(void)event;self.highlighted=YES;[self sendActionsForControlEvents:UIControlEventValueChanged];return YES;
 }
-- (BOOL)continueTracking:(UITouch *)touch withEvent:(UIEvent *)event {
+- (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     (void)event;self.highlighted=CGRectContainsPoint(self.bounds,[touch locationInView:self]);
     [self sendActionsForControlEvents:UIControlEventValueChanged];return YES;
 }
-- (void)endTracking:(UITouch *)touch withEvent:(UIEvent *)event {
+- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     (void)touch;(void)event;self.highlighted=NO;[self sendActionsForControlEvents:UIControlEventValueChanged];
 }
 - (void)cancelTrackingWithEvent:(UIEvent *)event {[super cancelTrackingWithEvent:event];self.highlighted=NO;[self sendActionsForControlEvents:UIControlEventValueChanged];}
@@ -52,10 +52,10 @@
     if(length<0.12){x=0;y=0;}else if(length<=1){CGFloat scale=(length-0.12)/(0.88*length);x*=scale;y*=scale;}
     _axis=CGPointMake(x,y);[self setNeedsDisplay];[self sendActionsForControlEvents:UIControlEventValueChanged];
 }
-- (BOOL)beginTracking:(UITouch *)touch withEvent:(UIEvent *)event {(void)event;[self updateTouch:touch];return YES;}
-- (BOOL)continueTracking:(UITouch *)touch withEvent:(UIEvent *)event {(void)event;[self updateTouch:touch];return YES;}
-- (void)endTracking:(UITouch *)touch withEvent:(UIEvent *)event {(void)touch;(void)event;_axis=CGPointZero;[self setNeedsDisplay];[self sendActionsForControlEvents:UIControlEventValueChanged];}
-- (void)cancelTrackingWithEvent:(UIEvent *)event {[super cancelTrackingWithEvent:event];[self endTracking:nil withEvent:event];}
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {(void)event;[self updateTouch:touch];return YES;}
+- (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {(void)event;[self updateTouch:touch];return YES;}
+- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {(void)touch;(void)event;_axis=CGPointZero;[self setNeedsDisplay];[self sendActionsForControlEvents:UIControlEventValueChanged];}
+- (void)cancelTrackingWithEvent:(UIEvent *)event {[super cancelTrackingWithEvent:event];[self endTrackingWithTouch:nil withEvent:event];}
 @end
 @implementation SMOTouchController {
     NSArray<SMOPadButton *> *_buttons;
@@ -102,7 +102,7 @@
 - (void)publishInput {
     uint64_t bits=0;if(_active && !self.hidden)for(SMOPadButton *b in _buttons)if(b.highlighted)bits|=b.bit;
     CGPoint l=_active && !self.hidden?_left.axis:CGPointZero,r=_active && !self.hidden?_right.axis:CGPointZero;
-    dm_input_set_buttons(bits);dm_input_set_sticks((int32_t)lrint(l.x*32767),(int32_t)lrint(l.y*32767),(int32_t)lrint(r.x*32767),(int32_t)lrint(r.y*32767));
+    dm_input_set_state(bits,(int32_t)lrint(l.x*32767),(int32_t)lrint(l.y*32767),(int32_t)lrint(r.x*32767),(int32_t)lrint(r.y*32767));
 }
 - (void)resetInput {
     for(SMOPadButton *b in _buttons){[b cancelTrackingWithEvent:nil];b.highlighted=NO;}

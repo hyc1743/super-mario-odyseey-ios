@@ -12,6 +12,7 @@ enum {
 };
 
 void dm_input_set_buttons(uint64_t buttons);
+void dm_input_set_state(uint64_t buttons, int32_t lx, int32_t ly, int32_t rx, int32_t ry);
 uint64_t dm_input_buttons(void);
 void dm_input_set_sticks(int32_t lx, int32_t ly, int32_t rx, int32_t ry);
 uint32_t dm_input_style(void);

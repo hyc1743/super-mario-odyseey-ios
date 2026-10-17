@@ -77,6 +77,14 @@ int main(void) {
     CHK(getmany(states, 0, &id) == 0 && ((uint8_t *)states)[0] == 0xA5, "zero sample capacity writes nothing");
     CHK(getmany(states, 2, &id) == 1 && states[0].attributes == 1, "Npad array API receives capacity and id in their correct argument slots");
     CHK(((uint8_t *)&states[1])[0] == 0xA5, "returns one available sample without overwriting the next slot");
+    dm_input_set_state(DM_BTN_A|DM_BTN_ZL,32767,-32767,-16384,16384);
+    getmany(states,1,&id);
+    CHK(states[0].buttons==(DM_BTN_A|DM_BTN_ZL) && states[0].lx==32767 && states[0].ly==-32767 && states[0].rx==-16384 && states[0].ry==16384,
+        "combined frontend state reaches the guest Npad snapshot");
+    dm_input_set_state(0,0,0,0,0);
+    getmany(states,1,&id);
+    CHK(!states[0].buttons && !states[0].lx && !states[0].ly && !states[0].rx && !states[0].ry,
+        "frontend cancellation clears every guest input field");
     uint32_t (*assignment)(const uint32_t *) = (void *)dm_hle_force_lookup("_ZN2nn3hid20GetNpadJoyAssignmentERKj");
     uint32_t const_id = 0x20;
     CHK(assignment(&const_id) == 0 && const_id == 0x20, "assignment query returns an enum and preserves const id");
