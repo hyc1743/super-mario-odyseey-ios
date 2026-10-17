@@ -80,6 +80,12 @@ static id<MTLBlitCommandEncoder> blit_for(SMOGuestEncoder *e) {
 }
 static int encode(void *context, uint32_t op, const void *payload, size_t size) {
     SMOGuestEncoder *e = (__bridge SMOGuestEncoder *)context;
+    if(op==NVN_CMD_UNSUPPORTED){
+        if(size!=sizeof(nvn_cmd_missing))return 0;
+        nvn_cmd_missing missing;memcpy(&missing,payload,sizeof missing);
+        if(!nvn_cmd_missing_is_skippable(missing.name))return 0;
+        return 1;
+    }
     if (op == NVN_CMD_BARRIER) {
         if (size != 8) return 0;
         [e.blit endEncoding]; e.blit = nil;

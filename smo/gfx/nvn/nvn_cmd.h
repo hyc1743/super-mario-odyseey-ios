@@ -18,6 +18,7 @@ typedef struct { uint64_t dst, size; /* followed by copied bytes */ } nvn_cmd_up
 typedef struct { uint64_t dst, size; uint32_t value, reserved; } nvn_cmd_clear;
 typedef struct { const char *name; uint64_t args[8]; } nvn_cmd_missing;
 uint64_t nvn_cmd_record_missing(const char *name, const uint64_t args[8]);
+int nvn_cmd_missing_is_skippable(const char *name);
 
 /* Visits executable commands in submission order, expanding CallCommands.
  * Returning zero rejects the stream. It never performs GPU work itself. */

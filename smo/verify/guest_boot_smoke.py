@@ -107,6 +107,7 @@ def main():
                       test_press_a_count=args.press_a_count if args.press_a_after is not None else 0,
                       gpu_frames_after_input=input_progress if args.press_a_after is not None else None,
                       audio_nonzero_samples_observed=bool(re.search(r"AUDIO_DEVICE_PCM .*audible=[1-9]\d*", data)),
+                      audio_mixer_input_nonzero_observed=bool(re.search(r"AUDIO_DEVICE_PCM .*input_peak=[1-9]\d*", data)),
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))
         (args.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)

@@ -153,11 +153,22 @@ static uint32_t render_frame(renderer *r) {
     offset=0x20;
     for(uint32_t i=0;i<count;i++){
         const uint8_t *cmd=list+offset;size_t length=smo_audio_u16(cmd+4);
-        int sink=smo_audio_u16(cmd+6)==15 && cmd[0x10];
+        int command_type=smo_audio_u16(cmd+6);
+        int sink=command_type==15 && cmd[0x10];
         offset+=length;segment_count++;
         if(!sink && i+1<count)continue;
         memcpy(r->scratch,list,0x20);memcpy(r->scratch+4,&segment_count,4);
         memcpy(r->scratch+0x20,list+begin,offset-begin);
+        unsigned input_peak=0;
+        if(sink){
+            uint64_t address=smo_audio_u64(cmd+0x118);uint32_t channels=smo_audio_u32(cmd+0x120);
+            uint32_t buffers=smo_audio_u32(list+0x10),frames=smo_audio_u32(list+0x14);
+            const int32_t *mix=(const int32_t *)(uintptr_t)address;
+            if(mix&&channels<=6&&frames==240&&buffers<=16)for(uint32_t ch=0;ch<channels;ch++){
+                uint32_t index=(uint8_t)cmd[0x124+ch];if(index>=buffers)continue;
+                for(uint32_t f=0;f<frames;f++){int32_t sample=mix[index*frames+f];unsigned value=sample<0?(unsigned)(-(int64_t)sample):(unsigned)sample;if(value>input_peak)input_peak=value;}
+            }
+        }
         limit(r->processor,UINT32_MAX);
         setup(r->processor,r->scratch,0x20+offset-begin);process(r->processor);
         if(sink){
@@ -166,7 +177,9 @@ static uint32_t render_frame(renderer *r) {
             unsigned peak=0;for(int s=0;s<samples*2;s++){unsigned value=r->pcm[s]<0?-(int)r->pcm[s]:r->pcm[s];if(value>peak)peak=value;}
             r->sink_frames++;if(peak)r->audible_frames++;
             if(r->sink_frames==1 || (peak && r->audible_frames==1) || r->sink_frames%200==0)
-                LOG("AUDIO_DEVICE_PCM frames=%llu audible=%llu peak=%u rate=48000 channels=2",(unsigned long long)r->sink_frames,(unsigned long long)r->audible_frames,peak);
+                LOG("AUDIO_DEVICE_PCM frames=%llu audible=%llu peak=%u input_peak=%u buffers=%u sink_channels=%u map=%u,%u rate=48000 channels=2",
+                    (unsigned long long)r->sink_frames,(unsigned long long)r->audible_frames,peak,input_peak,
+                    smo_audio_u32(list+0x10),smo_audio_u32(cmd+0x120),(unsigned char)cmd[0x124],(unsigned char)cmd[0x125]);
             smo_audio_output_fn output=atomic_load(&speaker_output);if(output)output(r->pcm,(size_t)samples);
         }
         begin=offset;segment_count=0;

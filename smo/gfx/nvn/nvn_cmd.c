@@ -109,6 +109,26 @@ static void *alloc_record(NVNcommandBuffer *c, uint32_t op, size_t payload) {
     return p + sizeof(nvn_cmd_header);
 }
 
+int nvn_cmd_missing_is_skippable(const char *name) {
+    static const char *const names[]={
+        "nvnCommandBufferSetPrimitiveRestart",
+        "nvnCommandBufferSetDepthClamp",
+        "nvnCommandBufferSetPolygonOffsetClamp",
+        "nvnCommandBufferSetTiledCacheAction",
+        "nvnCommandBufferSetTiledCacheTileSize",
+        "nvnCommandBufferSetStencilValueMask",
+        "nvnCommandBufferSetStencilMask",
+        "nvnCommandBufferSetStencilRef",
+        "nvnCommandBufferSetDepthBounds",
+        "nvnCommandBufferSetRasterizerDiscard",
+        "nvnCommandBufferSetPointSize",
+        "nvnCommandBufferClearTexture"
+    };
+    if(!name)return 0;
+    for(size_t i=0;i<sizeof names/sizeof names[0];i++)if(!strcmp(name,names[i]))return 1;
+    return 0;
+}
+
 uint64_t nvn_CommandBufferInitialize(NVNcommandBuffer *c, NVNdevice *d) {
     if (!c) return 0;
     nvn_st_ent *s = nvn_st_new(c, CMD_TYPE);

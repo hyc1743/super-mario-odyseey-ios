@@ -26,4 +26,6 @@ r252 的本次真机日志中 `AUDIO_SPEAKER running=1`，`callbacks=978 played=
 
 后续真机日志定位到另一处崩溃：命令内存补充成功后，约 30 秒时在 `nvnTextureGetZCullStorageSize` 路径出现 `FATAL missing resource type=12`。修复包括实现纹理 ZCull 存储大小查询，并把失效纹理记录为 `NVN_RESOURCE_MISS` 后跳过该次渲染命令，避免单个资源生命周期问题直接终止进程。
 
+r257 的新日志显示资源失效已被绕过，但约 53 秒时仍因 12 个已知的低层命令记录为不支持而 `NVN_GPU_SUBMIT_FAILED`。下一版对这 12 个命令只跳过其自身状态更新并保留日志，未知命令仍然拒绝提交。音频日志从下一版开始同时记录 DSP 设备输入 `input_peak` 和 PCM 输出 `peak`，用来确定静音发生在 DSP 前还是转换后。
+
 真机前可运行 `SMO_AUDIO_TEST_WAV=work/test-audio.wav ./smo/host/audio_selftest`，再运行 `python smo/verify/check_audio_wav.py work/test-audio.wav`。该测试使用合成的非零混音命令，检查 48 kHz PCM16 双声道、非零峰值和 WAV 数据长度；它能验证混音/转换链路，但不能证明真实游戏资源已经播放音乐。

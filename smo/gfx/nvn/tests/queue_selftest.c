@@ -8,7 +8,7 @@
 /* Explicitly installed test backend; production never uses simulated GPU completion. */
 static uint64_t submitted, completed, failed;
 static uint64_t submit(int count, const uint64_t *handles) {
-    assert(count==0 && !handles);
+    assert((count==0 && !handles)||(count==1 && handles));
     return ++submitted;
 }
 static int poll(uint64_t seq) { return failed && seq>=failed ? -1 : completed>=seq; }
@@ -49,6 +49,15 @@ int main(void) {
     uint64_t unknown=call("CommandBufferEndRecording",&cb,0,0,0);
     assert(!nvn_gpu_submit(1,&unknown) && submitted==0);
     call("CommandBufferFinalize",&cb,0,0,0);
+    NVNcommandBuffer safe_cb;
+    assert(call("CommandBufferInitialize",&safe_cb,0,0,0));
+    call("CommandBufferAddCommandMemory",&safe_cb,(uintptr_t)&pool,0,sizeof command_memory);
+    call("CommandBufferBeginRecording",&safe_cb,0,0,0);
+    call("CommandBufferSetDepthClamp",&safe_cb,0,0,0);
+    uint64_t safe=call("CommandBufferEndRecording",&safe_cb,0,0,0);
+    assert(nvn_gpu_submit(1,&safe)==1 && submitted==1);
+    call("CommandBufferFinalize",&safe_cb,0,0,0);
+    submitted=0;
     assert(call("SyncInitialize",&s,0,0,0));
     call("QueueFenceSync",&q,(uintptr_t)&s,0,0);
     assert(submitted==1);

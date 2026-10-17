@@ -13,6 +13,7 @@ static int check_command(void *context, uint32_t op, const void *payload, size_t
     if (op != NVN_CMD_UNSUPPORTED) return 1;
     if (size != sizeof(nvn_cmd_missing)) return 0;
     nvn_cmd_missing m; memcpy(&m,payload,sizeof m);
+    if(nvn_cmd_missing_is_skippable(m.name))return 1;
     p->missing=1;
     for (unsigned i=0;i<p->count;++i) if (p->names[i]==m.name) return 1;
     if (p->count<256) p->names[p->count++]=m.name;
