@@ -135,6 +135,21 @@ uint64_t nvn_DeviceFinalize(uint64_t dev, uint64_t a1, uint64_t a2, uint64_t a3,
     return 0;
 }
 
+void nvn_DeviceSetWindowOriginMode(void *device,int mode) {
+    nvn_st_ent *e=need(device,NVN_T_DEVICE,"DeviceSetWindowOriginMode");
+    if(e){e->v[4]=(uint32_t)mode;NVN_LOG("NVN_DEVICE_COORDINATES origin=%d depth=%llu",mode,(unsigned long long)e->v[5]);}
+}
+int nvn_DeviceGetWindowOriginMode(const void *device) {
+    nvn_st_ent *e=nvn_st_get(device,NVN_T_DEVICE);return e?(int)e->v[4]:0;
+}
+void nvn_DeviceSetDepthMode(void *device,int mode) {
+    nvn_st_ent *e=need(device,NVN_T_DEVICE,"DeviceSetDepthMode");
+    if(e){e->v[5]=(uint32_t)mode;NVN_LOG("NVN_DEVICE_COORDINATES origin=%llu depth=%d",(unsigned long long)e->v[4],mode);}
+}
+int nvn_DeviceGetDepthMode(const void *device) {
+    nvn_st_ent *e=nvn_st_get(device,NVN_T_DEVICE);return e?(int)e->v[5]:0;
+}
+
 // Device properties adapted from d2r-mobile (MIT; third_party/d2r-mobile.LICENSE).
 // SMO main+0x731358 requires major 53, minor >=13. These are API compatibility
 // values, independent of the host GPU. All outputs are signed 32-bit integers.
