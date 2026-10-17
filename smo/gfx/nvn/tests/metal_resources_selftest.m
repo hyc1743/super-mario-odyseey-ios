@@ -20,7 +20,7 @@ int main(void) {
     @autoreleasepool {
         id<MTLDevice> device=MTLCreateSystemDefaultDevice(); assert(device);
         uint8_t *memory=calloc(1,4096); assert(memory);
-        uint64_t pool[8]={0},object[8]={0},builder[8]={0},sampler[8]={0};
+        uint64_t pool[8]={0},object[24]={0} /* sizeof(NVNtexture)=0xC0 */,builder[8]={0},sampler[8]={0};
         nvn_st_ent *s=nvn_st_new(pool,4 /* memory pool */); assert(s);
         s->v[1]=(uintptr_t)memory;s->v[2]=4096;s->v[3]=NVN_MEMORY_POOL_FLAGS_CPU_CACHED;
         for(int y=0;y<4;++y)for(int x=0;x<4;++x){

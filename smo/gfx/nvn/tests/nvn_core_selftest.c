@@ -370,7 +370,7 @@ int main(void) {
            g_nvn_table_n, g_nvn_impl_n - 38, g_nvn_table_n - g_nvn_impl_n);
 
     printf("== 10. Texture storage through the game's proc dispatch ==\n");
-    uint64_t tb[16] = {0}, texture[16] = {0};
+    uint64_t tb[16] = {0}, texture[24] = {0};  /* sizeof(NVNtexture)=0xC0 */
     nvn_lookup("nvnTextureBuilderSetDevice")(OBJ(tb), OBJ(dev), 0, 0, 0, 0, 0, 0);
     nvn_lookup("nvnTextureBuilderSetDefaults")(OBJ(tb), 0, 0, 0, 0, 0, 0, 0);
     nvn_lookup("nvnTextureBuilderSetSize2D")(OBJ(tb), 4, 4, 0, 0, 0, 0, 0);
