@@ -14,6 +14,7 @@
 #include <string.h>
 #include <unistd.h>     // read/close/usleep
 #include "logbuf.h"
+#include "logsum.h"
 #include "romfs_resolve.h"
 #include "smoarc.h"
 #include "dm.h"
