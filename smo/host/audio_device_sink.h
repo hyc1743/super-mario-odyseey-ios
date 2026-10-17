@@ -8,6 +8,7 @@ static inline uint32_t smo_audio_u32(const void *p) { uint32_t v; memcpy(&v,p,4)
 static inline uint64_t smo_audio_u64(const void *p) { uint64_t v; memcpy(&v,p,8); return v; }
 static inline uint16_t smo_audio_u16(const void *p) { uint16_t v; memcpy(&v,p,2); return v; }
 static inline int16_t smo_audio_clip(double v) { return v>32767?32767:v< -32768?-32768:(int16_t)v; }
+static inline int16_t smo_audio_fixed16_to_pcm16(double v) { double sample=v/65536.0;return smo_audio_clip(sample+(sample>=0?0.5:-0.5)); }
 static inline int smo_audio_device_pcm(const uint8_t *header, const uint8_t *cmd,
                                        size_t bytes, int16_t *out, size_t capacity) {
     if(bytes!=0x130 || !cmd[0x10])return -1;
@@ -32,7 +33,7 @@ static inline int smo_audio_device_pcm(const uint8_t *header, const uint8_t *cmd
             l=(l+center+mix[indices[4]*frames+f]*0.70710678118)*0.70710678118;
             r=(r+center+mix[indices[5]*frames+f]*0.70710678118)*0.70710678118;
         }
-        out[2*f]=smo_audio_clip(l);out[2*f+1]=smo_audio_clip(r);
+        out[2*f]=smo_audio_fixed16_to_pcm16(l);out[2*f+1]=smo_audio_fixed16_to_pcm16(r);
     }
     return (int)frames;
 }

@@ -46,14 +46,14 @@ static void output_test(void){
     uint32_t v=6;memcpy(header+0x10,&v,4);v=240;memcpy(header+0x14,&v,4);v=48000;memcpy(header+0x18,&v,4);
     uint64_t address=(uintptr_t)mix;memcpy(cmd+0x118,&address,8);cmd[0x10]=1;
     v=2;memcpy(cmd+0x120,&v,4);cmd[0x124]=1;cmd[0x125]=0;
-    mix[0]=40000;mix[240]=-40000;
+    mix[240]=INT32_MAX;mix[0]=INT32_MIN;
     CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240);
-    CHECK(out[0]==-32768 && out[1]==32767 && out[2]==0 && out[3]==0);
-    v=1;memcpy(cmd+0x120,&v,4);mix[240]=1234;
+    CHECK(out[0]==32767 && out[1]==-32768 && out[2]==0 && out[3]==0);
+    v=1;memcpy(cmd+0x120,&v,4);mix[240]=1234<<16;
     CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240 && out[0]==1234 && out[1]==1234);
     v=6;memcpy(cmd+0x120,&v,4);for(int i=0;i<6;i++)cmd[0x124+i]=(uint8_t)i;
-    memset(mix,0,sizeof mix);mix[480]=10000;mix[720]=30000;
-    CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240 && abs(out[0]-5000)<=1 && abs(out[1]-5000)<=1);
+    memset(mix,0,sizeof mix);mix[0]=10000<<16;mix[240]=10000<<16;
+    CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240 && abs(out[0]-7071)<=2 && abs(out[1]-7071)<=2);
     cmd[0x124]=6;CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)<0);
     CHECK(smo_audio_device_pcm(header,cmd,0x12f,out,240)<0);
 }
@@ -99,7 +99,7 @@ static size_t generate(void *p, void *b, size_t n) {
             memcpy(commands+at+4,&len,2);memcpy(commands+at+6,&type,2);commands[at+0x10]=1;
             if(type==15){uint64_t address=(uintptr_t)sink_mix;memcpy(commands+at+0x118,&address,8);
                 v=2;memcpy(commands+at+0x120,&v,4);commands[at+0x125]=1;
-            }else{v=(i/2+1)*100;memcpy(commands+at+0x14,&v,4);}
+            }else{v=((i/2+1)*100)<<16;memcpy(commands+at+0x14,&v,4);}
             at+=len;
         }return at;
     }
@@ -111,7 +111,7 @@ static void setup(void *p, const void *b, size_t n) {
 static void process(void *p) {
     CHECK(p);processed++;if(device_commands){
         size_t at=32;for(uint32_t i=0;i<smo_audio_u32(process_list+4);i++){
-            if(smo_audio_u16(process_list+at+6)==20)for(unsigned s=0;s<480;s++)sink_mix[s]=(int)smo_audio_u32(process_list+at+0x14);
+            if(smo_audio_u16(process_list+at+6)==20)for(unsigned s=0;s<480;s++)sink_mix[s]=(int32_t)smo_audio_u32(process_list+at+0x14);
             at+=smo_audio_u16(process_list+at+4);
         }
     }
