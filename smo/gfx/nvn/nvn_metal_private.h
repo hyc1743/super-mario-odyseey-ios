@@ -11,6 +11,8 @@
 @property(nonatomic,strong) id<MTLRenderCommandEncoder> render;
 @property(nonatomic,strong) NSObject *renderState;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,id<MTLBuffer>> *buffers;
+@property(nonatomic,strong) id<MTLBuffer> visibilityBuffer;
+@property(nonatomic) NSUInteger visibilityCursor;
 @end
 id<MTLBuffer> nvn_metal_buffer(SMOGuestEncoder *,uint64_t,uint64_t,NSUInteger *);
 id<MTLDevice> nvn_metal_device(void);

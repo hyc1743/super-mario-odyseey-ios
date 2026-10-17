@@ -110,6 +110,10 @@ static MTLRenderPassDescriptor *pass_for(SMOGuestEncoder *e) {
         }
         active++;
     }
+    if(active&&getenv("SMO_FRAME_CAPTURE_DIR")){
+        if(!e.visibilityBuffer)e.visibilityBuffer=[e.device newBufferWithLength:4096 options:MTLResourceStorageModeShared];
+        p.visibilityResultBuffer=e.visibilityBuffer;
+    }
     return active?p:nil;
 }
 static int full_scissor(SMORenderState *s,id<MTLTexture> t) {
@@ -389,6 +393,17 @@ static int prepare_draw(SMOGuestEncoder *e) {
                 s->polygon.cull,s->polygon.front,s->depth.dt,s->depth.df,
                 viewport.originX,viewport.originY,viewport.width,viewport.height,
                 (long long)x,(long long)y,(long long)(right-x),(long long)(bottom-y));
+            if(e.visibilityBuffer&&e.visibilityCursor<512){
+                NSUInteger offset=8*e.visibilityCursor++;id<MTLBuffer> results=e.visibilityBuffer;
+                NSString *vs=s.vs.bindings[@"key"],*fs=s.fs.bindings[@"key"]?:@"depth";
+                [e.render setVisibilityResultMode:MTLVisibilityResultModeBoolean offset:offset];
+                [e.command addCompletedHandler:^(id<MTLCommandBuffer> command){
+                    if(command.status==MTLCommandBufferStatusCompleted){
+                        uint64_t visible=0;memcpy(&visible,(const uint8_t *)results.contents+offset,8);
+                        NVN_LOG("NVN_METAL_DRAW_VISIBILITY vs=%s fs=%s visible=%u",vs.UTF8String,fs.UTF8String,visible!=0);
+                    }
+                }];
+            }
         }
     }
     return 1;
@@ -496,7 +511,9 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
     case NVN_CMD_DRAW:{
         READ(nvn_cmd_draw,p);if(p.count<0||p.first<0||p.instances<0||p.base_instance<0)return 0;if(!p.count||!p.instances)return 1;
         MTLPrimitiveType primitive;if(!primitive_type(p.primitive,&primitive))return 0;int ready=prepare_draw(e);if(ready!=1)return ready==2;
-        [e.render drawPrimitives:primitive vertexStart:p.first vertexCount:p.count instanceCount:p.instances baseInstance:p.base_instance];mark_draw(s);return 1;
+        [e.render drawPrimitives:primitive vertexStart:p.first vertexCount:p.count instanceCount:p.instances baseInstance:p.base_instance];
+        if(e.visibilityBuffer)[e.render setVisibilityResultMode:MTLVisibilityResultModeDisabled offset:0];
+        mark_draw(s);return 1;
     }
     case NVN_CMD_DRAW_INDEXED:{
         READ(nvn_cmd_draw_indexed,p);if(p.count<0||p.instances<0||p.base_instance<0)return 0;if(!p.count||!p.instances)return 1;
@@ -506,7 +523,9 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
         NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,p.address,(uint64_t)p.count*stride,&offset);if(!buffer)return 0;
         int ready=prepare_draw(e);if(ready!=1)return ready==2;
         [e.render drawIndexedPrimitives:primitive indexCount:p.count indexType:stride==2?MTLIndexTypeUInt16:MTLIndexTypeUInt32
-            indexBuffer:buffer indexBufferOffset:offset instanceCount:p.instances baseVertex:p.base_vertex baseInstance:p.base_instance];mark_draw(s);return 1;
+            indexBuffer:buffer indexBufferOffset:offset instanceCount:p.instances baseVertex:p.base_vertex baseInstance:p.base_instance];
+        if(e.visibilityBuffer)[e.render setVisibilityResultMode:MTLVisibilityResultModeDisabled offset:0];
+        mark_draw(s);return 1;
     }
     default:return reject("render opcode");
     }
