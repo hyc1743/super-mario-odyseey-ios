@@ -5,6 +5,9 @@
 
 #import <UIKit/UIKit.h>
 #import "SMOMetalView.h"
+#import "SMOTouchController.h"
+#import "SMOAudio.h"
+#import "SMOFramePacer.h"
 #import "nvn_metal_private.h"
 #include <fcntl.h>      // open/O_RDONLY（HexHead 走 POSIX 读，要 errno）
 #include <stdio.h>
@@ -249,7 +252,8 @@ static NSArray<NSArray<NSString *> *> *kSubsystems(void) {
         @[@"宿主加载器（文件与三段内嵌两条路径）", @"已完成"],
         @[@"内核 svc + fs/oe/hid 服务", @"部分"],
         @[@"图形层（NVN → Metal，离屏验证中）", @"进行中"],
-        @[@"触屏 / 手柄输入", @"未开始"],
+        @[@"双摇杆触屏手柄", @"进行中"],
+        @[@"扬声器 PCM 音频输出", @"进行中"],
     ];
 }
 
@@ -331,6 +335,8 @@ static NSString *ScanDocuments(void) {
 // 屏幕只放「用户要知道的」：现在第几步、做到多少、要不要导出日志、最近几行日志。
 // 完整的东西（状态、文件、全量带时间戳日志、stderr、上一轮日志）都在「导出日志」里。
 @implementation SMOViewController {
+    SMOTouchController *_touchController;
+    UIButton *_powerMode;
     SMOMetalView *_gameView;
     UIStackView *_statusColumn;
     UIButton *_displayLogs;
@@ -363,6 +369,9 @@ static UILabel *MakeLabel(CGFloat size, UIFontWeight w, UIColor *c) {
     _gameView=[[SMOMetalView alloc] initWithFrame:self.view.bounds];
     _gameView.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:_gameView];
+    _touchController=[[SMOTouchController alloc] initWithFrame:self.view.bounds];
+    _touchController.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    _touchController.hidden=YES;[self.view addSubview:_touchController];
     __weak SMOMetalView *weakGameView=_gameView;
     nvn_metal_set_frame_sink(^(id<MTLTexture> texture,int interval,uint64_t ordinal){
         [weakGameView offerTexture:texture interval:interval ordinal:ordinal];
@@ -434,14 +443,24 @@ static UILabel *MakeLabel(CGFloat size, UIFontWeight w, UIColor *c) {
     _displayLogs.translatesAutoresizingMaskIntoConstraints=NO;
     [_displayLogs addTarget:self action:@selector(toggleDisplayLogs) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:_displayLogs];
+    _powerMode=[UIButton buttonWithType:UIButtonTypeSystem];
+    [_powerMode setTitle:@"60 帧" forState:UIControlStateNormal];
+    [_powerMode setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _powerMode.backgroundColor=[UIColor colorWithWhite:0 alpha:0.65];_powerMode.layer.cornerRadius=8;
+    _powerMode.hidden=YES;_powerMode.translatesAutoresizingMaskIntoConstraints=NO;
+    [_powerMode addTarget:self action:@selector(togglePowerMode) forControlEvents:UIControlEventTouchUpInside];[self.view addSubview:_powerMode];
     __weak SMOViewController *displayController=self;
     _gameView.onFirstFrame=^{
         SMOViewController *controller=displayController;
-        if(controller){controller->_statusColumn.hidden=YES;controller->_displayLogs.hidden=NO;}
+        if(controller){controller->_statusColumn.hidden=YES;controller->_displayLogs.hidden=NO;controller->_touchController.hidden=NO;controller->_powerMode.hidden=NO;}
     };
 
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
+        [_powerMode.centerXAnchor constraintEqualToAnchor:safe.centerXAnchor],
+        [_powerMode.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
+        [_powerMode.widthAnchor constraintEqualToConstant:100],
+        [_powerMode.heightAnchor constraintEqualToConstant:36],
         [_displayLogs.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
         [_displayLogs.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
         [_displayLogs.widthAnchor constraintEqualToConstant:64],
@@ -475,7 +494,11 @@ static UILabel *MakeLabel(CGFloat size, UIFontWeight w, UIColor *c) {
     [_more setTitle:_showAll ? @"只看最近" : @"显示全部" forState:UIControlStateNormal];
     [self refresh];
 }
-- (void)toggleDisplayLogs { _statusColumn.hidden=!_statusColumn.hidden; }
+- (void)toggleDisplayLogs { _statusColumn.hidden=!_statusColumn.hidden;_touchController.hidden=!_statusColumn.hidden; }
+- (void)togglePowerMode {
+    SMOFramePacer *pacer=SMOFramePacer.shared;pacer.powerSaving=!pacer.powerSaving;
+    [_powerMode setTitle:pacer.powerSaving?@"省电 30 帧":@"60 帧" forState:UIControlStateNormal];
+}
 
 static NSString *FmtDuration(double s) {
     if (s < 60) return [NSString stringWithFormat:@"%.0f 秒", s];
@@ -483,6 +506,7 @@ static NSString *FmtDuration(double s) {
 }
 
 - (void)refresh {
+    if(_statusColumn.hidden){UIApplication.sharedApplication.idleTimerDisabled=YES;return;}
     dm_progress_t p;
     dm_progress_get(&p);
     unsigned long long bytes = smoarc_bytes_done();
@@ -688,6 +712,9 @@ static void SMOUncaughtException(NSException *e) {
     }
     dm_crash_install();             // 崩溃也留现场（信号 + PC/LR + 帧链 → SMO-log-live.txt）
     NSSetUncaughtExceptionHandler(&SMOUncaughtException);
+    SMOFramePacer *pacer=SMOFramePacer.shared;
+    nvn_metal_set_frame_pacer(^(int interval){[pacer waitForFrame:interval];});
+    [SMOAudio start];
 
     self.window.rootViewController = [[SMOViewController alloc] init];
     [self.window makeKeyAndVisible];

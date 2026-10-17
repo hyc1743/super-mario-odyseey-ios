@@ -9,14 +9,13 @@
     uint64_t _latestOrdinal,_presented;
     int _interval;
     BOOL _scheduled,_active;
-    double _refreshRate;
     id<MTLCommandQueue> _queue;
     id<MTLRenderPipelineState> _pipeline;
 }
 + (Class)layerClass { return CAMetalLayer.class; }
 - (instancetype)initWithFrame:(CGRect)frame {
     if((self=[super initWithFrame:frame])){
-        _lock=[NSLock new];_active=YES;_refreshRate=60;
+        _lock=[NSLock new];_active=YES;
         _worker=dispatch_queue_create("smo.display",DISPATCH_QUEUE_SERIAL);
         CAMetalLayer *layer=(CAMetalLayer *)self.layer;
         layer.device=MTLCreateSystemDefaultDevice();
@@ -33,9 +32,11 @@
     [super layoutSubviews];
     CAMetalLayer *layer=(CAMetalLayer *)self.layer;
     CGFloat scale=self.window.screen.scale ?: UIScreen.mainScreen.scale;
+    /* The game renders at its own resolution. Avoid a second full native
+     * 3x-resolution pass just to scale a 720p image on a phone. */
+    scale=MIN(scale,1280.0/MAX(1,MAX(self.bounds.size.width,self.bounds.size.height)));
     layer.contentsScale=scale;
     layer.drawableSize=CGSizeMake(MAX(1,self.bounds.size.width*scale),MAX(1,self.bounds.size.height*scale));
-    [_lock lock];_refreshRate=self.window.screen.maximumFramesPerSecond ?: 60;[_lock unlock];
 }
 - (void)suspendDisplay { [_lock lock];_active=NO;_pending=nil;[_lock unlock]; }
 - (void)resumeDisplay { [_lock lock];_active=YES;[_lock unlock]; }
@@ -74,7 +75,7 @@
     for(;;){
       @autoreleasepool {
         [_lock lock];id<MTLTexture> texture=_pending;_pending=nil;
-        int interval=_interval;double refresh=_refreshRate;BOOL active=_active;
+        int interval=_interval;BOOL active=_active;
         if(!texture || !active){_scheduled=NO;[_lock unlock];return;}
         [_lock unlock];
         if(![self preparePipeline])continue;
@@ -100,7 +101,7 @@
             if(count==1 || count%60==0)dm_log_emit("GUEST_DISPLAY_FRAME_PRESENTED count=%llu",(unsigned long long)count);
             if(count==1)dispatch_async(dispatch_get_main_queue(), ^{ if(self.onFirstFrame)self.onFirstFrame(); });
         }];
-        if(interval>0)[command presentDrawable:drawable afterMinimumDuration:interval/refresh];
+        if(interval>0)[command presentDrawable:drawable afterMinimumDuration:interval/60.0];
         else [command presentDrawable:drawable];
         [command commit];[command waitUntilCompleted];
         if(command.status!=MTLCommandBufferStatusCompleted)

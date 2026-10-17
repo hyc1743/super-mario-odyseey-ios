@@ -26,6 +26,9 @@ targets:
   SMOMobile:
     type: application
     platform: iOS
+    dependencies:
+      - sdk: AudioToolbox.framework
+      - sdk: AVFAudio.framework
     sources:
       - path: Sources
       - path: Resources

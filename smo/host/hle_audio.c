@@ -5,6 +5,13 @@
 #include "hle_thread.h"
 #include <pthread.h>
 #include <time.h>
+#include <stdatomic.h>
+#include "audio_output.h"
+#include "audio_device_sink.h"
+static _Atomic(smo_audio_output_fn) speaker_output;
+static _Atomic int app_suspended;
+void smo_audio_set_output(smo_audio_output_fn output) { atomic_store(&speaker_output, output); }
+void smo_audio_set_suspended(int suspended) { atomic_store(&app_suspended,!!suspended); }
 
 static void convert_parameter(uint32_t internal_words[13], const void *parameter) {
     const uint8_t *external = parameter;
@@ -19,10 +26,22 @@ static void convert_parameter(uint32_t internal_words[13], const void *parameter
 }
 
 static void *sdk_function(const char *name) {
+    /* Symbols are immutable after host_boot. Resolve once, rather than
+     * running the loader's linear cross-check for every 5 ms audio frame. */
+    static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
+    static struct {const char *name;void *function;} cache[48];
+    static unsigned used;
+    pthread_mutex_lock(&lock);
+    for(unsigned c=0;c<used;c++)if(!strcmp(cache[c].name,name)){
+        void *function=cache[c].function;pthread_mutex_unlock(&lock);return function;
+    }
     for (int i = 0; i < g_nmod; i++) {
         if (strcmp(g_mod[i].name, "sdk")) continue;
         void *fn = module_sym(&g_mod[i], name);
-        if (fn) return fn;
+        if (fn){
+            if(used==SMO_ARRAY_LEN(cache))die("Audio SDK symbol cache exhausted");
+            cache[used].name=name;cache[used++].function=fn;pthread_mutex_unlock(&lock);return fn;
+        }
     }
     die("Audio SDK function unavailable: %s", name);
 }
@@ -56,6 +75,10 @@ struct renderer {
     void *event;
     int running, manual;
     uint64_t frames;
+    uint8_t *scratch;
+    size_t scratch_size;
+    int16_t pcm[480];
+    uint64_t sink_frames, audible_frames;
     _Alignas(16) uint8_t server[0x330];
     _Alignas(16) uint8_t processor[0x50];
 };
@@ -91,11 +114,46 @@ static uint32_t render_frame(renderer *r) {
     if (!commands || !available) return AUDIO_INVALID;
     size_t bytes = generate(r->server, commands, available);
     if (bytes < 0x20 || bytes > available) return AUDIO_INVALID;
-    limit(r->processor, UINT32_MAX);
-    setup(r->processor, commands, bytes);
-    process(r->processor);
+    const uint8_t *list=commands;
+    uint32_t count=smo_audio_u32(list+4);
+    size_t offset=0x20, begin=offset;
+    uint32_t segment_count=0;
+    /* Validate the entire list before handing any segment to the SDK. */
+    for(uint32_t i=0;i<count;i++){
+        if(offset>bytes || bytes-offset<0x14 || smo_audio_u32(list+offset)!=0xcafebabeu)return AUDIO_INVALID;
+        size_t length=smo_audio_u16(list+offset+4);
+        if(length<0x14 || length>bytes-offset)return AUDIO_INVALID;
+        offset+=length;
+    }
+    if(offset!=bytes)return AUDIO_INVALID;
+    if(r->scratch_size<bytes){
+        void *memory=realloc(r->scratch,bytes);if(!memory)return AUDIO_NO_MEMORY;
+        r->scratch=memory;r->scratch_size=bytes;
+    }
+    offset=0x20;
+    for(uint32_t i=0;i<count;i++){
+        const uint8_t *cmd=list+offset;size_t length=smo_audio_u16(cmd+4);
+        int sink=smo_audio_u16(cmd+6)==15 && cmd[0x10];
+        offset+=length;segment_count++;
+        if(!sink && i+1<count)continue;
+        memcpy(r->scratch,list,0x20);memcpy(r->scratch+4,&segment_count,4);
+        memcpy(r->scratch+0x20,list+begin,offset-begin);
+        limit(r->processor,UINT32_MAX);
+        setup(r->processor,r->scratch,0x20+offset-begin);process(r->processor);
+        if(sink){
+            int samples=smo_audio_device_pcm(list,cmd,length,r->pcm,240);
+            if(samples<0){LOG("AUDIO_DEVICE_SINK_UNSUPPORTED frames=%u rate=%u channels=%u",smo_audio_u32(list+0x14),smo_audio_u32(list+0x18),length>=0x124?smo_audio_u32(cmd+0x120):0);return AUDIO_INVALID;}
+            unsigned peak=0;for(int s=0;s<samples*2;s++){unsigned value=r->pcm[s]<0?-(int)r->pcm[s]:r->pcm[s];if(value>peak)peak=value;}
+            r->sink_frames++;if(peak)r->audible_frames++;
+            if(r->sink_frames==1 || (peak && r->audible_frames==1) || r->sink_frames%2000==0)
+                LOG("AUDIO_DEVICE_PCM frames=%llu audible=%llu peak=%u rate=48000 channels=2",(unsigned long long)r->sink_frames,(unsigned long long)r->audible_frames,peak);
+            smo_audio_output_fn output=atomic_load(&speaker_output);if(output)output(r->pcm,(size_t)samples);
+        }
+        begin=offset;segment_count=0;
+    }
+    if(!count){limit(r->processor,UINT32_MAX);setup(r->processor,commands,bytes);process(r->processor);}
     server_event(r);
-    if (!r->frames++) LOG("AUDIO_RENDERER_CPU_FRAME bytes=%zu (host speaker output pending)", bytes);
+    if (!r->frames++) LOG("AUDIO_RENDERER_CPU_FRAME bytes=%zu", bytes);
     return 0;
 }
 // The SDK RequestUpdate serializes the real client configuration and invokes
@@ -117,6 +175,7 @@ static void *audio_tick(void *unused) {
     const struct timespec interval = {0, 5000000};
     for (;;) {
         nanosleep(&interval, NULL);
+        if(atomic_load(&app_suspended))continue;
         pthread_mutex_lock(&audio_lock);
         for (unsigned i = 0; i < SMO_ARRAY_LEN(sessions); i++) {
             renderer *r = sessions[i];
@@ -223,7 +282,7 @@ static void h_close(renderer_handle handle) {
         destroy_server(r);
         if (r->event) hle_forget_system_event(r->event);
         for (unsigned i = 0; i < SMO_ARRAY_LEN(sessions); i++) if (sessions[i] == r) sessions[i] = NULL;
-        free(r);
+        free(r->scratch);free(r);
     }
     pthread_mutex_unlock(&audio_lock);
 }

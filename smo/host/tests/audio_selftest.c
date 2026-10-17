@@ -1,4 +1,8 @@
 #include "../hle.h"
+#include "../audio_ring.h"
+#include "../audio_device_sink.h"
+#include "../audio_output.h"
+#include <pthread.h>
 
 module_t g_mod[MAX_MOD];
 int g_nmod = 2;
@@ -12,9 +16,45 @@ static int client_calls, server_calls, processed, bound, forgotten;
 static void *last_bound;
 static uint32_t server_result, init_result;
 static int budget;
-static uint8_t commands[64];
+static uint8_t commands[1024];
+static int device_commands,output_calls;
+static int32_t sink_mix[240*2];
+static const uint8_t *process_list;
 static const void *expected_config;
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
+static void output_pcm(const int16_t *pcm,size_t frames){
+    output_calls++;CHECK(frames==240 && pcm[0]==output_calls*100 && pcm[1]==output_calls*100);
+}
+static smo_audio_ring test_ring;
+static void *ring_producer(void *unused){
+    (void)unused;int16_t pair[2];
+    for(int i=0;i<100000;i++){pair[0]=(int16_t)i;pair[1]=(int16_t)~i;while(!smo_audio_ring_push(&test_ring,pair,1)){} }
+    return NULL;
+}
+static void output_test(void){
+    int16_t pair[2]={123,-456},out[480];
+    CHECK(smo_audio_ring_push(&test_ring,pair,1)==1);
+    CHECK(smo_audio_ring_pop(&test_ring,out,2)==1);
+    CHECK(out[0]==123 && out[1]==-456 && out[2]==0 && out[3]==0);
+    pthread_t producer;CHECK(!pthread_create(&producer,NULL,ring_producer,NULL));
+    for(int i=0;i<100000;){size_t n=smo_audio_ring_pop(&test_ring,out,87);
+        for(size_t s=0;s<n;s++,i++)CHECK(out[2*s]==(int16_t)i && out[2*s+1]==(int16_t)~i);}
+    CHECK(!pthread_join(producer,NULL));
+    uint8_t header[32]={0},cmd[0x130]={0};int32_t mix[240*6]={0};
+    uint32_t v=6;memcpy(header+0x10,&v,4);v=240;memcpy(header+0x14,&v,4);v=48000;memcpy(header+0x18,&v,4);
+    uint64_t address=(uintptr_t)mix;memcpy(cmd+0x118,&address,8);cmd[0x10]=1;
+    v=2;memcpy(cmd+0x120,&v,4);cmd[0x124]=1;cmd[0x125]=0;
+    mix[0]=40000;mix[240]=-40000;
+    CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240);
+    CHECK(out[0]==-32768 && out[1]==32767 && out[2]==0 && out[3]==0);
+    v=1;memcpy(cmd+0x120,&v,4);mix[240]=1234;
+    CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240 && out[0]==1234 && out[1]==1234);
+    v=6;memcpy(cmd+0x120,&v,4);for(int i=0;i<6;i++)cmd[0x124+i]=(uint8_t)i;
+    memset(mix,0,sizeof mix);mix[480]=10000;mix[720]=30000;
+    CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240 && abs(out[0]-5000)<=1 && abs(out[1]-5000)<=1);
+    cmd[0x124]=6;CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)<0);
+    CHECK(smo_audio_device_pcm(header,cmd,0x12f,out,240)<0);
+}
 static int valid(const void *p) {
     valid_calls++;
     CHECK(p == expected_parameter);
@@ -48,10 +88,32 @@ static void *get_buffer(const void *p) { CHECK(p); return commands; }
 static size_t capacity(const void *p) { CHECK(p); return sizeof commands; }
 static size_t generate(void *p, void *b, size_t n) {
     CHECK(p && b == commands && n == sizeof commands);
+    if(device_commands){
+        memset(commands,0,sizeof commands);uint32_t v=4;memcpy(commands+4,&v,4);
+        v=2;memcpy(commands+0x10,&v,4);v=240;memcpy(commands+0x14,&v,4);v=48000;memcpy(commands+0x18,&v,4);
+        size_t at=32;
+        for(int i=0;i<4;i++){
+            v=0xcafebabe;memcpy(commands+at,&v,4);uint16_t len=i%2?0x130:0x18,type=i%2?15:20;
+            memcpy(commands+at+4,&len,2);memcpy(commands+at+6,&type,2);commands[at+0x10]=1;
+            if(type==15){uint64_t address=(uintptr_t)sink_mix;memcpy(commands+at+0x118,&address,8);
+                v=2;memcpy(commands+at+0x120,&v,4);commands[at+0x125]=1;
+            }else{v=(i/2+1)*100;memcpy(commands+at+0x14,&v,4);}
+            at+=len;
+        }return at;
+    }
     return 32;
 }
-static void setup(void *p, const void *b, size_t n) { CHECK(p && b == commands && n == 32); }
-static void process(void *p) { CHECK(p); processed++; }
+static void setup(void *p, const void *b, size_t n) {
+    CHECK(p);if(!device_commands)CHECK(b==commands && n==32);else CHECK(n==32+0x18+0x130);process_list=b;
+}
+static void process(void *p) {
+    CHECK(p);processed++;if(device_commands){
+        size_t at=32;for(uint32_t i=0;i<smo_audio_u32(process_list+4);i++){
+            if(smo_audio_u16(process_list+at+6)==20)for(unsigned s=0;s<480;s++)sink_mix[s]=(int)smo_audio_u32(process_list+at+0x14);
+            at+=smo_audio_u16(process_list+at+4);
+        }
+    }
+}
 static void time_limit(void *p, uint32_t n) { CHECK(p && n == UINT32_MAX); }
 typedef struct { void *object, *event; } handle_t;
 typedef struct { void *data; size_t size; } buffer_t;
@@ -95,6 +157,7 @@ void *module_sym(module_t *module, const char *name) {
     return NULL;
 }
 int main(void) {
+    output_test();
     strcpy(g_mod[0].name, "main");
     strcpy(g_mod[1].name, "sdk");
     uint64_t (*get_size)(const void *) = (void *)dm_hle_force_lookup(
@@ -165,6 +228,9 @@ int main(void) {
     CHECK(!start_renderer(handle));
     CHECK(!update_renderer(handle, expected_config) && processed == 1);
     CHECK(!execute(handle) && processed == 2);
+    device_commands=1;smo_audio_set_output(output_pcm);
+    CHECK(!execute(handle) && processed==4 && output_calls==2);
+    device_commands=0;smo_audio_set_output(NULL);
     close_renderer(handle);
     free(allocation);
     // Native boot previously aborted while polling this uninitialized event.

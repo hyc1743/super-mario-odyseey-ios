@@ -26,6 +26,10 @@ static _Atomic uint64_t offscreen_frames;
 static NSMutableDictionary<NSString *,NSNumber *> *presented_generations;
 static pthread_mutex_t sink_lock=PTHREAD_MUTEX_INITIALIZER;
 static void (^frame_sink)(id<MTLTexture>,int,uint64_t);
+static void (^frame_pacer)(int);
+void nvn_metal_set_frame_pacer(void (^pacer)(int)) {
+    pthread_mutex_lock(&sink_lock);frame_pacer=[pacer copy];pthread_mutex_unlock(&sink_lock);
+}
 void nvn_metal_set_frame_sink(void (^sink)(id<MTLTexture>,int,uint64_t)) {
     pthread_mutex_lock(&sink_lock);frame_sink=[sink copy];pthread_mutex_unlock(&sink_lock);
 }
@@ -286,6 +290,8 @@ static void capture_frame(id<MTLTexture> texture,uint64_t ordinal) {
 }
 static uint64_t present_on_worker(const nvn_present_request *request) {
     @autoreleasepool {
+        pthread_mutex_lock(&sink_lock);void (^pacer)(int)=frame_pacer;pthread_mutex_unlock(&sink_lock);
+        if(pacer)pacer(request->interval);
         id<MTLTexture> source=nvn_metal_texture(device,&request->texture,NULL,0);
         if(!source || source.textureType!=MTLTextureType2D || source.sampleCount!=1 || source.arrayLength!=1){
             NVN_LOG("NVN_GPU_PRESENT_UNSUPPORTED texture layout");return 0;

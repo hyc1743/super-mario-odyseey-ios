@@ -24,4 +24,7 @@ uint64_t nvn_metal_offscreen_frames(void);
 /* The sink receives an immutable GPU-completed snapshot on a native thread.
  * It must enqueue bounded display work and return without acquiring a drawable. */
 void nvn_metal_set_frame_sink(void (^)(id<MTLTexture>,int,uint64_t));
+/* Optional frontend backpressure, invoked on the native encoding worker
+ * before taking a present snapshot. Never called while sink_lock is held. */
+void nvn_metal_set_frame_pacer(void (^)(int));
 #endif

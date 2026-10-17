@@ -1,0 +1,32 @@
+name: SMOFrontendTests
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    CODE_SIGNING_ALLOWED: "NO"
+    CLANG_ENABLE_OBJC_ARC: "YES"
+    GENERATE_INFOPLIST_FILE: "YES"
+    HEADER_SEARCH_PATHS: "$(SRCROOT)/../host $(SRCROOT)/../gfx/nvn $(SRCROOT)/Sources"
+targets:
+  SMOFrontendTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Sources/SMOTouchController.m
+      - Sources/SMOFramePacer.m
+      - Sources/SMOAudio.m
+      - Tests
+    dependencies:
+      - sdk: AudioToolbox.framework
+      - sdk: AVFAudio.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.smo.frontendtests
+schemes:
+  SMOFrontendTests:
+    build:
+      targets:
+        SMOFrontendTests: all
+    test:
+      targets: [SMOFrontendTests]
