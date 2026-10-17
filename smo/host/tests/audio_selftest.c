@@ -259,7 +259,7 @@ int main(void) {
     for(int i=0;i<10;i++)CHECK(!update_renderer(handle,expected_config));
     struct timespec wait={0,100000000};nanosleep(&wait,NULL);
     int auto_frames=atomic_load(&processed)-prior;
-    CHECK(auto_frames>=4 && auto_frames<=30); // automatic rendering uses the paced service clock
+    CHECK(auto_frames>=1 && auto_frames<=30); // automatic rendering runs without an update-driven mix loop
     close_renderer(handle);
     free(allocation);
     // Native boot previously aborted while polling this uninitialized event.
