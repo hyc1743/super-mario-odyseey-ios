@@ -99,6 +99,19 @@ static uint64_t audio_now_ns(void){
     struct timespec now;clock_gettime(CLOCK_MONOTONIC,&now);
     return (uint64_t)now.tv_sec*1000000000u+(uint64_t)now.tv_nsec;
 }
+static pthread_mutex_t renderer_update_pace_lock=PTHREAD_MUTEX_INITIALIZER;
+static uint64_t next_renderer_update_ns;
+static void pace_renderer_update(void){
+    pthread_mutex_lock(&renderer_update_pace_lock);
+    uint64_t now=audio_now_ns();
+    while(next_renderer_update_ns>now){
+        uint64_t delay=next_renderer_update_ns-now;
+        struct timespec wait={(time_t)(delay/1000000000u),(long)(delay%1000000000u)};
+        nanosleep(&wait,NULL);now=audio_now_ns();
+    }
+    next_renderer_update_ns=now+5000000u;
+    pthread_mutex_unlock(&renderer_update_pace_lock);
+}
 /* SDK EventType::SignalEvent enters Horizon arbitration and needs a registered
  * guest thread. The audio worker attaches one before calling SDK processing. */
 static void server_event(renderer *r) {
@@ -265,7 +278,9 @@ static uint32_t h_open(renderer_handle *out, void *event, const void *parameter,
 }
 static uint32_t h_update(renderer_handle handle, const void *config) {
     uint64_t call=atomic_fetch_add(&renderer_updates,1)+1;
-    if(call==1 || call%100==0)LOG("AUDIO_RENDERER_UPDATE_CALLS count=%llu",(unsigned long long)call);
+    if(call==1 || (call<=10000 && call%1000==0) || call%100000==0)
+        LOG("AUDIO_RENDERER_UPDATE_CALLS count=%llu",(unsigned long long)call);
+    if(config)pace_renderer_update();
     pthread_mutex_lock(&audio_lock);
     renderer *r = find_session(handle.object);
     uint32_t result = AUDIO_INVALID;
