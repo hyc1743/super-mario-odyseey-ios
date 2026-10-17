@@ -23,6 +23,7 @@ def main():
     parser.add_argument("executable", type=pathlib.Path)
     parser.add_argument("--seconds", type=int, default=30)
     parser.add_argument("--press-a-after", type=int, help="press A once after this many seconds from nnMain")
+    parser.add_argument("--press-a-count", type=int, default=1, help="A presses spaced 10 seconds apart")
     parser.add_argument("--romfs", type=pathlib.Path, help="private startup resource fixture directory")
     parser.add_argument("--output", type=pathlib.Path, default=pathlib.Path("work/boot-smoke"))
     args = parser.parse_args()
@@ -35,10 +36,14 @@ def main():
     env = dict(os.environ)
     env["SMO_TRACE_FS_MISSING"] = "1"
     env.pop("SMO_TEST_PRESS_A_AFTER", None)
+    env.pop("SMO_TEST_PRESS_A_COUNT", None)
     if args.press_a_after is not None:
-        if args.press_a_after < 0 or args.press_a_after + 10 >= args.seconds:
+        if not 1 <= args.press_a_count <= 8:
+            parser.error("input count must be between 1 and 8")
+        if args.press_a_after < 0 or args.press_a_after + args.press_a_count*10 >= args.seconds:
             parser.error("input test needs at least 10 seconds after the A press")
         env["SMO_TEST_PRESS_A_AFTER"] = str(args.press_a_after)
+        env["SMO_TEST_PRESS_A_COUNT"] = str(args.press_a_count)
     with tempfile.TemporaryDirectory(prefix="smo-boot-") as temporary:
         for name in ("romfs", "save", "temp"):
             directory = pathlib.Path(temporary, name)
@@ -77,9 +82,10 @@ def main():
                        max(audio_mix,default=0)>=audio_min_frames and
                        max(audio_ticks,default=0)>=audio_min_frames)
         audio_gap = "AUDIO_DEVICE_SINK_UNSUPPORTED" in data
-        after_input = data.partition("TEST_INPUT_A pressed=0")[2]
-        input_progress = args.press_a_after is None or bool(
-            re.search(r"GUEST_GPU_FRAME_COMPLETED count=\d+", after_input))
+        after_input = data.rpartition("TEST_INPUT_A pressed=0")[2]
+        input_progress = args.press_a_after is None or (
+            data.count("TEST_INPUT_A pressed=0") == args.press_a_count and bool(
+            re.search(r"GUEST_GPU_FRAME_COMPLETED count=\d+", after_input)))
         fatal = "FATAL" in data or "【红】" in data or api_gaps
         passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and audio_clock and input_progress and not audio_gap and not fatal and not mapping_gap
         result = dict(passed=passed, scope="nnMain + guest thread + real GPU submit/completion + 60 fresh-draw offscreen frame deliveries; image correctness and physical iOS display require separate verification",
@@ -98,6 +104,7 @@ def main():
                       audio_update_calls_observed=max(audio_updates,default=0),
                       unsupported_audio_sink_observed=audio_gap,
                       test_press_a_after=args.press_a_after,
+                      test_press_a_count=args.press_a_count if args.press_a_after is not None else 0,
                       gpu_frames_after_input=input_progress if args.press_a_after is not None else None,
                       audio_nonzero_samples_observed=bool(re.search(r"AUDIO_DEVICE_PCM .*audible=[1-9]\d*", data)),
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))

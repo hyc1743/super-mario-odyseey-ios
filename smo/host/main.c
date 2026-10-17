@@ -21,14 +21,18 @@ extern void dm_jump_guest(void *arg, void *fn);
 
 /* Headless verification only: exercise the same HID state as the touch pad.
  * The iOS frontend does not link main.c and never synthesizes these presses. */
+typedef struct { unsigned delay, count; } test_input_config;
 static void *test_press_a(void *argument) {
-    unsigned delay = (unsigned)(uintptr_t)argument;
-    sleep(delay);
-    dm_input_set_buttons(DM_BTN_A);
-    LOG("TEST_INPUT_A pressed=1");
-    usleep(300000);
-    dm_input_set_buttons(0);
-    LOG("TEST_INPUT_A pressed=0");
+    test_input_config config = *(test_input_config *)argument;
+    sleep(config.delay);
+    for (unsigned i=0;i<config.count;i++) {
+        if (i) sleep(10);
+        dm_input_set_buttons(DM_BTN_A);
+        LOG("TEST_INPUT_A pressed=1 index=%u", i+1);
+        usleep(300000);
+        dm_input_set_buttons(0);
+        LOG("TEST_INPUT_A pressed=0 index=%u", i+1);
+    }
     return NULL;
 }
 
@@ -69,10 +73,18 @@ int main(int argc, char **argv) {
     if (!fn) return 1;
     const char *press_after = getenv("SMO_TEST_PRESS_A_AFTER");
     if (press_after) {
+        static test_input_config config;
         char *end; unsigned long seconds = strtoul(press_after, &end, 10);
         if (!*press_after || *end || seconds > 120) die("Invalid test input delay");
+        config.delay=(unsigned)seconds; config.count=1;
+        const char *count_text=getenv("SMO_TEST_PRESS_A_COUNT");
+        if (count_text) {
+            unsigned long count=strtoul(count_text,&end,10);
+            if (!*count_text || *end || !count || count>8) die("Invalid test input count");
+            config.count=(unsigned)count;
+        }
         pthread_t input;
-        if (pthread_create(&input, NULL, test_press_a, (void *)(uintptr_t)seconds))
+        if (pthread_create(&input, NULL, test_press_a, &config))
             die("Failed to create test input worker");
         pthread_detach(input);
     }

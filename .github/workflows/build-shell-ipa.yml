@@ -315,7 +315,7 @@ jobs:
             export SMO_SHADER_DIR=/tmp/smo-device-shaders
             export SMO_SHADER_BUNDLE=/tmp/smo-device-shaders/shaders.smoa
           fi
-          python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded --seconds 45 --press-a-after 10 "${BOOT_ARGS[@]}"
+          python3 smo/verify/guest_boot_smoke.py smo/host/smo_host_embedded --seconds 60 --press-a-after 10 --press-a-count 2 "${BOOT_ARGS[@]}"
       - name: Preserve unmatched shader evidence privately
         if: ${{ always() && env.SMO_INJECTED == '1' && env.SMO_PRIVATE_TOKEN != '' }}
         run: python3 smo/verify/upload_shader_capture.py
