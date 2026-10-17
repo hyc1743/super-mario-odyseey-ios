@@ -66,6 +66,13 @@ def bindings(key, stage, source, metadata):
         # c0..c2 are driver/constant banks and must not use this mapping.
         if kind == "cbuf" and 3 <= resource.get("slot", -1) <= 16:
             argument["nvn_slot"] = resource["slot"] - 3
+        if kind == "cbuf" and resource.get("slot") == 1 and "constant_data" in resources:
+            argument["kind"] = "constant"
+        if kind == "sbuf" and resource.get("cb_slot") == 0 and stage in (1, 5):
+            base = 0x110 if stage == 1 else 0x510
+            offset = resource["cb_offset"] * 4 - base
+            if 0 <= offset < 0x100 and offset % 16 == 0:
+                argument["nvn_slot"] = offset // 16
         # SMO combined handles occupy c2[0x20 + 8*slot], rather than the
         # reference game's separate-handle table at 0x168. The complete SMO
         # fixture uses only immediate indices 8,10,...,70 (32 texture slots).
@@ -80,9 +87,12 @@ def bindings(key, stage, source, metadata):
     # Preserve actual compiler attributes rather than assuming dense locations.
     attribute_locations = {int(i) for i in re.findall(r"\[\[attribute\((\d+)\)\]\]", source)}
     inputs = [i for i in inputs if i.get("location") in attribute_locations]
-    return {"version": 1, "key": key, "stage": stage, "entry": "main0",
+    result = {"version": 1, "key": key, "stage": stage, "entry": "main0",
             "argument_buffer": 0, "arguments": arguments, "vertex_inputs": inputs,
             "unsupported_arguments": unsupported}
+    if "constant_data" in resources:
+        result["constant_data"] = resources["constant_data"]
+    return result
 
 
 def write_shader(z, row, key, source, metadata):
@@ -124,6 +134,12 @@ def translate(row, unpack, cross, reuse=None):
     spv = unpack / "msl" / (key + ".spv")
     facts = unpack / "msl" / (key + ".res.json")
     resource = json.loads(facts.read_text(encoding="utf-8"))
+    constant = unpack / key / "c1.bin"
+    if constant.is_file():
+        data = constant.read_bytes()
+        if len(data) > 65536:
+            raise ValueError("shader constants exceed NVN bank size: " + key)
+        resource["constant_data"] = data.hex()
     if resource["key"] != key:
         raise ValueError("resource reflection key mismatch: " + key)
     digest = hashlib.sha256(spv.read_bytes()).hexdigest()

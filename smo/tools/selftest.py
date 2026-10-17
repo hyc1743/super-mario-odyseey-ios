@@ -89,7 +89,7 @@ def test_sarc():
     s = Sarc(make_sarc(files))
     # SystemData/AglResource nests a second SARC below the outer Yaz0/SARC.
     # Discover by magic even when the nested member has an unrelated suffix.
-    from sharcb import shader_members, embedded_shader_members, extract_data
+    from sharcb import shader_members, embedded_shader_members, bnsh_constants, extract_data
     shader = bytearray(0x90)
     shader[:4] = b"BAHS"
     struct.pack_into("<I", shader, 8, 0x12345678)
@@ -116,6 +116,7 @@ def test_sarc():
     embedded[0xc:0xe] = b"\xff\xfe"
     struct.pack_into("<I", embedded, 0x1c, len(embedded))
     embedded[0x40:0x40 + len(shader) - 8] = shader[8:]
+    embedded[0x60:0x64] = b"grsc"
     module = b"prefix" + embedded + b"unrelated module data"
     found = list(embedded_shader_members(module, "main.bin"))
     check("embedded BNSH bounded discovery", len(found) == 1 and found[0][1] == embedded)
@@ -125,6 +126,23 @@ def test_sarc():
     struct.pack_into("<I", embedded, 0x1c, len(embedded) + 1000)
     check("embedded BNSH rejects out-of-module size", not list(embedded_shader_members(bytes(embedded), "bad.bin")))
     check("embedded BNSH rejects truncated header", not list(embedded_shader_members(b"BNSH\0\0\0\0", "short.bin")))
+    constant_file = bytearray(0xd00)
+    constant_file[0x60:0x64] = b"grsc"
+    struct.pack_into("<IQ", constant_file, 0x7c, 1, 0xc0)
+    struct.pack_into("<Q", constant_file, 0xc0 + 0x10, 0x100)
+    struct.pack_into("<Q", constant_file, 0x100 + 8, 0x200)
+    struct.pack_into("<QQII", constant_file, 0x200 + 8, 0x500, 0x300, 0x100, 0x708)
+    constant_file[0x500:0x504] = b"\x34\x12\x76\x98"
+    struct.pack_into("<II", constant_file, 0x500 + 0x700, 0xc0, 0x100)
+    payload = bytes(range(64))
+    constant_file[0x3c0:0x400] = payload
+    check("BNSH constant segment follows code record", bnsh_constants(constant_file) == {0x300: payload})
+    struct.pack_into("<I", constant_file, 0x500 + 0x704, 0x101)
+    try:
+        bnsh_constants(constant_file)
+        check("BNSH rejects constant outside bytecode", False)
+    except ValueError:
+        check("BNSH rejects constant outside bytecode", True)
     check("SARC 项数与名字", sorted(n for n, _, _ in s.entries) == ["alBar.sharcb", "alFoo.sharc"])
     check("SARC 数据", s.read("alFoo.sharc") == files[0][1] and s.read("alBar.sharcb") == files[1][1])
 
@@ -321,6 +339,19 @@ def test_shader_fixtures():
     arguments = shader_fixture.bindings("test", 1, "", metadata)["arguments"]
     check("NVN user constant banks", [a.get("nvn_slot") for a in arguments] == [0, 13, None])
     check("Metal argument IDs preserved", [a["id"] for a in arguments] == [4, 5, 6])
+    metadata["resources"]["cbufs"][0]["slot"] = 1
+    metadata["resources"]["constant_data"] = "00112233"
+    constants = shader_fixture.bindings("test", 1, "", metadata)
+    check("compiler constants retain exact bytes", constants["arguments"][0]["kind"] == "constant" and
+          constants["constant_data"] == "00112233" and "nvn_slot" not in constants["arguments"][0])
+    metadata = {"resources": {"sbufs": [{"binding": i, "cb_slot": 0, "cb_offset": offset}
+                  for i, offset in enumerate((0x110 // 4, 0x510 // 4, 3))]},
+                "spirv": {"ssbos": [{"name": "s" + str(i), "binding": i} for i in range(3)]},
+                "metal_arguments": [{"name": "s" + str(i), "id": i, "declaration": "device float *", "array": ""}
+                                    for i in range(3)]}
+    check("NVN storage tables are stage specific",
+          [a.get("nvn_slot") for a in shader_fixture.bindings("test", 1, "", metadata)["arguments"]] == [0, None, None] and
+          [a.get("nvn_slot") for a in shader_fixture.bindings("test", 5, "", metadata)["arguments"]] == [None, 0, None])
     metadata = {"resources": {"textures": [{"binding": i, "handle": handle,
         "cbuf_slot": -1, "separate": False, "array": 1} for i, handle in enumerate((8, 70, 7, 9, 72))]},
         "spirv": {"textures": [{"name": "t" + str(i), "binding": i} for i in range(5)]},

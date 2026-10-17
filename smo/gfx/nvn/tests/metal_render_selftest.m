@@ -35,7 +35,7 @@ static void write_shader(NSString *root,FILE *index,uint8_t *code,unsigned seed,
     assert([source writeToFile:[root stringByAppendingPathComponent:[name stringByAppendingString:@".metal"]]
         atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
     NSDictionary *bindings=@{@"version":@1,@"key":name,@"stage":@(stage),@"entry":@"main0",@"argument_buffer":@0,
-        @"arguments":args,@"unsupported_arguments":@[],@"vertex_inputs":inputs};
+        @"arguments":args,@"unsupported_arguments":@[],@"vertex_inputs":inputs,@"constant_data":@"0000803e"};
     NSData *data=[NSJSONSerialization dataWithJSONObject:bindings options:0 error:NULL];assert(data);
     assert([data writeToFile:[root stringByAppendingPathComponent:[name stringByAppendingString:@".bindings.json"]] atomically:YES]);
 }
@@ -52,6 +52,7 @@ int main(void) {
         memset(memory+page*4,255,4);
         float vertices[6]={-1,-1,3,-1,-1,3};uint16_t indices[3]={0,1,2};float color[4]={1,0,0,1};
         memcpy(memory+page*2,vertices,sizeof vertices);memcpy(memory+page*2+128,indices,sizeof indices);memcpy(memory+page*5,color,sizeof color);
+        float storageFactor=4;memcpy(memory+page*5+64,&storageFactor,sizeof storageFactor);
         NSString *root=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
         assert([[NSFileManager defaultManager] createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:NULL]);
         setenv("SMO_SHADER_DIR",root.UTF8String,1);NSString *idx=[root stringByAppendingPathComponent:@"shaders.idx"];
@@ -63,12 +64,13 @@ int main(void) {
         });
         FILE *index=fopen(idx.fileSystemRepresentation,"wb");assert(index);
         NSString *vs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct Input{float2 p[[attribute(0)]];};\nvertex float4 main0(Input v[[stage_in]]){return float4(v.p,0,1);}\n";
-        NSString *fs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct A{constant float4 *color[[id(0)]];texture2d<float> image[[id(1)]];sampler smp[[id(2)]];};\nfragment float4 main0(constant A &a[[buffer(0)]]){return *a.color*a.image.sample(a.smp,float2(0.5));}\n";
+        NSString *fs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct A{constant float4 *color[[id(0)]];texture2d<float> image[[id(1)]];sampler smp[[id(2)]];constant float *scale[[id(3)]];device float *factor[[id(4)]];};\nfragment float4 main0(constant A &a[[buffer(0)]]){return *a.color*a.image.sample(a.smp,float2(0.5))*(*a.scale)*(*a.factor);}\n";
         write_shader(root,index,memory+page*7,7,1,vs,@[],@[@{@"location":@0,@"type":@"vec2"}]);
         write_shader(root,index,memory+page*7+512,19,5,fs,@[
             @{@"id":@0,@"kind":@"cbuf",@"nvn_slot":@0},
             @{@"id":@1,@"kind":@"texture",@"nvn_slot":@0,@"array":@1,@"separate":@NO},
-            @{@"id":@2,@"kind":@"sampler",@"nvn_slot":@0,@"array":@1,@"separate":@NO}],@[]);
+            @{@"id":@2,@"kind":@"sampler",@"nvn_slot":@0,@"array":@1,@"separate":@NO},
+            @{@"id":@3,@"kind":@"constant"},@{@"id":@4,@"kind":@"sbuf",@"nvn_slot":@0}],@[]);
         fclose(index);nvn_shader_reset();assert(nvn_shader_load(idx.fileSystemRepresentation)==2);
         C(ProgramInitialize,&program,0,0,0,0,0);nvn_shader_data shaders[2]={{P(memory+page*7),NULL},{P(memory+page*7+512),NULL}};
         assert(C(ProgramSetShaders,&program,2,P(shaders),0,0,0));
@@ -84,6 +86,7 @@ int main(void) {
         C(CommandBufferBindVertexAttribState,&cb,1,P(&attribute),0,0,0);C(CommandBufferBindVertexStreamState,&cb,1,P(&stream),0,0,0);
         C(CommandBufferBindVertexBuffer,&cb,0,P(memory+page*2),sizeof vertices,0,0);
         C(CommandBufferBindUniformBuffer,&cb,1,0,P(memory+page*5),16,0);C(CommandBufferBindProgram,&cb,P(&program),3,0,0,0);
+        C(CommandBufferBindStorageBuffer,&cb,1,0,P(memory+page*5+64),4,0);
         C(CommandBufferSetTexturePool,&cb,P(&tp),0,0,0,0);C(CommandBufferSetSamplerPool,&cb,P(&sp),0,0,0,0);
         C(CommandBufferBindTexture,&cb,1,0,1|UINT64_C(1)<<20,0,0);
         C(CommandBufferDrawElements,&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,NVN_INDEX_TYPE_UNSIGNED_SHORT,3,P(memory+page*2+128),0);

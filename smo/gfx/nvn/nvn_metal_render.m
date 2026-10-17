@@ -14,6 +14,7 @@
 @property(nonatomic,strong) id<MTLFunction> function;
 @property(nonatomic,strong) NSDictionary *bindings;
 @property(nonatomic,strong) id<MTLArgumentEncoder> arguments;
+@property(nonatomic,strong) id<MTLBuffer> constants;
 @end
 @implementation SMOMetalShader
 @end
@@ -149,6 +150,22 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
         private_metal_error(key,error);return nil;
     }
     SMOMetalShader *result=[SMOMetalShader new];result.function=function;result.bindings=bindings;
+    for(NSDictionary *arg in bindings[@"arguments"])if([arg[@"kind"] isEqualToString:@"constant"]){
+        NSString *hex=bindings[@"constant_data"];
+        if(![hex isKindOfClass:NSString.class] || hex.length>131072 || hex.length%2)return nil;
+        result.constants=[e.device newBufferWithLength:65536 options:MTLResourceStorageModeShared];
+        if(!result.constants)return nil;
+        uint8_t *bytes=result.constants.contents;
+        for(NSUInteger i=0;i<hex.length/2;i++){
+            unsigned value=0;
+            for(unsigned j=0;j<2;j++){
+                unichar c=[hex characterAtIndex:i*2+j];unsigned n=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:16;
+                if(n>15)return nil;value=value*16+n;
+            }
+            bytes[i]=(uint8_t)value;
+        }
+        break;
+    }
     if([bindings[@"arguments"] count]){
         result.arguments=[function newArgumentEncoderWithBufferIndex:[bindings[@"argument_buffer"] unsignedIntegerValue]];
         if(!result.arguments)return nil;
@@ -251,6 +268,12 @@ static int arguments_for(SMOGuestEncoder *e,SMOMetalShader *shader,unsigned stag
     [encoder setArgumentBuffer:args offset:0];
     for(NSDictionary *arg in shader.bindings[@"arguments"]){
         unsigned aid=[arg[@"id"] unsignedIntValue];NSString *kind=arg[@"kind"];
+        if([kind isEqualToString:@"constant"]){
+            if(!shader.constants)return reject("missing shader constant segment");
+            [encoder setBuffer:shader.constants offset:0 atIndex:aid];
+            [e.render useResource:shader.constants usage:MTLResourceUsageRead stages:stage==0?MTLRenderStageVertex:MTLRenderStageFragment];
+            continue;
+        }
         /* Maxwell bank numbers and texture instruction immediates are not NVN
          * binding slots. Metadata must carry a verified conversion explicitly. */
         if(!arg[@"nvn_slot"]){

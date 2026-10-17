@@ -118,12 +118,53 @@ def extract(path, outdir, stage_filter=None, facts=None):
     return extract_data(open(path, "rb").read(), path, outdir, stage_filter, facts)
 
 
+def bnsh_constants(data):
+    """Resolve BNSH variation/program/code records to compiler constant bytes.
+
+    Record layout follows ShaderLibrary's BnshLoader/Structs. NVN control
+    +0x700/+0x704 delimit c1 inside the associated bytecode allocation, as in
+    the reference project's job_for. Every pointer stays inside this container.
+    """
+    def checked(offset, size):
+        if offset < 0 or size < 0 or offset + size > len(data):
+            raise ValueError("BNSH record exceeds container")
+        return offset
+    checked(0, 0x88)
+    if data[0x60:0x64] != b"grsc":
+        raise ValueError("missing BNSH grsc header")
+    count = struct.unpack_from("<I", data, 0x7c)[0]
+    table = struct.unpack_from("<Q", data, 0x80)[0]
+    checked(table, count * 0x40)
+    result = {}
+    for i in range(count):
+        program = struct.unpack_from("<Q", data, table + i * 0x40 + 0x10)[0]
+        checked(program, 0x38)
+        for stage in range(6):
+            descriptor = struct.unpack_from("<Q", data, program + 8 + 8 * stage)[0]
+            if not descriptor:
+                continue
+            checked(descriptor, 0x20)
+            control, code, code_size, control_size = struct.unpack_from("<QQII", data, descriptor + 8)
+            checked(control, control_size); checked(code, code_size)
+            if control_size < 0x708 or data[control:control + 4] != b"\x34\x12\x76\x98":
+                raise ValueError("invalid NVN shader control record")
+            begin, end = struct.unpack_from("<II", data, control + 0x700)
+            if not 0 <= begin <= end <= code_size or end - begin > 65536:
+                raise ValueError("BNSH constant range exceeds bytecode")
+            constant = data[code + begin:code + end]
+            if code in result and result[code] != constant:
+                raise ValueError("one BNSH code allocation has conflicting constants")
+            result[code] = constant
+    return result
+
+
 def extract_data(d, path, outdir, stage_filter=None, facts=None):
     # 两种容器都收：`BAHS`（.sharcb，配套 .sharc 定义）与 `FSHA`（.bfsha，单文件）
     # 它们的**着色器槽位布局完全一样**（+0x00 标记 0x12345678 / +0x30 SPH 0x50 / +0x80 机器码），
     # 所以同一套切分即可；差别只在 .bfsha 没有 GLSL 定义（facts 拿不到，走缺省值）。
     assert d[:4] in (b"BAHS", b"FSHA", b"BNSH"), f"{path}: unsupported shader container magic {d[:4]!r}"
     jobs, rows = [], []
+    constants = bnsh_constants(d) if d[:4] == b"BNSH" else {}
     for k, (p, e) in enumerate(blobs(d)):
         if e - p < CODE_OFF + 8:
             continue
@@ -150,6 +191,9 @@ def extract_data(d, path, outdir, stage_filter=None, facts=None):
                              for i, v in enumerate(f.get("img", []))},
                      "attr": sf.get("attr", {}), "fout": sf.get("fout", {}),
                      "local": sf.get("local") or [1, 1, 1]})
+        if p in constants:
+            jobs[-1]["c1"] = constants[p].hex()
+            open(os.path.join(sub, "c1.bin"), "wb").write(constants[p])
         open(os.path.join(sub, "code_full.bin"), "wb").write(sph + code)
         rows.append((key, os.path.basename(path), f"0x{p:x}", stage, len(code),
                      hashlib.sha256(sph).hexdigest()[:16], hashlib.sha256(code).hexdigest()[:16]))
