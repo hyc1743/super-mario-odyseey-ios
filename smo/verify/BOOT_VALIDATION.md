@@ -276,4 +276,15 @@ Maxwell c3..c16 to 0..13; c0..c2 remain unresolved driver banks. Native guest
 rendering and completed presentation still require validation.
 The merged private fixture contains 21,076 unique converted shaders and 42,158
 deduplicated exact-span index rows. Its pinned SHA-256 is
-`907b2cd94a5159aac653bdf0c16c2850b0684d10cc7049da029a13b1f5378dc9`.
+`384f5d6030abb59822ce82126425f36542221d45ed92dd21bc91a33e92e14886`.
+
+Run `38985156780` confirms both first bound shaders resolve and compile on
+Metal. Actual drawing reaches the fragment texture argument, which still lacks
+a logical slot. All 90,823 texture references in the merged fixture use combined
+immediates 8,10,...,70: SMO's c2 table begins at 0x20 with eight bytes per slot.
+Fixture metadata now maps only this observed immediate/combined form to slots
+0..31; other handle forms remain unresolved. The translator's sampler-type
+queries also use this SMO layout instead of the reference game's 0x168 base.
+Full texture-type fixture regeneration is underway; the current pinned fixture
+has updated binding metadata, and its first draw uses a 2D texture. Correct
+cube/3D/array rendering is not yet proven.

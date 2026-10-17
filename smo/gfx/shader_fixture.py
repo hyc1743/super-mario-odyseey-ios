@@ -66,6 +66,15 @@ def bindings(key, stage, source, metadata):
         # c0..c2 are driver/constant banks and must not use this mapping.
         if kind == "cbuf" and 3 <= resource.get("slot", -1) <= 16:
             argument["nvn_slot"] = resource["slot"] - 3
+        # SMO combined handles occupy c2[0x20 + 8*slot], rather than the
+        # reference game's separate-handle table at 0x168. The complete SMO
+        # fixture uses only immediate indices 8,10,...,70 (32 texture slots).
+        # Keep other handle forms unresolved instead of applying this layout.
+        handle = resource.get("handle", -1)
+        if (kind == "texture" and resource.get("cbuf_slot") == -1 and
+                not resource.get("separate", False) and resource.get("array") == 1 and
+                8 <= handle <= 70 and handle % 2 == 0):
+            argument["nvn_slot"] = (handle - 8) // 2
         arguments.append(argument)
     inputs = reflected.get("inputs", []) if stage == 1 else []
     # Preserve actual compiler attributes rather than assuming dense locations.

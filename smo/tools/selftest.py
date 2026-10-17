@@ -306,6 +306,15 @@ def test_shader_fixtures():
     arguments = shader_fixture.bindings("test", 1, "", metadata)["arguments"]
     check("NVN user constant banks", [a.get("nvn_slot") for a in arguments] == [0, 13, None])
     check("Metal argument IDs preserved", [a["id"] for a in arguments] == [4, 5, 6])
+    metadata = {"resources": {"textures": [{"binding": i, "handle": handle,
+        "cbuf_slot": -1, "separate": False, "array": 1} for i, handle in enumerate((8, 70, 7, 9, 72))]},
+        "spirv": {"textures": [{"name": "t" + str(i), "binding": i} for i in range(5)]},
+        "metal_arguments": [{"name": "t" + str(i), "id": i, "declaration": "texture2d<float>", "array": ""}
+                            for i in range(5)] + [{"name": "t0Smplr", "id": 9, "declaration": "sampler", "array": ""}]}
+    arguments = shader_fixture.bindings("test", 5, "", metadata)["arguments"]
+    check("SMO combined texture slots and sampler pairing",
+          [a.get("nvn_slot") for a in arguments] == [0, 31, None, None, None, 0] and
+          arguments[-1]["kind"] == "sampler")
     with tempfile.TemporaryDirectory() as directory:
         root = pathlib.Path(directory)
         def fixture(name, key, source):

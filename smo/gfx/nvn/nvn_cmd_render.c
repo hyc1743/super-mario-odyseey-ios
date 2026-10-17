@@ -150,6 +150,9 @@ static void handles(NVNcommandBuffer *c,int kind,int stage,int first,int count,c
     nvn_cmd_handles *p=nvn_cmd_alloc(c,NVN_CMD_BIND_HANDLES,sizeof *p+(size_t)count*8);
     *p=(nvn_cmd_handles){kind,stage,first,count};
     if (count) memcpy(p+1,h,(size_t)count*8);
+    static _Atomic unsigned diagnostics;
+    if(count && atomic_fetch_add(&diagnostics,1)<16)
+        NVN_LOG("NVN_HANDLE_BINDING kind=%d stage=%d first=%d count=%d",kind,stage,first,count);
 }
 void nvn_CommandBufferBindTextures(NVNcommandBuffer *c,NVNshaderStage stage,int first,int count,const NVNtextureHandle *h) {
     handles(c,NVN_BIND_TEXTURE,stage,first,count,h);

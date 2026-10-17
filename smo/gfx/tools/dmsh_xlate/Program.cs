@@ -28,7 +28,10 @@ using System.Text.Json.Nodes;
 
 static class SwshXlate
 {
-    const int TexBase = 0x168, SampBase = 0x568;   // NVN 分离贴图 / 采样器句柄在 c[2] 的字节基址（每槽 8 字节；dm/gfx/tools/maxwell_refs.py 全量实测） | byte base of NVN separate texture / sampler handles in c[2] (8 bytes per slot; full measurement in dm/gfx/tools/maxwell_refs.py)
+    // SMO NVN53 combined texture handles: c2[0x20 + 8*slot], slots 0..31.
+    // All 90,823 texture references in the merged fixture use handles 8..70,
+    // even, rather than the reference game's separate tables at 0x168/0x568.
+    const int TexBase = 0x20, TexSlots = 32;
 
     sealed class Accessor : IGpuAccessor
     {
@@ -54,7 +57,7 @@ static class SwshXlate
         {
             (int off0, _, _) = TextureHandle.UnpackOffsets(handle);
             int bytes = off0 * 4;
-            return (cbufSlot < 0 || (cbufSlot & 0xffff) == 2) && bytes >= TexBase && bytes < SampBase && (bytes - TexBase) % 8 == 0 ? (bytes - TexBase) / 8 : -1;
+            return (cbufSlot < 0 || (cbufSlot & 0xffff) == 2) && bytes >= TexBase && bytes < TexBase + 8 * TexSlots && (bytes - TexBase) % 8 == 0 ? (bytes - TexBase) / 8 : -1;
         }
         public SamplerType QuerySamplerType(int handle, int cbufSlot = -1)
         {
