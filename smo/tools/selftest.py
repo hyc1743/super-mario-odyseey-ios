@@ -87,6 +87,30 @@ def test_sarc():
     from nintendo_archives import Sarc
     files = [("alFoo.sharc", b"\x01\x02\x03" * 10), ("alBar.sharcb", b"xyz")]
     s = Sarc(make_sarc(files))
+    # SystemData/AglResource nests a second SARC below the outer Yaz0/SARC.
+    # Discover by magic even when the nested member has an unrelated suffix.
+    from sharcb import shader_members, extract_data
+    shader = bytearray(0x90)
+    shader[:4] = b"BAHS"
+    struct.pack_into("<I", shader, 8, 0x12345678)
+    struct.pack_into("<I", shader, 8 + 0x30, 1 << 10)
+    nested = make_yaz0_literal(make_sarc([
+        ("resource.payload", make_sarc([("common.sharcb", bytes(shader))])),
+        ("ignored.raw", b"not a shader")]))
+    members = list(shader_members(nested, "system.szs"))
+    check("nested system shader discovery", len(members) == 1 and
+          members[0][0] == "system.szs::resource.payload::common.sharcb" and members[0][1] == shader)
+    with tempfile.TemporaryDirectory() as directory:
+        jobs, rows = extract_data(members[0][1], members[0][0], directory)
+        check("nested shader extraction", len(jobs) == len(rows) == 1 and jobs[0]["stage"] == "vs")
+    too_deep = bytes(shader)
+    for _ in range(9):
+        too_deep = make_sarc([("nested", too_deep)])
+    try:
+        list(shader_members(too_deep, "deep.sarc"))
+        check("shader archive depth bound", False)
+    except ValueError:
+        check("shader archive depth bound", True)
     check("SARC 项数与名字", sorted(n for n, _, _ in s.entries) == ["alBar.sharcb", "alFoo.sharc"])
     check("SARC 数据", s.read("alFoo.sharc") == files[0][1] and s.read("alBar.sharcb") == files[1][1])
 
@@ -267,7 +291,49 @@ def test_hle_policy():
     check("图形入口仍需接管", "nvnBootstrapLoader" in forced)
 
 
+def test_shader_fixtures():
+    import json
+    import pathlib
+    import zipfile
+    sys.path.insert(0, os.path.join(HERE, "..", "gfx"))
+    import shader_fixture
+    metadata = {"resources": {"cbufs": [{"binding": i, "slot": bank}
+                  for i, bank in enumerate((3, 16, 2))]},
+                "spirv": {"ubos": [{"name": "c" + str(i), "binding": i}
+                  for i in range(3)]},
+                "metal_arguments": [{"name": "c" + str(i), "id": i + 4,
+                  "declaration": "constant float4 *", "array": ""} for i in range(3)]}
+    arguments = shader_fixture.bindings("test", 1, "", metadata)["arguments"]
+    check("NVN user constant banks", [a.get("nvn_slot") for a in arguments] == [0, 13, None])
+    check("Metal argument IDs preserved", [a["id"] for a in arguments] == [4, 5, 6])
+    with tempfile.TemporaryDirectory() as directory:
+        root = pathlib.Path(directory)
+        def fixture(name, key, source):
+            path = root / name
+            with zipfile.ZipFile(path, "w") as z:
+                z.writestr("manifest.json", json.dumps({"msl_flags": [], "shaders": [{"key": key}], "unsupported": []}))
+                z.writestr("shaders.idx", "0000000000000001\t1\t" + key + ".metal\n")
+                for suffix, data in ((".metal", source), (".bindings.json", "{}"), (".reflection.json", "{}")):
+                    z.writestr(key + suffix, data)
+            return path
+        a = fixture("a.zip", "a", "source a")
+        b = fixture("b.zip", "b", "source b")
+        output = root / "merged.zip"
+        shader_fixture.merge([a, b, a], output)
+        original = output.read_bytes()
+        with zipfile.ZipFile(output) as z:
+            check("merge retains distinct resource families", len(json.loads(z.read("manifest.json"))["shaders"]) == 2)
+        conflict = fixture("conflict.zip", "a", "different source")
+        try:
+            shader_fixture.merge([a, conflict], output)
+            check("conflicting shader merge rejected", False)
+        except ValueError:
+            check("conflicting merge preserves previous fixture", output.read_bytes() == original and
+                  not output.with_suffix(".zip.partial").exists())
+
+
 def main():
+    test_shader_fixtures()
     for name, fn in (("1. Yaz0", test_yaz0), ("2. SARC", test_sarc),
                      ("3. NSO 头", test_nso), ("4. 改写器端到端", test_rewriter),
                      ("5. HLE 接管边界", test_hle_policy)):

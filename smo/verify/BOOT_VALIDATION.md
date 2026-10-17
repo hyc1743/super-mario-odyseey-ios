@@ -261,3 +261,19 @@ assets with the same binary hash fail explicitly. Two real offline inputs and
 synthetic bounds/ambiguity regressions pass locally. Native validation of the
 expanded index is pending. Shader diagnostics contain only hashes and lengths;
 shader bytes and converted sources remain in the private fixture repository.
+
+Run `38983808937` retained a bounded unmatched vertex capture privately. Its
+456-byte decoded program matches `SystemData/AglResource.szs` exactly, inside
+the nested `agl_resource.Nin_NX_NVN.release.sarc` / `agl_common.sharcb` resource.
+The earlier conversion covered ShaderData but omitted these system containers.
+`sharcb.py --archives` now traverses Yaz0/SARC layers by magic without extracting
+member paths. Synthetic nested-discovery and depth-bound regressions pass.
+The system family adds 2,622 unique shaders (2,656 archive entries). Seven
+translator AST failures succeed with debug optimization disabled; no replacement
+shader is used. The combined 42,184-row index resolves both first bound shaders
+through the real local pool-checked lookup test. NVN user uniform slots map from
+Maxwell c3..c16 to 0..13; c0..c2 remain unresolved driver banks. Native guest
+rendering and completed presentation still require validation.
+The merged private fixture contains 21,076 unique converted shaders and 42,158
+deduplicated exact-span index rows. Its pinned SHA-256 is
+`907b2cd94a5159aac653bdf0c16c2850b0684d10cc7049da029a13b1f5378dc9`.

@@ -10,11 +10,12 @@ import json
 import os
 from pathlib import Path
 import urllib.request
+import urllib.error
 import zipfile
 
 
 def archive_captures(directory):
-    files = sorted(directory.glob("shader-*.bin"))
+    files = sorted([*directory.glob("shader-*.bin"), *directory.glob("metal-error-*.txt")])
     if not files:
         return None
     if len(files) > 24 or any(p.stat().st_size > 65536 for p in files):
@@ -48,10 +49,17 @@ def main():
 
     if api("").get("private") is not True:
         raise ValueError("raw shader captures require a private repository")
-    result = api("/contents/diagnostics/shaders-" + run + ".zip", {
+    path = "/contents/diagnostics/shaders-" + run + ".zip"
+    body = {
         "message": "Capture bounded unmatched runtime shaders for run " + run,
         "branch": "embed-input", "content": base64.b64encode(data).decode("ascii"),
-    })
+    }
+    try:
+        body["sha"] = api(path + "?ref=embed-input")["sha"]
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+    result = api(path, body)
     print("Private shader diagnostic uploaded: bytes=" + str(len(data)) +
           " sha256=" + hashlib.sha256(data).hexdigest() + " commit=" + result["commit"]["sha"])
 

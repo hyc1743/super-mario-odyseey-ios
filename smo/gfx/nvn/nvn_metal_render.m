@@ -57,6 +57,16 @@ NSObject *nvn_metal_render_state(void) {
 }
 void nvn_metal_render_end(SMOGuestEncoder *e) { [e.render endEncoding];e.render=nil; }
 static int reject(const char *what) { NVN_LOG("NVN_METAL_RENDER_UNSUPPORTED %s",what);return 0; }
+static void private_metal_error(NSString *key,NSError *error) {
+    /* Metal descriptions can embed source excerpts. Only domain/code are public. */
+    const char *directory=getenv("SMO_SHADER_CAPTURE_DIR");
+    if(!directory || !error)return;
+    NSString *detail=error.localizedDescription;
+    if(detail.length>16000)detail=[detail substringToIndex:16000];
+    NSString *path=[[NSString stringWithUTF8String:directory] stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"metal-error-%@.txt",key]];
+    [detail writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+}
 static id<MTLTexture> attachment_texture(SMOGuestEncoder *e,const nvn_attachment *a) {
     if(!a->resource.object)return nil;
     return nvn_metal_texture(e.device,&a->resource,a->has_view?&a->view:NULL,1);
@@ -118,7 +128,11 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
     }
     id<MTLLibrary> library=[e.device newLibraryWithSource:source options:options error:&error];
     id<MTLFunction> function=[library newFunctionWithName:bindings[@"entry"]];
-    if(!function){NVN_LOG("NVN_METAL_SHADER_COMPILE_FAILED key=%s error=%s",key.UTF8String,error.localizedDescription.UTF8String ?: "missing entry");return nil;}
+    if(!function){
+        NVN_LOG("NVN_METAL_SHADER_COMPILE_FAILED key=%s domain=%s code=%ld",key.UTF8String,
+            error.domain.UTF8String ?: "missing entry",(long)error.code);
+        private_metal_error(key,error);return nil;
+    }
     SMOMetalShader *result=[SMOMetalShader new];result.function=function;result.bindings=bindings;
     if([bindings[@"arguments"] count]){
         result.arguments=[function newArgumentEncoderWithBufferIndex:[bindings[@"argument_buffer"] unsignedIntegerValue]];
@@ -206,7 +220,10 @@ static id<MTLRenderPipelineState> pipeline_for(SMOGuestEncoder *e,MTLRenderPassD
     d.vertexDescriptor=vd;
     id<MTLRenderPipelineState> cached=s.pipelines[key];if(cached)return cached;
     NSError *error=nil;cached=[e.device newRenderPipelineStateWithDescriptor:d error:&error];
-    if(!cached){NVN_LOG("NVN_METAL_PIPELINE_FAILED error=%s",error.localizedDescription.UTF8String);return nil;}
+    if(!cached){
+        NVN_LOG("NVN_METAL_PIPELINE_FAILED domain=%s code=%ld",error.domain.UTF8String ?: "unknown",(long)error.code);
+        private_metal_error(@"pipeline",error);return nil;
+    }
     s.pipelines[key]=cached;return cached;
 }
 

@@ -58,8 +58,15 @@ def bindings(key, stage, source, metadata):
         if resource is None:
             unsupported.append(arg)
             continue
-        arguments.append({**resource, "id": arg["id"], "name": name,
-                          "kind": "sampler" if sampler else kind})
+        argument = {**resource, "id": arg["id"], "name": name,
+                    "kind": "sampler" if sampler else kind}
+        # NVN graphics user UBOs occupy Maxwell c3..c16. The reference
+        # maxwell_refs.py uses this ABI; SMO's first system vertex shader reads
+        # c3 and its recorded vertex BindUniformBuffer supplies slot 0.
+        # c0..c2 are driver/constant banks and must not use this mapping.
+        if kind == "cbuf" and 3 <= resource.get("slot", -1) <= 16:
+            argument["nvn_slot"] = resource["slot"] - 3
+        arguments.append(argument)
     inputs = reflected.get("inputs", []) if stage == 1 else []
     # Preserve actual compiler attributes rather than assuming dense locations.
     attribute_locations = {int(i) for i in re.findall(r"\[\[attribute\((\d+)\)\]\]", source)}
@@ -75,7 +82,7 @@ def write_shader(z, row, key, source, metadata):
     z.writestr(key + ".bindings.json", json.dumps(bindings(key, row[1], source, metadata), sort_keys=True))
 
 
-def repack(archive, output, index=None):
+def repack(archive, output, index=None, spans=None):
     """Upgrade an already converted private fixture without rerunning compilers."""
     temporary = output.with_suffix(output.suffix + ".partial")
     with zipfile.ZipFile(archive) as old, zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as z:
@@ -87,6 +94,15 @@ def repack(archive, output, index=None):
             flat = key + ".metal" in names
             source = old.read(key + ".metal" if flat else "msl/" + key + ".metal").decode()
             metadata = json.loads(old.read(key + ".reflection.json" if flat else "reflection/" + key + ".json"))
+            if spans:
+                span = json.loads((spans / (key + ".span.json")).read_text())
+                size = span["span_bytes"]
+                resource = metadata["resources"]
+                if (span["key"] != key or span["archive_bytes"] != shader["span"] or
+                        not 0x58 <= size <= span["archive_bytes"] or
+                        resource.get("span_bytes", size) != size):
+                    raise ValueError("inconsistent decoded shader span: " + key)
+                resource["span_bytes"] = size
             write_shader(z, (None, shader["stage"], key + ".metal"), key, source, metadata)
         z.writestr("manifest.json", json.dumps(manifest, sort_keys=True))
     temporary.replace(output)
@@ -107,6 +123,48 @@ def translate(row, unpack, cross):
     metadata = {"resources": resource, "spirv": reflection,
                 "metal_arguments": metal_arguments(source)}
     return row, key, source, metadata
+
+
+def merge(archives, output):
+    """Combine independently converted resource families without hiding conflicts."""
+    temporary = output.with_suffix(output.suffix + ".partial")
+    shaders, unsupported, rows, assets = {}, {}, set(), {}
+    flags = None
+    try:
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED) as target:
+            for path in archives:
+                with zipfile.ZipFile(path) as archive:
+                    manifest = json.loads(archive.read("manifest.json"))
+                    if flags is not None and flags != manifest["msl_flags"]:
+                        raise ValueError("shader compiler options differ")
+                    flags = manifest["msl_flags"]
+                    rows.update(line for line in archive.read("shaders.idx").decode().splitlines()
+                                if line and not line.startswith("#"))
+                    for item in manifest.get("unsupported", []):
+                        unsupported[item["key"]] = item
+                    for item in manifest["shaders"]:
+                        key = item["key"]
+                        for suffix in (".metal", ".bindings.json", ".reflection.json"):
+                            name = key + suffix
+                            data = archive.read(name)
+                            digest = hashlib.sha256(data).digest()
+                            if name in assets:
+                                if assets[name] != digest:
+                                    raise ValueError("conflicting shader asset: " + name)
+                            else:
+                                target.writestr(name, data)
+                                assets[name] = digest
+                        if key in shaders and shaders[key] != item:
+                            raise ValueError("conflicting shader manifest: " + key)
+                        shaders[key] = item
+            target.writestr("shaders.idx", "# merged exact shader spans\n" + "\n".join(sorted(rows)) + "\n")
+            target.writestr("manifest.json", json.dumps({"version": 1, "msl_flags": flags,
+                "shaders": list(shaders.values()), "unsupported": list(unsupported.values())}, sort_keys=True))
+        temporary.replace(output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    print(f"merged={len(shaders)} index_rows={len(rows)} zip_bytes={output.stat().st_size} "
+          f"sha256={hashlib.sha256(output.read_bytes()).hexdigest()}")
 
 
 def build(unpack, output, cross, keys=None, jobs=8):
@@ -146,13 +204,18 @@ def main():
     parser.add_argument("--unpack", type=Path, default=Path("work/shaders_all"))
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--repack", type=Path, help="upgrade a legacy converted fixture, no translation")
+    parser.add_argument("--merge", nargs="+", type=Path, help="merge flat fixtures, reject conflicting assets")
     parser.add_argument("--index", type=Path, help="replace the exact-span index while repacking")
+    parser.add_argument("--spans", type=Path, help="validate and preserve decoded span metadata while repacking")
     parser.add_argument("--spirv-cross", default="spirv-cross")
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--keys", nargs="+", help="optional SHA256-prefix shader keys; default all")
     args = parser.parse_args()
+    if args.merge:
+        merge(args.merge, args.out)
+        return
     if args.repack:
-        repack(args.repack, args.out, args.index)
+        repack(args.repack, args.out, args.index, args.spans)
         return
     build(args.unpack, args.out, args.spirv_cross, set(args.keys) if args.keys else None, args.jobs)
 

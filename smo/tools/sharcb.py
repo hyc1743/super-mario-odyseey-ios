@@ -69,8 +69,34 @@ def facts_for(facts, sharcb_path):
     return {}
 
 
+def shader_members(data, name, depth=0):
+    """Discover shader containers inside nested system/layout SARC archives.
+
+    Use CLI --archives with an SZs/SARC file or a directory containing them.
+    Inspect magic rather than member extensions: system resources contain an
+    additional SARC layer absent from ShaderData. Member names are provenance
+    only; they are never used as filesystem extraction paths.
+    """
+    from nintendo_archives import Sarc, yaz0_decompress
+    if depth > 8:
+        raise ValueError("shader archive nesting exceeds eight levels")
+    if data[:4] == b"Yaz0":
+        data = yaz0_decompress(data)
+    if data[:4] in (b"BAHS", b"FSHA"):
+        yield name, data
+    elif data[:4] == b"SARC":
+        archive = Sarc(data)
+        for member, offset, size in archive.entries:
+            if offset < 0 or size < 0 or offset + size > len(data):
+                raise ValueError("shader archive member exceeds container")
+            yield from shader_members(data[offset:offset + size], name + "::" + member, depth + 1)
+
+
 def extract(path, outdir, stage_filter=None, facts=None):
-    d = open(path, "rb").read()
+    return extract_data(open(path, "rb").read(), path, outdir, stage_filter, facts)
+
+
+def extract_data(d, path, outdir, stage_filter=None, facts=None):
     # 两种容器都收：`BAHS`（.sharcb，配套 .sharc 定义）与 `FSHA`（.bfsha，单文件）
     # 它们的**着色器槽位布局完全一样**（+0x00 标记 0x12345678 / +0x30 SPH 0x50 / +0x80 机器码），
     # 所以同一套切分即可；差别只在 .bfsha 没有 GLSL 定义（facts 拿不到，走缺省值）。
@@ -114,17 +140,20 @@ def main():
         return 1
     src, outdir = sys.argv[1], sys.argv[2]
     sf = sys.argv[sys.argv.index("--stage-filter") + 1] if "--stage-filter" in sys.argv else None
+    archives = "--archives" in sys.argv
     if os.path.isdir(src):      # 递归找：<输出>/<归档名>/X.sharcb
         files = [os.path.join(dp, f) for dp, _, fs in os.walk(src) for f in sorted(fs)
-                 if f.endswith((".sharcb", ".bfsha"))]
+                 if f.endswith((".sharcb", ".bfsha") + ((".szs", ".sarc") if archives else ()))]
     else:
         files = [src]
     facts = load_facts(sys.argv[sys.argv.index("--facts") + 1]) if "--facts" in sys.argv else {}
     all_jobs, all_rows = [], []
     for f in files:
-        j, r = extract(f, outdir, sf, facts)
-        all_jobs += j
-        all_rows += r
+        members = shader_members(open(f, "rb").read(), f) if archives else [(f, open(f, "rb").read())]
+        for name, data in members:
+            j, r = extract_data(data, name, outdir, sf, facts)
+            all_jobs += j
+            all_rows += r
     os.makedirs(outdir, exist_ok=True)
     json.dump(all_jobs, open(os.path.join(outdir, "jobs.json"), "w"), indent=1)
     with open(os.path.join(outdir, "index.tsv"), "w", encoding="utf-8") as f:
