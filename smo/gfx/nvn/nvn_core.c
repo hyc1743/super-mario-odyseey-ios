@@ -369,6 +369,42 @@ TEX_SET(Target, 7)
 TEX_SET(Samples, 8)
 TEX_SET(Stride, 11)
 #undef TEX_SET
+void nvn_TextureBuilderSetSwizzle(void *obj,int r,int g,int b,int a) {
+    nvn_st_ent *e=need(obj,NVN_T_TEXB,"TextureBuilderSetSwizzle");
+    if(e)e->v[NVN_TEX_SWIZZLE_WORD]=(e->v[NVN_TEX_SWIZZLE_WORD]&NVN_TEX_HAS_PACKAGE)|NVN_TEX_HAS_SWIZZLE|
+        (uint8_t)r|((uint64_t)(uint8_t)g<<8)|((uint64_t)(uint8_t)b<<16)|((uint64_t)(uint8_t)a<<24);
+}
+void nvn_TextureBuilderSetDepthStencilMode(void *obj,int mode) {
+    nvn_st_ent *e=need(obj,NVN_T_TEXB,"TextureBuilderSetDepthStencilMode");
+    if(e)e->v[NVN_TEX_DEPTH_WORD]=(uint32_t)mode;
+}
+void nvn_TextureBuilderSetPackagedTextureLayout(void *obj,const void *layout) {
+    nvn_st_ent *e=need(obj,NVN_T_TEXB,"TextureBuilderSetPackagedTextureLayout");
+    if(!e)return;
+    e->v[NVN_TEX_SWIZZLE_WORD]&=~NVN_TEX_HAS_PACKAGE;
+    e->v[NVN_TEX_PACKAGE_WORD]=0;
+    if(layout){memcpy(&e->v[NVN_TEX_PACKAGE_WORD],layout,8);e->v[NVN_TEX_SWIZZLE_WORD]|=NVN_TEX_HAS_PACKAGE;}
+}
+static void texture_get_swizzle(const void *obj,unsigned type,int *r,int *g,int *b,int *a) {
+    nvn_resource_snapshot s;uint64_t w=UINT64_C(0x05040302);
+    nvn_st_ent *e=nvn_st_get(obj,type);
+    if(e){if(e->v[NVN_TEX_SWIZZLE_WORD]&NVN_TEX_HAS_SWIZZLE)w=e->v[NVN_TEX_SWIZZLE_WORD];}
+    else if(type==NVN_T_TEX&&nvn_resources_snapshot(obj,type,&s)){
+        if(s.words[NVN_TEX_SWIZZLE_WORD]&NVN_TEX_HAS_SWIZZLE)w=s.words[NVN_TEX_SWIZZLE_WORD];
+    }
+    if(r)*r=(int)(w&255);
+    if(g)*g=(int)((w>>8)&255);
+    if(b)*b=(int)((w>>16)&255);
+    if(a)*a=(int)((w>>24)&255);
+}
+void nvn_TextureBuilderGetSwizzle(const void *obj,int *r,int *g,int *b,int *a) {texture_get_swizzle(obj,NVN_T_TEXB,r,g,b,a);}
+void nvn_TextureGetSwizzle(const void *obj,int *r,int *g,int *b,int *a) {texture_get_swizzle(obj,NVN_T_TEX,r,g,b,a);}
+int nvn_TextureBuilderGetDepthStencilMode(const void *obj) {
+    nvn_st_ent *e=nvn_st_get(obj,NVN_T_TEXB);return e?(int)e->v[NVN_TEX_DEPTH_WORD]:0;
+}
+int nvn_TextureGetDepthStencilMode(const void *obj) {
+    nvn_resource_snapshot s;return nvn_resources_snapshot(obj,NVN_T_TEX,&s)?(int)s.words[NVN_TEX_DEPTH_WORD]:0;
+}
 uint64_t nvn_TextureBuilderSetSize3D(uint64_t obj, uint64_t w, uint64_t h, uint64_t d,
                                     uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a4; (void)a5; (void)a6; (void)a7;
@@ -422,6 +458,7 @@ static uint64_t texture_size(const nvn_st_ent *e) {
         l.height = tex_div_ceil(l.height, fmt.bh);
     }
     if (l.dims == 2) l.tile_h_log2 = nvn_tex_default_tile_h(l.height, l.samples_y, fmt.bh);
+    if (!l.linear && !nvn_tex_package_tile_h(e->v,&l.tile_h_log2)) return 0;
     if (l.dims == 3) l.tile_d_log2 = tex_pick_tile_size(l.depth + l.depth / 2);
     return nvn_tex_storage_size(&l);
 }
@@ -444,6 +481,7 @@ uint64_t nvn_TextureInitialize(uint64_t obj, uint64_t builder, uint64_t a2, uint
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_ent *b = need(ARG_OBJ(builder), NVN_T_TEXB, "TextureInitialize(builder)");
     uint64_t size = texture_size(b);
+    if (!b) return NVN_FALSE;
     if (!size) {
         NVN_LOG("NVN_TEXTURE_INIT_FAILED object=%p reason=layout format=%llu target=%llu size=%llux%llux%llu levels=%llu",
             ARG_OBJ(obj),(unsigned long long)b->v[5],(unsigned long long)b->v[7],

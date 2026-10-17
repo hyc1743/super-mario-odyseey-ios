@@ -66,6 +66,10 @@ SKIP = {
     "nvnProgramInitialize", "nvnProgramFinalize", "nvnProgramSetShaders",
 }
 SKIP.update(WINDOW_IMPLEMENTED)
+SKIP.update({"nvnTextureBuilderSetSwizzle", "nvnTextureBuilderSetDepthStencilMode",
+             "nvnTextureBuilderSetPackagedTextureLayout", "nvnTextureBuilderGetSwizzle",
+             "nvnTextureGetSwizzle", "nvnTextureBuilderGetDepthStencilMode",
+             "nvnTextureGetDepthStencilMode"})
 SKIP.update("nvn" + prefix + "Get" + suffix
             for prefix in ("SamplerBuilder", "Sampler")
             for suffix in ("MinMagFilter", "WrapMode", "Compare", "LodClamp", "LodBias",

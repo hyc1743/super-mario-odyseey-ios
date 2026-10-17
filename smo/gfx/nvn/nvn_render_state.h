@@ -4,6 +4,19 @@
 #define SMO_NVN_RENDER_STATE_H
 #include "include/nvn.h"
 #include <string.h>
+
+typedef struct { uint32_t samples,enabled,alpha_to_coverage,dither,reserved[2]; } nvn_multisample_state;
+_Static_assert(sizeof(nvn_multisample_state)==sizeof(NVNmultisampleState), "multisampleState inline size");
+static inline nvn_multisample_state nvn_multisample_snapshot(const void *obj) { nvn_multisample_state v; memcpy(&v,obj,sizeof v); return v; }
+void nvn_MultisampleStateSetDefaults(NVNmultisampleState*);
+void nvn_MultisampleStateSetSamples(NVNmultisampleState*,int);
+int nvn_MultisampleStateGetSamples(const NVNmultisampleState*);
+void nvn_MultisampleStateSetMultisampleEnable(NVNmultisampleState*,uint32_t);
+NVNboolean nvn_MultisampleStateGetMultisampleEnable(const NVNmultisampleState*);
+void nvn_MultisampleStateSetAlphaToCoverageEnable(NVNmultisampleState*,uint32_t);
+NVNboolean nvn_MultisampleStateGetAlphaToCoverageEnable(const NVNmultisampleState*);
+void nvn_MultisampleStateSetAlphaToCoverageDither(NVNmultisampleState*,uint32_t);
+NVNboolean nvn_MultisampleStateGetAlphaToCoverageDither(const NVNmultisampleState*);
 typedef struct { uint64_t target:3,src_rgb:7,dst_rgb:7,src_a:7,dst_a:7,eq_rgb:3,eq_a:3,advanced_mode:6,advanced_overlap:2,advanced_premultiplied_src:1,advanced_normalized_dst:1; } nvn_blend_state;
 _Static_assert(sizeof(nvn_blend_state)==sizeof(NVNblendState), "blendState inline size");
 static inline nvn_blend_state nvn_blend_snapshot(const void *obj) { nvn_blend_state v; memcpy(&v,obj,sizeof(v)); return v; }

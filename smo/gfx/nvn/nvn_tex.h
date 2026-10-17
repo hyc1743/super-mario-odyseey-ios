@@ -5,6 +5,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Texture snapshot words 12..14 hold immutable base sampling/layout state.
+ * Presence bits distinguish an explicit all-zero swizzle/layout from defaults. */
+enum { NVN_TEX_SWIZZLE_WORD=12, NVN_TEX_DEPTH_WORD=13, NVN_TEX_PACKAGE_WORD=14 };
+#define NVN_TEX_HAS_SWIZZLE (UINT64_C(1)<<32)
+#define NVN_TEX_HAS_PACKAGE (UINT64_C(1)<<33)
+/* Reference d2r-mobile: packaged layout byte 0 is the block-height exponent. */
+static inline int nvn_tex_package_tile_h(const uint64_t *words, uint8_t *height) {
+    if (!(words[NVN_TEX_SWIZZLE_WORD]&NVN_TEX_HAS_PACKAGE)) return 1;
+    unsigned h=(unsigned)(words[NVN_TEX_PACKAGE_WORD]&255);
+    if(h>5)return 0;
+    *height=(uint8_t)h;
+    return 1;
+}
+
 // 一张贴图的布局参数。字段对位 deko3d 的 DkImageLayout，命名保持可对照。
 //
 // 块（block）在这里指**压缩块**：BC 贴图一个块是 4×4 texel、8 或 16 字节；

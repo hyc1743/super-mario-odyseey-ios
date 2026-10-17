@@ -35,6 +35,10 @@ STATE_FAMILIES = ["nvn" + name for name in (
     "PolygonState", "VertexAttribState", "VertexStreamState",
 )]
 IMPLEMENTED_FAMILIES += STATE_FAMILIES
+MULTISAMPLE_IMPLEMENTED = {"nvnMultisampleStateSetDefaults"} | {
+    "nvnMultisampleState"+op+field for op in ("Set","Get")
+    for field in ("Samples","MultisampleEnable","AlphaToCoverageEnable","AlphaToCoverageDither")
+}
 RESOURCE_FAMILIES = ["nvnTextureView", "nvnTexturePool", "nvnSamplerPool"]
 RESOURCE_HANDLES = {"nvnDeviceGet"+suffix for suffix in (
     "TextureHandle", "TexelFetchHandle", "ImageHandle", "SeparateTextureHandle", "SeparateSamplerHandle",
@@ -89,7 +93,7 @@ def main():
         line = line.strip()
         if line and not line.startswith("#"):
             names.append(line)
-    impl = {n for n in names if any(n.startswith(p) for p in IMPLEMENTED_FAMILIES)} | COMMAND_IMPLEMENTED
+    impl = {n for n in names if any(n.startswith(p) for p in IMPLEMENTED_FAMILIES)} | COMMAND_IMPLEMENTED | MULTISAMPLE_IMPLEMENTED
     missing = impl - set(names)
     if missing:
         print(f"🔴 IMPLEMENTED 里有 {len(missing)} 个名字不在 names.txt 里：{sorted(missing)[:5]}")

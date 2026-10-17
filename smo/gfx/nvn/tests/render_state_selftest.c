@@ -148,6 +148,16 @@ static void vertex_and_unaligned(void) {
 }
 
 int main(void) {
+    NVNmultisampleState ms,copy;
+    memset(&ms,0xff,sizeof ms);nvn_MultisampleStateSetDefaults(&ms);
+    assert(!nvn_MultisampleStateGetSamples(&ms)&&!nvn_MultisampleStateGetMultisampleEnable(&ms));
+    nvn_MultisampleStateSetSamples(&ms,4);
+    nvn_MultisampleStateSetMultisampleEnable(&ms,0x101);
+    nvn_MultisampleStateSetAlphaToCoverageEnable(&ms,0x100);
+    nvn_MultisampleStateSetAlphaToCoverageDither(&ms,1);
+    memcpy(&copy,&ms,sizeof copy);nvn_MultisampleStateSetDefaults(&ms);
+    assert(nvn_MultisampleStateGetSamples(&copy)==4&&nvn_MultisampleStateGetMultisampleEnable(&copy));
+    assert(!nvn_MultisampleStateGetAlphaToCoverageEnable(&copy)&&nvn_MultisampleStateGetAlphaToCoverageDither(&copy));
     blend(); color_and_mask(); depth_and_polygon(); vertex_and_unaligned();
     puts("render_state_selftest: PASS (inline copies, snapshots, defaults, boolean ABI)");
     return 0;

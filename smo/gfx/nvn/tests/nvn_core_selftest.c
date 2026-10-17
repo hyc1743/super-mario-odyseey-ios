@@ -4,6 +4,7 @@
 #include "../nvn_host.h"
 #include "../nvn_state.h"
 #include "../include/nvn.h"
+#include "../nvn_tex.h"
 #include <pthread.h>
 
 enum { STATE_WORKERS = 4, STATE_OBJECTS = 4096 };
@@ -109,7 +110,47 @@ static void sampler_abi_test(void) {
     nvn_st_del(&builder,7);
 }
 
+static void texture_layout_test(void) {
+    NVNtextureBuilder builder={0};NVNtexture texture={0},alias={0};
+    NVNmemoryPool pool={0};NVNmemoryPoolBuilder pb={0};
+    uint8_t memory[16384]={0};
+    API(MemoryPoolBuilderSetDefaults,PFNNVNMEMORYPOOLBUILDERSETDEFAULTSPROC)(&pb);
+    API(MemoryPoolBuilderSetStorage,PFNNVNMEMORYPOOLBUILDERSETSTORAGEPROC)(&pb,memory,sizeof memory);
+    CHK(API(MemoryPoolInitialize,PFNNVNMEMORYPOOLINITIALIZEPROC)(&pool,&pb),"texture test pool");
+    API(TextureBuilderSetDefaults,PFNNVNTEXTUREBUILDERSETDEFAULTSPROC)(&builder);
+    NVNtextureSwizzle r,g,b,a;
+    API(TextureBuilderGetSwizzle,PFNNVNTEXTUREBUILDERGETSWIZZLEPROC)(&builder,&r,&g,&b,&a);
+    CHK(r==2&&g==3&&b==4&&a==5,"base texture identity swizzle default");
+    API(TextureBuilderSetSize2D,PFNNVNTEXTUREBUILDERSETSIZE2DPROC)(&builder,16,65);
+    API(TextureBuilderSetFormat,PFNNVNTEXTUREBUILDERSETFORMATPROC)(&builder,0x25);
+    API(TextureBuilderSetStorage,PFNNVNTEXTUREBUILDERSETSTORAGEPROC)(&builder,&pool,0);
+    size_t automatic=API(TextureBuilderGetStorageSize,PFNNVNTEXTUREBUILDERGETSTORAGESIZEPROC)(&builder);
+    NVNpackagedTextureLayout packed={{0}};
+    API(TextureBuilderSetPackagedTextureLayout,PFNNVNTEXTUREBUILDERSETPACKAGEDTEXTURELAYOUTPROC)(&builder,&packed);
+    packed.layout[0]=5;
+    size_t packaged=API(TextureBuilderGetStorageSize,PFNNVNTEXTUREBUILDERGETSTORAGESIZEPROC)(&builder);
+    CHK(packaged==4608&&automatic==8192,"explicit zero block height overrides automatic layout and copies source bytes");
+    API(TextureBuilderSetSwizzle,PFNNVNTEXTUREBUILDERSETSWIZZLEPROC)(&builder,4,3,2,1);
+    API(TextureBuilderSetDepthStencilMode,PFNNVNTEXTUREBUILDERSETDEPTHSTENCILMODEPROC)(&builder,1);
+    CHK(API(TextureInitialize,PFNNVNTEXTUREINITIALIZEPROC)(&texture,&builder),"packaged texture initialization");
+    memcpy(&alias,&texture,sizeof alias);
+    API(TextureBuilderSetDefaults,PFNNVNTEXTUREBUILDERSETDEFAULTSPROC)(&builder);
+    API(TextureGetSwizzle,PFNNVNTEXTUREGETSWIZZLEPROC)(&alias,&r,&g,&b,&a);
+    CHK(r==4&&g==3&&b==2&&a==1&&API(TextureGetDepthStencilMode,PFNNVNTEXTUREGETDEPTHSTENCILMODEPROC)(&alias)==1,
+        "initialized texture and copied alias retain base sampling state");
+    API(TextureBuilderSetSize2D,PFNNVNTEXTUREBUILDERSETSIZE2DPROC)(&builder,16,65);
+    API(TextureBuilderSetFormat,PFNNVNTEXTUREBUILDERSETFORMATPROC)(&builder,0x25);
+    packed.layout[0]=255;
+    API(TextureBuilderSetPackagedTextureLayout,PFNNVNTEXTUREBUILDERSETPACKAGEDTEXTURELAYOUTPROC)(&builder,&packed);
+    CHK(!API(TextureBuilderGetStorageSize,PFNNVNTEXTUREBUILDERGETSTORAGESIZEPROC)(&builder),"invalid packaged block exponent rejected");
+    API(TextureBuilderSetPackagedTextureLayout,PFNNVNTEXTUREBUILDERSETPACKAGEDTEXTURELAYOUTPROC)(&builder,NULL);
+    CHK(API(TextureBuilderGetStorageSize,PFNNVNTEXTUREBUILDERGETSTORAGESIZEPROC)(&builder)==automatic,"null packaged layout restores automatic layout");
+    API(TextureFinalize,PFNNVNTEXTUREFINALIZEPROC)(&texture);
+    API(MemoryPoolFinalize,PFNNVNMEMORYPOOLFINALIZEPROC)(&pool);
+    nvn_st_del(&builder,11);nvn_st_del(&pb,3);
+}
 int main(void) {
+    texture_layout_test();
     sampler_abi_test();
     uint64_t devb[8] = {0}, dev[8] = {0}, poolb[8] = {0}, pool[8] = {0};
     uint64_t bufb[8] = {0}, buf[8] = {0}, sync[8] = {0}, sampb[8] = {0}, samp[8] = {0}, prog[8] = {0};

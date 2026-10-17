@@ -5,6 +5,16 @@
 static unsigned boolean(uint32_t x) { return (x&255u)!=0; }
 #define LOAD(k) nvn_##k##_state v=nvn_##k##_snapshot(s)
 #define STORE() memcpy(s,&v,sizeof(v))
+void nvn_MultisampleStateSetDefaults(NVNmultisampleState *s) { memset(s,0,sizeof *s); }
+void nvn_MultisampleStateSetSamples(NVNmultisampleState *s,int samples) { LOAD(multisample);v.samples=(uint32_t)samples;STORE(); }
+int nvn_MultisampleStateGetSamples(const NVNmultisampleState *s) { LOAD(multisample);return (int)v.samples; }
+#define MULTI_BOOL(Name,field) \
+void nvn_MultisampleStateSet##Name(NVNmultisampleState *s,uint32_t enable) { LOAD(multisample);v.field=boolean(enable);STORE(); } \
+NVNboolean nvn_MultisampleStateGet##Name(const NVNmultisampleState *s) { LOAD(multisample);return (NVNboolean)v.field; }
+MULTI_BOOL(MultisampleEnable,enabled)
+MULTI_BOOL(AlphaToCoverageEnable,alpha_to_coverage)
+MULTI_BOOL(AlphaToCoverageDither,dither)
+#undef MULTI_BOOL
 void nvn_BlendStateSetDefaults(NVNblendState *s) { nvn_blend_state v; memset(&v,0,sizeof(v)); v.src_rgb=v.src_a=NVN_BLEND_FUNC_ONE; v.dst_rgb=v.dst_a=NVN_BLEND_FUNC_ZERO; v.eq_rgb=v.eq_a=NVN_BLEND_EQUATION_ADD; v.advanced_premultiplied_src=v.advanced_normalized_dst=1; STORE(); }
 void nvn_BlendStateSetBlendTarget(NVNblendState *s,int value) { LOAD(blend); v.target=value; STORE(); }
 int nvn_BlendStateGetBlendTarget(const NVNblendState *s) { LOAD(blend); return v.target; }

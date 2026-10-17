@@ -109,6 +109,7 @@ static int layout(const uint64_t *w,nvn_tex_layout *l,uint64_t *layer_stride,uin
         *layer_stride=(uint64_t)l->stride*tex_div_ceil(l->height,f.bh);
     } else {
         if(l->dims==2)l->tile_h_log2=nvn_tex_default_tile_h(l->height,l->samples_y,f.bh);
+        if(!nvn_tex_package_tile_h(w,&l->tile_h_log2))return 0;
         *layer_stride=nvn_tex_level_offset(l,l->mip_levels);
         if(l->layers>1)*layer_stride=tex_align_layer_size(*layer_stride,l->height,1,f.bh,l->tile_h_log2,0);
     }
@@ -198,7 +199,16 @@ id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapsho
     }
     {
         if(render_target&&pixel((uint32_t)s->words[5]).compressed)goto failure;
-        id<MTLTexture> result=texture_view(entry,v);
+        nvn_view_state effective={0};if(v)effective=*v;
+        const uint64_t *w=s->words;
+        if(!render_target&&!(effective.flags&NVN_VIEW_SWIZZLE)&&(w[NVN_TEX_SWIZZLE_WORD]&NVN_TEX_HAS_SWIZZLE)){
+            effective.flags|=NVN_VIEW_SWIZZLE;
+            for(int i=0;i<4;i++)effective.swizzle[i]=(uint8_t)(w[NVN_TEX_SWIZZLE_WORD]>>(i*8));
+        }
+        if(!render_target&&!(effective.flags&NVN_VIEW_DEPTH_STENCIL)&&w[NVN_TEX_DEPTH_WORD]){
+            effective.flags|=NVN_VIEW_DEPTH_STENCIL;effective.depth_stencil=(int32_t)w[NVN_TEX_DEPTH_WORD];
+        }
+        id<MTLTexture> result=texture_view(entry,&effective);
         if(!result)goto failure;
         pthread_mutex_unlock(&cache_lock);return result;
     }

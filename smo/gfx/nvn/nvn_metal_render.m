@@ -27,6 +27,7 @@
     nvn_channel_state channel;
     nvn_depth_state depth;
     nvn_polygon_state polygon;
+    nvn_multisample_state multisample;
     nvn_vertex_attrib_state attributes[16];
     nvn_vertex_stream_state streams[16];
     NVNbufferRange vertex[32],uniforms[6][32],storage[6][32];
@@ -235,6 +236,11 @@ static id<MTLRenderPipelineState> pipeline_for(SMOGuestEncoder *e,MTLRenderPassD
     id<MTLTexture> depth=pass.depthAttachment.texture ?: pass.stencilAttachment.texture;
     if(depth){if(samples && samples!=depth.sampleCount)return nil;samples=depth.sampleCount;}
     d.rasterSampleCount=samples?:1;
+    nvn_multisample_state ms=s->multisample;
+    if((ms.samples&&ms.samples!=d.rasterSampleCount)||
+       (d.rasterSampleCount>1&&!ms.enabled)||(ms.alpha_to_coverage&&ms.dither))return nil;
+    d.alphaToCoverageEnabled=ms.alpha_to_coverage!=0;
+    [key appendFormat:@":a2c%u",ms.alpha_to_coverage];
     d.depthAttachmentPixelFormat=pass.depthAttachment.texture.pixelFormat;
     d.stencilAttachmentPixelFormat=pass.stencilAttachment.texture.pixelFormat;
     [key appendFormat:@":%lu:%lu:%lu",(unsigned long)d.rasterSampleCount,(unsigned long)d.depthAttachmentPixelFormat,(unsigned long)d.stencilAttachmentPixelFormat];
@@ -433,6 +439,7 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
         case NVN_STATE_CHANNEL:dst=&s->channel;expected=sizeof s->channel;break;
         case NVN_STATE_DEPTH:dst=&s->depth;expected=sizeof s->depth;break;
         case NVN_STATE_POLYGON:dst=&s->polygon;expected=sizeof s->polygon;break;
+        case NVN_STATE_MULTISAMPLE:dst=&s->multisample;expected=sizeof s->multisample;break;
         default:return reject("multisample state");
         }
         if(p.size!=expected)return 0;memcpy(dst,p.bytes,expected);return 1;
