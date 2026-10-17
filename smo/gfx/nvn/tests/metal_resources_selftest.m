@@ -5,7 +5,16 @@
 #include "../nvn_state.h"
 #include "../nvn_host.h"
 #include "../nvn_tex.h"
+#include "../nvn_texture_transfer.h"
+#include <pthread.h>
 #include <assert.h>
+
+typedef struct { NVNtexture *texture;NVNcopyRegion region; } flush_test;
+static void *flush_small_stack(void *argument) {
+    flush_test *t=argument;
+    ((PFNNVNTEXTUREFLUSHTEXELSPROC)(uintptr_t)nvn_lookup("nvnTextureFlushTexels"))(t->texture,NULL,&t->region);
+    return NULL;
+}
 
 int main(void) {
     @autoreleasepool {
@@ -13,7 +22,7 @@ int main(void) {
         uint8_t *memory=calloc(1,4096); assert(memory);
         uint64_t pool[8]={0},object[8]={0},builder[8]={0},sampler[8]={0};
         nvn_st_ent *s=nvn_st_new(pool,4 /* memory pool */); assert(s);
-        s->v[1]=(uintptr_t)memory;s->v[2]=4096;
+        s->v[1]=(uintptr_t)memory;s->v[2]=4096;s->v[3]=NVN_MEMORY_POOL_FLAGS_CPU_CACHED;
         for(int y=0;y<4;++y)for(int x=0;x<4;++x){
             uint8_t *p=memory+y*32+x*4;p[0]=17;p[1]=34;p[2]=51;p[3]=255;
         }
@@ -34,6 +43,22 @@ int main(void) {
         tex=nvn_metal_texture(device,&texture,NULL,0);
         [tex getBytes:pixels bytesPerRow:16 fromRegion:MTLRegionMake2D(0,0,4,4) mipmapLevel:0];
         assert(pixels[0]==255 && pixels[1]==0 && pixels[2]==0 && pixels[3]==255);
+        nvn_st_ent *tracked=nvn_st_new(object,12);assert(tracked);
+        memcpy(tracked->v,texture.words,sizeof tracked->v);nvn_resources_stamp(object,12);
+        uint8_t green[8]={0,255,0,255,0,255,0,255};NVNcopyRegion update={1,1,0,2,1,1};
+        ((PFNNVNTEXTUREWRITETEXELSPROC)(uintptr_t)nvn_lookup("nvnTextureWriteTexels"))((NVNtexture *)object,NULL,&update,green);
+        [tex getBytes:pixels bytesPerRow:16 fromRegion:MTLRegionMake2D(0,0,4,4) mipmapLevel:0];
+        assert(pixels[20]==255&&pixels[21]==0); /* cached CPU data awaits flush */
+        flush_test ft={(NVNtexture *)object,update};pthread_t flush_thread;pthread_attr_t attr;
+        assert(!pthread_attr_init(&attr));assert(!pthread_attr_setstacksize(&attr,16384));
+        assert(!pthread_create(&flush_thread,&attr,flush_small_stack,&ft));
+        assert(!pthread_join(flush_thread,NULL));pthread_attr_destroy(&attr);
+        assert(nvn_metal_texture(device,&texture,NULL,0)==tex);
+        [tex getBytes:pixels bytesPerRow:16 fromRegion:MTLRegionMake2D(0,0,4,4) mipmapLevel:0];
+        for(unsigned y=0;y<4;y++)for(unsigned x=0;x<4;x++){
+            unsigned i=(y*4+x)*4;int patched=y==1&&(x==1||x==2);
+            assert(pixels[i]==(patched?0:255)&&pixels[i+1]==(patched?255:0)&&pixels[i+2]==0&&pixels[i+3]==255);
+        }
         nvn_fn defaults=nvn_lookup("nvnSamplerBuilderSetDefaults");
         defaults((uintptr_t)builder,0,0,0,0,0,0,0);
         assert(nvn_lookup("nvnSamplerInitialize")((uintptr_t)sampler,(uintptr_t)builder,0,0,0,0,0,0));

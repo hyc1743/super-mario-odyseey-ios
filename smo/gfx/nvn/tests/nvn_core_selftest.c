@@ -5,6 +5,7 @@
 #include "../nvn_state.h"
 #include "../include/nvn.h"
 #include "../nvn_tex.h"
+#include "../nvn_texture_transfer.h"
 #include <pthread.h>
 
 enum { STATE_WORKERS = 4, STATE_OBJECTS = 4096 };
@@ -149,7 +150,64 @@ static void texture_layout_test(void) {
     API(MemoryPoolFinalize,PFNNVNMEMORYPOOLFINALIZEPROC)(&pool);
     nvn_st_del(&builder,11);nvn_st_del(&pb,3);
 }
+static unsigned transfer_flushes;
+static int observe_flush(const nvn_texture_transfer *t) {
+    transfer_flushes++;return t->level==1&&t->region.zoffset==1&&t->region.depth==2;
+}
+static void texture_transfer_test(void) {
+    uint8_t memory[65536]={0},pixels[16*65*4],input[72];
+    NVNmemoryPool pool={0};NVNtexture texture={0},alias={0};
+    nvn_st_ent *p=nvn_st_new(&pool,4),*s=nvn_st_new(&texture,12);
+    p->v[1]=(uintptr_t)memory;p->v[2]=sizeof memory;
+    uint64_t words[16]={0,16,65,1,1,0x25,0,1,1,(uintptr_t)&pool,128,0,NVN_TEX_HAS_PACKAGE,0,0,0};
+    memcpy(s->v,words,sizeof words);s->v[15]=nvn_st_resource_serial();nvn_resources_stamp(&texture,12);
+    memcpy(&alias,&texture,sizeof alias);
+    memset(input,0xaa,sizeof input);
+    for(unsigned y=0;y<3;y++)for(unsigned x=0;x<16;x++)input[y*24+x]=(uint8_t)(1+y*16+x);
+    NVNcopyRegion r={3,7,0,4,3,1};
+    API(TextureWriteTexelsStrided,PFNNVNTEXTUREWRITETEXELSSTRIDEDPROC)(&alias,NULL,&r,input,24,0);
+    CHK(nvn_tex_detile(pixels,sizeof pixels,0,memory+128,sizeof memory-128,16,65,4,0)==sizeof pixels,
+        "written packaged texture can be detiled");
+    int ok=1;
+    for(unsigned y=0;y<65;y++)for(unsigned x=0;x<64;x++){
+        uint8_t expected=y>=7&&y<10&&x>=12&&x<28?(uint8_t)(1+(y-7)*16+x-12):0;
+        if(pixels[y*64+x]!=expected)ok=0;
+    }
+    CHK(ok&&memory[127]==0,"strided subrectangle crosses GOB boundaries without changing surrounding storage");
+    memset(memory,0,sizeof memory);
+    s->v[1]=s->v[2]=8;s->v[3]=3;s->v[4]=3;s->v[7]=4;
+    nvn_view_state v={.flags=NVN_VIEW_LEVELS|NVN_VIEW_LAYERS,.base_level=1,.level_count=1,.base_layer=1,.layer_count=2};
+    r=(NVNcopyRegion){1,1,0,2,2,2};
+    uint8_t layered[64];for(unsigned i=0;i<sizeof layered;i++)layered[i]=(uint8_t)(i+1);
+    API(TextureWriteTexelsStrided,PFNNVNTEXTUREWRITETEXELSSTRIDEDPROC)(&texture,(const NVNtextureView *)&v,&r,layered,12,32);
+    nvn_resource_snapshot snapshot;nvn_texture_transfer transfer;
+    CHK(nvn_resources_snapshot(&texture,12,&snapshot)&&nvn_texture_transfer_prepare(&snapshot,&v,&r,&transfer),"array mip transfer validated");
+    ok=1;
+    for(unsigned layer=0;layer<3;layer++){
+        uint8_t mip_pixels[64];uint64_t offset=128+layer*transfer.layer_stride+transfer.mip_offset;
+        if(nvn_tex_detile(mip_pixels,sizeof mip_pixels,0,memory+offset,sizeof memory-offset,4,4,4,0)!=sizeof mip_pixels)ok=0;
+        for(unsigned y=0;y<4;y++)for(unsigned x=0;x<16;x++){
+            uint8_t expected=layer>=1&&y>=1&&y<3&&x>=4&&x<12?layered[(layer-1)*32+(y-1)*12+x-4]:0;
+            if(mip_pixels[y*16+x]!=expected)ok=0;
+        }
+    }
+    CHK(ok,"view-relative mip/layers and independent row/image strides preserve untouched layers");
+    transfer_flushes=0;nvn_texture_set_flush_handler(observe_flush);
+    API(TextureFlushTexels,PFNNVNTEXTUREFLUSHTEXELSPROC)(&alias,(const NVNtextureView *)&v,&r);
+    nvn_texture_set_flush_handler(NULL);
+    CHK(transfer_flushes==1,"flush resolves copied texture identity and exact absolute subresource");
+    r.width=99;
+    CHK(!nvn_texture_transfer_prepare(&snapshot,&v,&r,&transfer),"out of bounds transfer rejected before copying");
+    memset(memory,0,sizeof memory);
+    s->v[1]=6;s->v[2]=5;s->v[3]=1;s->v[4]=1;s->v[5]=0x41;s->v[7]=1;
+    r=(NVNcopyRegion){4,4,0,2,1,1};uint8_t block[8]={1,2,3,4,5,6,7,8},blocks[32];
+    API(TextureWriteTexels,PFNNVNTEXTUREWRITETEXELSPROC)(&texture,NULL,&r,block);
+    CHK(nvn_tex_detile(blocks,sizeof blocks,0,memory+128,sizeof memory-128,2,2,8,0)==sizeof blocks&&
+        !memcmp(blocks+24,block,8)&&blocks[0]==0&&blocks[23]==0,"compressed edge texels write one complete BC block");
+    nvn_st_del(&texture,12);nvn_st_del(&pool,4);
+}
 int main(void) {
+    texture_transfer_test();
     texture_layout_test();
     sampler_abi_test();
     uint64_t devb[8] = {0}, dev[8] = {0}, poolb[8] = {0}, pool[8] = {0};

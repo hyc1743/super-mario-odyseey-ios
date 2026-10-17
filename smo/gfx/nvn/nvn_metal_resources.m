@@ -7,20 +7,24 @@
 #include "nvn_state.h"
 #include "nvn_tex.h"
 #include "nvn_texread.h"
+#include "nvn_texture_transfer.h"
 #include "nvn_bcdec.h"
 #include <math.h>
 #include <pthread.h>
+#include <dispatch/dispatch.h>
 #include "nvn_format_info.inc"
 
 @interface SMONVNMetalTexture : NSObject
 @property(nonatomic,strong) id<MTLTexture> texture;
 @property(nonatomic,strong) NSMutableDictionary<NSData *,id<MTLTexture>> *views;
+@property(nonatomic) nvn_resource_snapshot resource;
 @end
 @implementation SMONVNMetalTexture
 @end
 static NSMutableDictionary<NSData *,SMONVNMetalTexture *> *textures;
 static NSMutableDictionary<NSData *,id<MTLSamplerState>> *samplers;
 static pthread_mutex_t cache_lock=PTHREAD_MUTEX_INITIALIZER;
+static int flush_texture_region(const nvn_texture_transfer *transfer);
 
 typedef struct { MTLPixelFormat metal; uint32_t bytes,bw,bh; int compressed,depth; } pixel_info;
 static pixel_info pixel(uint32_t f) {
@@ -173,6 +177,7 @@ static id<MTLTexture> texture_view(SMONVNMetalTexture *entry,const nvn_view_stat
 }
 id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapshot *s,const nvn_view_state *v,int render_target) {
     if(!device||!s)return nil;
+    nvn_texture_set_flush_handler(flush_texture_region);
     pthread_mutex_lock(&cache_lock);
     if(!textures)textures=[NSMutableDictionary new];
     NSData *key=resource_key(device,s);SMONVNMetalTexture *entry=textures[key];
@@ -195,7 +200,7 @@ id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapsho
         if(!p.compressed)d.usage|=MTLTextureUsageRenderTarget;
         id<MTLTexture> texture=[device newTextureWithDescriptor:d];if(!texture)goto failure;
         if(!p.depth&&w[8]<=1&&!upload(texture,w,p,&l,(const uint8_t *)(uintptr_t)(pool->v[1]+w[10]),layer_stride,storage))goto failure;
-        entry=[SMONVNMetalTexture new];entry.texture=texture;entry.views=[NSMutableDictionary new];textures[key]=entry;
+        entry=[SMONVNMetalTexture new];entry.texture=texture;entry.resource=*s;entry.views=[NSMutableDictionary new];textures[key]=entry;
     }
     {
         if(render_target&&pixel((uint32_t)s->words[5]).compressed)goto failure;
@@ -217,6 +222,52 @@ failure:
         (unsigned long long)s->object,(unsigned long long)s->words[15],(unsigned long long)s->words[5],
         (unsigned long long)s->words[7],(unsigned long long)s->words[8],render_target);
     pthread_mutex_unlock(&cache_lock);return nil;
+}
+static int upload_region(SMONVNMetalTexture *entry,const nvn_texture_transfer *t) {
+    id<MTLTexture> tex=entry.texture;
+    if(tex.storageMode!=MTLStorageModeShared||tex.sampleCount>1)return 0;
+    pixel_info p=pixel((uint32_t)t->resource.words[5]);
+    if(p.metal==MTLPixelFormatInvalid||p.depth)return 0;
+    nvn_tex_layout mip=t->layout;
+    mip.width=t->width;mip.height=t->height;mip.layers=1;mip.mip_levels=1;
+    mip.tile_h_log2=tex_adjust_tile_size(t->layout.tile_h_log2,8,tex_div_ceil(mip.height,mip.block_h));
+    uint64_t row=(uint64_t)tex_div_ceil(mip.width,p.bw)*p.bytes;
+    uint64_t size=row*tex_div_ceil(mip.height,p.bh);
+    if(!size||size>SIZE_MAX)return 0;
+    uint8_t *decoded=malloc((size_t)size);if(!decoded)return 0;
+    const NVNcopyRegion *r=&t->region;
+    for(int z=0;z<r->depth;z++){
+        uint64_t offset=(uint64_t)(r->zoffset+z)*t->layer_stride+t->mip_offset;
+        if(offset>=t->storage_size||nvn_tex_decode(&mip,(uint32_t)t->resource.words[5],
+                t->storage+offset,(size_t)(t->storage_size-offset),decoded,(size_t)size)!=(int64_t)size){free(decoded);return 0;}
+        uint64_t first=(uint64_t)(r->yoffset/(int)p.bh)*row+(uint64_t)(r->xoffset/(int)p.bw)*p.bytes;
+        [tex replaceRegion:MTLRegionMake2D(r->xoffset,r->yoffset,r->width,r->height)
+            mipmapLevel:t->level slice:(NSUInteger)(r->zoffset+z) withBytes:decoded+first
+            bytesPerRow:(NSUInteger)row bytesPerImage:(NSUInteger)size];
+    }
+    free(decoded);return 1;
+}
+static int flush_texture_region(const nvn_texture_transfer *transfer) {
+    /* Metal/Foundation work must execute on a native stack, since NVN APIs can
+     * be called from a 16 KiB guest stack. Never dispatch_sync from that stack. */
+    nvn_texture_transfer t=*transfer;
+    __block int result=1;
+    dispatch_semaphore_t finished=dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+        @autoreleasepool {
+            pthread_mutex_lock(&cache_lock);
+            for(SMONVNMetalTexture *entry in textures.allValues){
+                nvn_resource_snapshot s=entry.resource;
+                if(s.object==t.resource.object&&s.words[15]==t.resource.words[15]&&!upload_region(entry,&t)){
+                    result=0;break;
+                }
+            }
+            pthread_mutex_unlock(&cache_lock);
+        }
+        dispatch_semaphore_signal(finished);
+    });
+    dispatch_semaphore_wait(finished,DISPATCH_TIME_FOREVER);
+    return result;
 }
 static float float_word(uint64_t w){uint32_t bits=(uint32_t)w;float f;memcpy(&f,&bits,4);return f;}
 static int address_mode(uint64_t value,MTLSamplerAddressMode *out) {
@@ -272,5 +323,6 @@ failure:
     pthread_mutex_unlock(&cache_lock);return nil;
 }
 void nvn_metal_resources_reset(void) {
+    nvn_texture_set_flush_handler(NULL);
     pthread_mutex_lock(&cache_lock);[textures removeAllObjects];[samplers removeAllObjects];pthread_mutex_unlock(&cache_lock);
 }

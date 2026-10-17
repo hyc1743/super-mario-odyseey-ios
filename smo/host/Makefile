@@ -9,7 +9,7 @@ CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
 # CORE = 除 main.c 以外的宿主全部源（自检目标复用；内嵌装载自检也要它）
-CORE = logbuf.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_hipc.c hle_sdkinit.c hle_vi.c hle_oe.c hle_pl.c hle_audio.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_cmd_render.c ../gfx/nvn/nvn_resources.c ../gfx/nvn/nvn_render_state.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_window.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+CORE = logbuf.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_hipc.c hle_sdkinit.c hle_vi.c hle_oe.c hle_pl.c hle_audio.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_texture_transfer.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_cmd_render.c ../gfx/nvn/nvn_resources.c ../gfx/nvn/nvn_render_state.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_window.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
 METAL_RUNTIME_SRC = ../gfx/nvn/nvn_metal_runtime.m ../gfx/nvn/nvn_metal_render.m ../gfx/nvn/nvn_metal_resources.m ../gfx/nvn/nvn_texread.c ../gfx/nvn/nvn_bcdec.c
 HOST_GPU_SRC =
 HOST_GPU_FLAGS =
@@ -36,7 +36,7 @@ smo_host_embedded: $(SRC) ../ios/Sources/Embedded.S ../ios/Sources/Embedded.c
 # CI 没发现是因为它绕过 Makefile、自己写 gcc 命令行 —— 现在 regress.sh 会跑 `make test`。
 # 结论：这一组文件是相互依赖的整体，就该只写一次。
 GFX_COMMON = ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c \
-             ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_cmd_render.c ../gfx/nvn/nvn_resources.c ../gfx/nvn/nvn_render_state.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_window.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
+             ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_texture_transfer.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_cmd_render.c ../gfx/nvn/nvn_resources.c ../gfx/nvn/nvn_render_state.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_window.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_replay.c
 
 # NVN 图形层单测：接口层（按名取函数 + 命令记录）
 nvn_iface_selftest: $(GFX_COMMON) ../gfx/nvn/tests/nvn_selftest.c

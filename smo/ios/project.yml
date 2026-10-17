@@ -59,6 +59,7 @@ targets:
       - path: ../gfx/nvn/nvn_table.c
       - path: ../gfx/nvn/nvn_state.c
       - path: ../gfx/nvn/nvn_core.c
+      - path: ../gfx/nvn/nvn_texture_transfer.c
       - path: ../gfx/nvn/nvn_cmd.c
       - path: ../gfx/nvn/nvn_cmd_render.c
       - path: ../gfx/nvn/nvn_resources.c

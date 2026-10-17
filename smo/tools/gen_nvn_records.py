@@ -66,6 +66,7 @@ SKIP = {
     "nvnProgramInitialize", "nvnProgramFinalize", "nvnProgramSetShaders",
 }
 SKIP.update(WINDOW_IMPLEMENTED)
+SKIP.update({"nvnTextureWriteTexels", "nvnTextureWriteTexelsStrided", "nvnTextureFlushTexels"})
 SKIP.update({"nvnTextureBuilderSetSwizzle", "nvnTextureBuilderSetDepthStencilMode",
              "nvnTextureBuilderSetPackagedTextureLayout", "nvnTextureBuilderGetSwizzle",
              "nvnTextureGetSwizzle", "nvnTextureBuilderGetDepthStencilMode",
