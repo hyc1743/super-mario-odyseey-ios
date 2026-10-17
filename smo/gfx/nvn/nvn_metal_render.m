@@ -377,8 +377,20 @@ static int set_depth_state(SMOGuestEncoder *e) {
     id<MTLDepthStencilState> state=[e.device newDepthStencilStateWithDescriptor:desc];if(!state)return 0;
     [e.render setDepthStencilState:state];return 1;
 }
+/* 单条绘制用到了还没实现的特性：只丢这一条（返回 2），不让整条命令缓冲失败。
+ * 以前 reject() 一路返回 0 → 整个命令缓冲（通常就是整帧）被跳过 → Start 后全黑。 */
+static int skip_draw(const char *what) {
+    static NSMutableSet<NSString *> *seen;
+    @synchronized([SMORenderState class]){
+        if(!seen)seen=[NSMutableSet new];
+        NSString *k=[NSString stringWithUTF8String:what];
+        if(![seen containsObject:k]){[seen addObject:k];NVN_LOG("NVN_METAL_DRAW_SKIPPED %s（只丢这一条绘制）",what);}
+    }
+    return 2;
+}
 static int prepare_draw(SMOGuestEncoder *e) {
     SMORenderState *s=(SMORenderState *)e.renderState;
+    if(!s.vs)return skip_draw("no matched vertex shader");
     int depthMode=guest_depth_mode(s);
     if(s.vs&&s.vs.depthMode!=depthMode){
         nvn_shader_ent entry=s.vs.sourceEntry;
@@ -404,10 +416,13 @@ static int prepare_draw(SMOGuestEncoder *e) {
     }
     [e.render setRenderPipelineState:pipeline];
     if(!set_depth_state(e))return 0;
-    if(s->polygon.cull==NVN_FACE_FRONT_AND_BACK)return reject("front and back culling");
+    if(s->polygon.cull==NVN_FACE_FRONT_AND_BACK)return 2;  /* 两面都剔除：本来就什么都不画 */
     [e.render setCullMode:s->polygon.cull==NVN_FACE_FRONT?MTLCullModeFront:s->polygon.cull==NVN_FACE_BACK?MTLCullModeBack:MTLCullModeNone];
     [e.render setFrontFacingWinding:s->polygon.front?MTLWindingCounterClockwise:MTLWindingClockwise];
-    if(s->polygon.mode==NVN_POLYGON_MODE_POINT || s->polygon.offset_en)return reject("polygon point/offset");
+    if(s->polygon.mode==NVN_POLYGON_MODE_POINT)return skip_draw("polygon mode point");
+    /* 深度偏移的系数走 SetPolygonOffsetClamp（尚未录制）：先按无偏移画，最坏是贴花/阴影 z-fighting，
+     * 远好过整帧丢弃。 */
+    if(s->polygon.offset_en)skip_draw("polygon offset ignored");
     [e.render setTriangleFillMode:s->polygon.mode==NVN_POLYGON_MODE_LINE?MTLTriangleFillModeLines:MTLTriangleFillModeFill];
     [e.render setBlendColorRed:s->blend_color[0] green:s->blend_color[1] blue:s->blend_color[2] alpha:s->blend_color[3]];
     id<MTLTexture> target=pass.depthAttachment.texture;
@@ -540,10 +555,11 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
                 NVN_LOG("NVN_SHADER_EXEC_MATCH_FAILED program=%llu index=%u stages=%llu candidates=%u matches=%u",
                     (unsigned long long)p.resource.words[15],i,(unsigned long long)p.stages,match.candidates,match.matches);
                 nvn_shader_capture_gpu(p.resource.words[2+i*2],p.resource.words[15],i);
-                return reject("exact guest shader match");
+                /* 程序匹配不上：清空着色器，后续绘制在 prepare_draw 里逐条跳过，命令缓冲继续 */
+                s.vs=nil;s.fs=nil;return 1;
             }
             unsigned stage=entry->stage==1?0:entry->stage==5?1:UINT_MAX;
-            if(stage==UINT_MAX)return reject("geometry/tessellation/compute shader");
+            if(stage==UINT_MAX){s.vs=nil;s.fs=nil;skip_draw("geometry/tessellation/compute shader");return 1;}
             if(!(p.stages&(1u<<stage)))continue;
             SMOMetalShader *shader=load_shader(e,entry,guest_depth_mode(s));if(!shader)return 0;
             if(stage==0)s.vs=shader;else s.fs=shader;

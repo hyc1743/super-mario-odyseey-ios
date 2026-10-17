@@ -36,9 +36,23 @@ int nvn_resources_snapshot(const void *object, uint32_t type, nvn_resource_snaps
     nvn_st_ent *e = nvn_st_get(object, type);
     if(!e && (type==8 || type==10 || type==12)){
         resource_identity id;memcpy(&id,object,sizeof id);
-        if(id.magic!=(RESOURCE_MAGIC|type) || !id.serial)return 0;
+        static _Atomic unsigned alias_misses;
+        if(id.magic!=(RESOURCE_MAGIC|type) || !id.serial){
+            /* 真机 v0.6.14：Start 后 ×8408 NVN_RESOURCE_MISS 走的都是这条（SNAPSHOT_MISS 一次没出现），
+             * 多数是栈上的纹理副本。记下头 24 字节，判断是「没盖戳的副本」还是「戳被游戏覆写」。 */
+            if(atomic_fetch_add(&alias_misses,1)<16)
+                NVN_LOG("NVN_RESOURCE_ALIAS_MISS reason=stamp type=%u object=%p words=%#llx,%#llx,%#llx",type,object,
+                    (unsigned long long)id.magic,(unsigned long long)id.owner,(unsigned long long)id.serial);
+            return 0;
+        }
         e=nvn_st_get((void *)(uintptr_t)id.owner,type);
-        if(!e || e->v[15]!=id.serial)return 0;
+        if(!e || e->v[15]!=id.serial){
+            if(atomic_fetch_add(&alias_misses,1)<16)
+                NVN_LOG("NVN_RESOURCE_ALIAS_MISS reason=%s type=%u object=%p owner=%#llx serial=%llu live_serial=%llu",
+                    e?"stale":"finalized",type,object,(unsigned long long)id.owner,(unsigned long long)id.serial,
+                    (unsigned long long)(e?e->v[15]:0));
+            return 0;
+        }
         static _Atomic unsigned aliases;
         if(atomic_fetch_add(&aliases,1)<8)NVN_LOG("NVN_RESOURCE_ALIAS object=%p owner=%p type=%u serial=%llu",object,e->key,type,(unsigned long long)id.serial);
     }

@@ -72,10 +72,10 @@ static void output_test(void){
     mix[240]=INT32_MAX;mix[0]=INT32_MIN;
     CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240);
     CHECK(out[0]==32767 && out[1]==-32768 && out[2]==0 && out[3]==0);
-    v=1;memcpy(cmd+0x120,&v,4);mix[240]=1234<<16;
+    v=1;memcpy(cmd+0x120,&v,4);mix[240]=1234;
     CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240 && out[0]==1234 && out[1]==1234);
     v=6;memcpy(cmd+0x120,&v,4);for(int i=0;i<6;i++)cmd[0x124+i]=(uint8_t)i;
-    memset(mix,0,sizeof mix);mix[0]=10000<<16;mix[240]=10000<<16;
+    memset(mix,0,sizeof mix);mix[0]=10000;mix[240]=10000;
     CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)==240 && abs(out[0]-7071)<=2 && abs(out[1]-7071)<=2);
     cmd[0x124]=6;CHECK(smo_audio_device_pcm(header,cmd,sizeof cmd,out,240)<0);
     CHECK(smo_audio_device_pcm(header,cmd,0x12f,out,240)<0);
@@ -124,7 +124,7 @@ static size_t generate(void *p, void *b, size_t n) {
             memcpy(commands+at+4,&len,2);memcpy(commands+at+6,&type,2);commands[at+0x10]=1;
             if(type==15){uint64_t address=(uintptr_t)sink_mix;memcpy(commands+at+0x118,&address,8);
                 v=2;memcpy(commands+at+0x120,&v,4);commands[at+0x125]=1;
-            }else{v=((i/2+1)*100)<<16;memcpy(commands+at+0x14,&v,4);}
+            }else{v=(i/2+1)*100;memcpy(commands+at+0x14,&v,4);}
             at+=len;
         }return at;
     }
