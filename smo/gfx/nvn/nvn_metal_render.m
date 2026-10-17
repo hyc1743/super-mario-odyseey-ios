@@ -15,6 +15,9 @@
 @property(nonatomic,strong) NSDictionary *bindings;
 @property(nonatomic,strong) id<MTLArgumentEncoder> arguments;
 @property(nonatomic,strong) id<MTLBuffer> constants;
+@property(nonatomic,copy) NSString *cacheKey;
+@property(nonatomic) int depthMode;
+@property(nonatomic) nvn_shader_ent sourceEntry;
 @end
 @implementation SMOMetalShader
 @end
@@ -33,6 +36,7 @@
     NVNbufferRange vertex[32],uniforms[6][32],storage[6][32];
     uint64_t handles[4][6][128];
     uint64_t texture_pool,sampler_pool;
+    uint64_t programDevice;
     float viewports[16][4],depth_ranges[16][2],blend_color[4];
     int32_t scissors[16][4];
     unsigned viewport_count,scissor_count;
@@ -121,11 +125,18 @@ static int full_scissor(SMORenderState *s,id<MTLTexture> t) {
         (int64_t)s->scissors[0][0]+s->scissors[0][2]>=(int64_t)t.width &&
         (int64_t)s->scissors[0][1]+s->scissors[0][3]>=(int64_t)t.height);
 }
-static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entry) {
+static int guest_depth_mode(SMORenderState *s) {
+    nvn_st_ent *device=nvn_st_get((void *)(uintptr_t)s->programDevice,1);
+    return device?(int)device->v[5]:1; /* synthetic host shaders already use Metal depth */
+}
+static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entry,int depthMode) {
     SMORenderState *s=(SMORenderState *)e.renderState;
     NSString *filename=[NSString stringWithUTF8String:entry->msl];
     NSString *key=filename.stringByDeletingPathExtension;
-    SMOMetalShader *cached=s.shaders[key];if(cached)return cached;
+    if(entry->stage!=1)depthMode=1;
+    if(depthMode!=0&&depthMode!=1){reject("device depth mode");return nil;}
+    NSString *cacheKey=[NSString stringWithFormat:@"%@:%d",key,depthMode];
+    SMOMetalShader *cached=s.shaders[cacheKey];if(cached)return cached;
     const char *directory=getenv("SMO_SHADER_DIR");
     if(!directory){reject("SMO_SHADER_DIR missing");return nil;}
     NSString *root=[NSString stringWithUTF8String:directory];
@@ -139,6 +150,14 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
        ![bindings[@"key"] isEqualToString:key] || [bindings[@"stage"] intValue]!=entry->stage ||
        ![bindings[@"arguments"] isKindOfClass:[NSArray class]] || [bindings[@"unsupported_arguments"] count]){
         NVN_LOG("NVN_METAL_SHADER_MISSING key=%s stage=%u",key.UTF8String,entry->stage);return nil;
+    }
+    if(entry->stage==1&&depthMode==0){
+        NSString *variant=bindings[@"depth_clip_source"];
+        if(![variant isKindOfClass:NSString.class]||![variant.lastPathComponent isEqualToString:variant]){
+            NVN_LOG("NVN_METAL_SHADER_DEPTH_VARIANT_MISSING key=%s",key.UTF8String);return nil;
+        }
+        source=[NSString stringWithContentsOfFile:[root stringByAppendingPathComponent:variant] encoding:NSUTF8StringEncoding error:&error];
+        if(!source)return nil;
     }
     MTLCompileOptions *options=[MTLCompileOptions new];
     if(@available(macOS 15.0,iOS 18.0,*)){
@@ -157,6 +176,7 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
         private_metal_error(key,error);return nil;
     }
     SMOMetalShader *result=[SMOMetalShader new];result.function=function;result.bindings=bindings;
+    result.cacheKey=cacheKey;result.depthMode=depthMode;result.sourceEntry=*entry;
     for(NSDictionary *arg in bindings[@"arguments"])if([arg[@"kind"] isEqualToString:@"constant"]){
         NSString *hex=bindings[@"constant_data"];
         if(![hex isKindOfClass:NSString.class] || hex.length>131072 || hex.length%2)return nil;
@@ -177,8 +197,8 @@ static SMOMetalShader *load_shader(SMOGuestEncoder *e,const nvn_shader_ent *entr
         result.arguments=[function newArgumentEncoderWithBufferIndex:[bindings[@"argument_buffer"] unsignedIntegerValue]];
         if(!result.arguments)return nil;
     }
-    s.shaders[key]=result;
-    NVN_LOG("NVN_METAL_SHADER_READY key=%s stage=%u",key.UTF8String,entry->stage);
+    s.shaders[cacheKey]=result;
+    NVN_LOG("NVN_METAL_SHADER_READY key=%s stage=%u depth=%d",key.UTF8String,entry->stage,depthMode);
     return result;
 }
 static MTLVertexFormat vertex_format(unsigned fmt) {
@@ -221,7 +241,7 @@ static id<MTLRenderPipelineState> pipeline_for(SMOGuestEncoder *e,MTLRenderPassD
     if(!s.vs)return nil;
     if(s->color.logic_op!=NVN_LOGIC_OP_COPY || s->color.alpha_func!=NVN_ALPHA_FUNC_ALWAYS){reject("logic/alpha test");return nil;}
     MTLRenderPipelineDescriptor *d=[MTLRenderPipelineDescriptor new];d.vertexFunction=s.vs.function;d.fragmentFunction=s.fs.function;
-    NSMutableString *key=[NSMutableString stringWithFormat:@"%@:%@",s.vs.bindings[@"key"],s.fs.bindings[@"key"] ?: @"depth"];
+    NSMutableString *key=[NSMutableString stringWithFormat:@"%@:%@",s.vs.cacheKey,s.fs.cacheKey ?: @"depth"];
     NSUInteger samples=0;
     for(unsigned i=0;i<8;i++){
         id<MTLTexture> tex=pass.colorAttachments[i].texture;
@@ -347,6 +367,11 @@ static int set_depth_state(SMOGuestEncoder *e) {
 }
 static int prepare_draw(SMOGuestEncoder *e) {
     SMORenderState *s=(SMORenderState *)e.renderState;
+    int depthMode=guest_depth_mode(s);
+    if(s.vs&&s.vs.depthMode!=depthMode){
+        nvn_shader_ent entry=s.vs.sourceEntry;
+        s.vs=load_shader(e,&entry,depthMode);if(!s.vs)return 0;
+    }
     MTLRenderPassDescriptor *pass=pass_for(e);if(!pass)return reject("render attachments");
     id<MTLRenderPipelineState> pipeline=pipeline_for(e,pass);if(!pipeline)return reject("render pipeline");
     if(!e.render){
@@ -483,6 +508,7 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
     }
     case NVN_CMD_BIND_PROGRAM:{
         READ(nvn_cmd_program,p);unsigned count=(unsigned)p.resource.words[1];if(count>6)return 0;
+        s->programDevice=p.resource.words[0];
         if(p.stages&1)s.vs=nil;if(p.stages&2)s.fs=nil;
         for(unsigned i=0;i<count;i++){
             nvn_shader_match match;const nvn_shader_ent *entry=nvn_shader_find_gpu(p.resource.words[2+i*2],&match);
@@ -495,7 +521,7 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
             unsigned stage=entry->stage==1?0:entry->stage==5?1:UINT_MAX;
             if(stage==UINT_MAX)return reject("geometry/tessellation/compute shader");
             if(!(p.stages&(1u<<stage)))continue;
-            SMOMetalShader *shader=load_shader(e,entry);if(!shader)return 0;
+            SMOMetalShader *shader=load_shader(e,entry,guest_depth_mode(s));if(!shader)return 0;
             if(stage==0)s.vs=shader;else s.fs=shader;
         }
         return 1;

@@ -303,12 +303,12 @@ jobs:
           PY
             curl -sS --http1.1 --retry 3 --retry-all-errors --fail-with-body -L -H "Authorization: Bearer $SMO_PRIVATE_TOKEN" \
               -H "Accept: application/vnd.github.raw+json" \
-              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-shaders.zip?ref=e753fa3adca332fc6cd337ee19aff0f815d07fdc" \
+              "https://api.github.com/repos/$PRIVATE_REPO/contents/input/boot-shaders.zip?ref=5fdd1aae1be923036e56c7a6a8098604984f1423" \
               -o /tmp/boot-shaders.zip
             python3 - <<'PY'
           import hashlib, zipfile
           path = '/tmp/boot-shaders.zip'
-          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '00db9294e03dbf568a09a91a66c1e2fd2f09feb050bea8c754979800741e44e1'
+          assert hashlib.sha256(open(path, 'rb').read()).hexdigest() == '97cfbed25e77df064fe0c564a7f56495f73d3f727c4e210d1f395e0e863c1951'
           with zipfile.ZipFile(path) as archive:
               archive.extractall('/tmp/smo-boot-shaders')
           PY

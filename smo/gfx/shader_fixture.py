@@ -92,6 +92,8 @@ def bindings(key, stage, source, metadata):
             "unsupported_arguments": unsupported}
     if "constant_data" in resources:
         result["constant_data"] = resources["constant_data"]
+    if "depth_clip_source" in metadata:
+        result["depth_clip_source"] = metadata["depth_clip_source"]
     return result
 
 
@@ -123,6 +125,12 @@ def repack(archive, output, index=None, spans=None):
                     raise ValueError("inconsistent decoded shader span: " + key)
                 resource["span_bytes"] = size
             write_shader(z, (None, shader["stage"], key + ".metal"), key, source, metadata)
+            if "depth_clip_sha256" in shader:
+                name = key + ".clip.metal"
+                data = old.read(name)
+                if hashlib.sha256(data).hexdigest() != shader["depth_clip_sha256"]:
+                    raise ValueError("depth variant digest mismatch: " + key)
+                z.writestr(name, data)
         z.writestr("manifest.json", json.dumps(manifest, sort_keys=True))
     temporary.replace(output)
     print(f"repacked={len(manifest['shaders'])} zip_bytes={output.stat().st_size} "
@@ -158,6 +166,9 @@ def translate(row, unpack, cross, reuse=None):
                 raise ValueError("cached Metal source digest mismatch: " + key)
             metadata["resources"] = resource
             metadata["spirv_sha256"] = digest
+            # This build returns the base source only. Add verified variants
+            # afterward with shader_depth_variants.py.
+            metadata.pop("depth_clip_source", None)
             return row, key, source, metadata
     source = subprocess.check_output([cross, str(spv), *MSL_FLAGS]).decode("utf-8")
     source = source.replace("\r\n", "\n")
@@ -186,7 +197,10 @@ def merge(archives, output):
                         unsupported[item["key"]] = item
                     for item in manifest["shaders"]:
                         key = item["key"]
-                        for suffix in (".metal", ".bindings.json", ".reflection.json"):
+                        suffixes = [".metal", ".bindings.json", ".reflection.json"]
+                        if "depth_clip_sha256" in item:
+                            suffixes.append(".clip.metal")
+                        for suffix in suffixes:
                             name = key + suffix
                             data = archive.read(name)
                             digest = hashlib.sha256(data).digest()

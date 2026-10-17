@@ -25,7 +25,7 @@ static void *submit_small_stack(void *context) {
     C(QueueFenceSync,s->queue,P(s->sync),0,0,0,0);
     return NULL;
 }
-static void write_shader(NSString *root,FILE *index,uint8_t *code,unsigned seed,int stage,NSString *source,NSArray *args,NSArray *inputs) {
+static void write_shader(NSString *root,FILE *index,uint8_t *code,unsigned seed,int stage,NSString *source,NSArray *args,NSArray *inputs,NSString *depthClipSource) {
     for(unsigned i=0;i<256;i++)code[i]=(uint8_t)(i*13+seed);
     uint64_t key=nvn_shader_key(code,256);
     NSString *name=[NSString stringWithFormat:@"%016llx",(unsigned long long)key];
@@ -34,8 +34,13 @@ static void write_shader(NSString *root,FILE *index,uint8_t *code,unsigned seed,
         (unsigned long long)nvn_shader_key(code+0x50,256-0x50),(unsigned long long)nvn_shader_key(code+0x50,64));
     assert([source writeToFile:[root stringByAppendingPathComponent:[name stringByAppendingString:@".metal"]]
         atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
-    NSDictionary *bindings=@{@"version":@1,@"key":name,@"stage":@(stage),@"entry":@"main0",@"argument_buffer":@0,
-        @"arguments":args,@"unsupported_arguments":@[],@"vertex_inputs":inputs,@"constant_data":@"0000803e"};
+    NSMutableDictionary *bindings=[@{@"version":@1,@"key":name,@"stage":@(stage),@"entry":@"main0",@"argument_buffer":@0,
+        @"arguments":args,@"unsupported_arguments":@[],@"vertex_inputs":inputs,@"constant_data":@"0000803e"} mutableCopy];
+    if(depthClipSource){
+        bindings[@"depth_clip_source"]=[name stringByAppendingString:@".clip.metal"];
+        assert([depthClipSource writeToFile:[root stringByAppendingPathComponent:bindings[@"depth_clip_source"]]
+            atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    }
     NSData *data=[NSJSONSerialization dataWithJSONObject:bindings options:0 error:NULL];assert(data);
     assert([data writeToFile:[root stringByAppendingPathComponent:[name stringByAppendingString:@".bindings.json"]] atomically:YES]);
 }
@@ -63,16 +68,18 @@ int main(void) {
             assert(interval==1);[deliveryLock lock];delivered[@(ordinal)]=texture;[deliveryLock unlock];
         });
         FILE *index=fopen(idx.fileSystemRepresentation,"wb");assert(index);
-        NSString *vs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct Input{float2 p[[attribute(0)]];};\nvertex float4 main0(Input v[[stage_in]]){return float4(v.p,0,1);}\n";
+        NSString *vs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct Input{float2 p[[attribute(0)]];};\nvertex float4 main0(Input v[[stage_in]]){return float4(v.p,-0.5,1);}\n";
+        NSString *depthClipVS=@"#include <metal_stdlib>\nusing namespace metal;\nstruct Input{float2 p[[attribute(0)]];};\nvertex float4 main0(Input v[[stage_in]]){return float4(v.p,0.25,1);}\n";
         NSString *fs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct A{constant float4 *color[[id(0)]];texture2d<float> image[[id(1)]];sampler smp[[id(2)]];constant float *scale[[id(3)]];device float *factor[[id(4)]];};\nfragment float4 main0(constant A &a[[buffer(0)]]){return *a.color*a.image.sample(a.smp,float2(0.5))*(*a.scale)*(*a.factor);}\n";
-        write_shader(root,index,memory+page*7,7,1,vs,@[],@[@{@"location":@0,@"type":@"vec2"}]);
+        write_shader(root,index,memory+page*7,7,1,vs,@[],@[@{@"location":@0,@"type":@"vec2"}],depthClipVS);
         write_shader(root,index,memory+page*7+512,19,5,fs,@[
             @{@"id":@0,@"kind":@"cbuf",@"nvn_slot":@0},
             @{@"id":@1,@"kind":@"texture",@"nvn_slot":@0,@"array":@1,@"separate":@NO},
             @{@"id":@2,@"kind":@"sampler",@"nvn_slot":@0,@"array":@1,@"separate":@NO},
-            @{@"id":@3,@"kind":@"constant"},@{@"id":@4,@"kind":@"sbuf",@"nvn_slot":@0}],@[]);
+            @{@"id":@3,@"kind":@"constant"},@{@"id":@4,@"kind":@"sbuf",@"nvn_slot":@0}],@[],nil);
         fclose(index);nvn_shader_reset();assert(nvn_shader_load(idx.fileSystemRepresentation)==2);
-        C(ProgramInitialize,&program,0,0,0,0,0);nvn_shader_data shaders[2]={{P(memory+page*7),NULL},{P(memory+page*7+512),NULL}};
+        uint64_t guestDevice[8]={0};assert(nvn_st_new(guestDevice,1));
+        C(ProgramInitialize,&program,P(guestDevice),0,0,0,0);nvn_shader_data shaders[2]={{P(memory+page*7),NULL},{P(memory+page*7+512),NULL}};
         assert(C(ProgramSetShaders,&program,2,P(shaders),0,0,0));
         C(SamplerBuilderSetDefaults,&sb,0,0,0,0,0);assert(C(SamplerInitialize,&sampler,P(&sb),0,0,0,0));
         assert(C(TexturePoolInitialize,&tp,P(&pool),page*6,16,0,0));assert(C(SamplerPoolInitialize,&sp,P(&pool),page*6+512,16,0,0));
@@ -141,6 +148,23 @@ int main(void) {
         const uint8_t *secondRGB=(const uint8_t *)secondImage.bytes+header.length;
         for(unsigned i=0;i<12*12;i++)assert(secondRGB[i*3]==0&&secondRGB[i*3+1]==255&&secondRGB[i*3+2]==0);
         assert(nvn_metal_offscreen_frames()==1);nvn_metal_set_frame_sink(nil);
+        /* The same bound program must change clip convention immediately when
+         * the device changes, and pipeline caches must distinguish variants. */
+        C(CommandBufferBeginRecording,&cb,0,0,0,0,0);
+        C(CommandBufferSetScissor,&cb,0,0,16,16,0);C(CommandBufferClearColor,&cb,0,P(clear),15,0,0);
+        C(CommandBufferSetScissor,&cb,4,4,8,8,0);
+        C(CommandBufferDrawElements,&cb,NVN_DRAW_PRIMITIVE_TRIANGLES,NVN_INDEX_TYPE_UNSIGNED_SHORT,3,P(memory+page*2+128),0);
+        uint64_t depthHandle=C(CommandBufferEndRecording,&cb,0,0,0,0,0);
+        for(int mode=1;mode>=0;mode--){
+            C(DeviceSetDepthMode,guestDevice,mode,0,0,0,0);
+            C(QueueSubmitCommands,&q,1,P(&depthHandle),0,0,0);C(QueueFenceSync,&q,P(&sync),0,0,0,0);
+            assert(C(SyncWait,&sync,UINT64_C(5000000000),0,0,0,0)<2);
+            [tex getBytes:pixels bytesPerRow:64 fromRegion:MTLRegionMake2D(0,0,16,16) mipmapLevel:0];
+            for(int y=0;y<16;y++)for(int x=0;x<16;x++){
+                const uint8_t *pixel=pixels+(y*16+x)*4;int inside=!mode&&x>=4&&x<12&&y>=4&&y<12;
+                assert(pixel[0]==(inside?255:0)&&pixel[1]==0&&pixel[2]==(inside?0:255)&&pixel[3]==255);
+            }
+        }
         C(WindowFinalize,&window,0,0,0,0,0);
         C(QueueFinalize,&q,0,0,0,0,0);C(SyncFinalize,&sync,0,0,0,0,0);C(CommandBufferFinalize,&cb,0,0,0,0,0);
         C(TexturePoolFinalize,&tp,0,0,0,0,0);C(SamplerPoolFinalize,&sp,0,0,0,0,0);

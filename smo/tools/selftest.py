@@ -402,6 +402,48 @@ def test_shader_fixtures():
                 check("unknown compiled input cannot reuse Metal", False)
             except FileNotFoundError:
                 check("unknown compiled input cannot reuse Metal", True)
+        import shader_depth_variants
+        from unittest.mock import patch
+        source = "constant float* a [[id(0)]]; original_vertex_body"
+        clip = source.replace("original_vertex_body", "converted_depth_body")
+        depth_input = root / "depth-input.zip"
+        reflection = {"resources": {}, "spirv": {}, "metal_arguments": shader_fixture.metal_arguments(source),
+                      "spirv_sha256": hashlib.sha256((compiled / "a.spv").read_bytes()).hexdigest()}
+        with zipfile.ZipFile(depth_input, "w") as z:
+            z.writestr("manifest.json", json.dumps({"msl_flags": shader_fixture.MSL_FLAGS,
+                "shaders": [{"key": "a", "stage": 1, "span": 88,
+                             "msl_sha256": hashlib.sha256(source.encode()).hexdigest()}]}))
+            z.writestr("shaders.idx", "1\t1\ta.metal\n")
+            z.writestr("a.metal", source)
+            z.writestr("a.reflection.json", json.dumps(reflection))
+            z.writestr("a.bindings.json", "{}")
+        depth_output = root / "depth-output.zip"
+        with patch.object(shader_depth_variants.subprocess, "check_output", return_value=clip.encode()) as compiler:
+            shader_depth_variants.build(depth_input, depth_output, [root])
+            check("depth variant uses compiler clip-space conversion", "--fixup-clipspace" in compiler.call_args.args[0])
+        with zipfile.ZipFile(depth_output) as z:
+            check("depth variant preserves original and records separate source", z.read("a.metal").decode() == source and
+                  z.read("a.clip.metal").decode() == clip and
+                  json.loads(z.read("a.bindings.json"))["depth_clip_source"] == "a.clip.metal")
+        shader_fixture.repack(depth_output, root / "depth-repacked.zip")
+        shader_fixture.merge([depth_output], root / "depth-merged.zip")
+        for path in (root / "depth-repacked.zip", root / "depth-merged.zip"):
+            with zipfile.ZipFile(path) as z:
+                check("fixture transform retains depth variant", z.read("a.clip.metal").decode() == clip and
+                      json.loads(z.read("a.bindings.json"))["depth_clip_source"] == "a.clip.metal")
+        original_depth = depth_output.read_bytes()
+        with patch.object(shader_depth_variants.subprocess, "check_output", return_value=b"constant float* b [[id(1)]];"):
+            try:
+                shader_depth_variants.build(depth_input, depth_output, [root])
+                check("depth variant resource ABI drift rejected", False)
+            except ValueError:
+                check("depth ABI failure preserves existing output", depth_output.read_bytes() == original_depth)
+        (compiled / "a.spv").write_bytes(b"changed compiled identity")
+        try:
+            shader_depth_variants.build(depth_input, depth_output, [root], "compiler-must-not-run")
+            check("depth variant requires exact original SPIR-V", False)
+        except ValueError:
+            check("depth variant input mismatch preserves existing output", depth_output.read_bytes() == original_depth)
 
 
 def main():
