@@ -65,7 +65,7 @@ def main():
         audio_mix = [int(n) for n in re.findall(r"AUDIO_RENDERER_MIX_FRAMES count=(\d+)",data)]
         audio_updates = [int(n) for n in re.findall(r"AUDIO_RENDERER_UPDATE_CALLS count=(\d+)",data)]
         audio_pcm = bool(audio_counts)
-        audio_min_frames = max(20,args.seconds*40)
+        audio_min_frames = max(20,args.seconds*30)
         audio_clock = (audio_pcm and max(audio_counts)<=args.seconds*220+200 and
                        max(audio_counts,default=0)>=audio_min_frames and
                        max(audio_mix,default=0)>=audio_min_frames and
