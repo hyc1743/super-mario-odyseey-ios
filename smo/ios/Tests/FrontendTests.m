@@ -5,6 +5,11 @@
 #include "dm_input.h"
 #include "audio_output.h"
 #include <math.h>
+@interface UIControl (SMOTestingTracking)
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event;
+- (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event;
+- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event;
+@end
 static uint64_t buttons;
 static int32_t axes[4];
 void dm_input_set_buttons(uint64_t value){buttons=value;}
