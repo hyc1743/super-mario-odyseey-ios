@@ -23,3 +23,5 @@ iOS 使用 48 kHz 立体声扬声器输出。`AUDIO_RENDERER_MIX_FRAMES` 应持�
 真机验证时先确认铃声/媒体音量正常，再进入游戏并操作一段时间；随后切到后台、恢复前台并再次播放。若没有声音，请导出日志，重点保留上述三类音频记录及其前后时间戳。启动自检能证明 PCM 持续生成，最终扬声器听感仍需真机确认。
 
 r252 的本次真机日志中 `AUDIO_SPEAKER running=1`，`callbacks=978 played=422400`，但 `AUDIO_DEVICE_PCM` 仍为 `audible=0 peak=0`。这证明设备输出回调取到了静音样本，尚未验证到非零游戏音频；不能据此宣称声音已修复。
+
+真机前可运行 `SMO_AUDIO_TEST_WAV=work/test-audio.wav ./smo/host/audio_selftest`，再运行 `python smo/verify/check_audio_wav.py work/test-audio.wav`。该测试使用合成的非零混音命令，检查 48 kHz PCM16 双声道、非零峰值和 WAV 数据长度；它能验证混音/转换链路，但不能证明真实游戏资源已经播放音乐。

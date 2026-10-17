@@ -4,6 +4,7 @@
 #include "../audio_output.h"
 #include <pthread.h>
 #include <time.h>
+#include <stdio.h>
 
 module_t g_mod[MAX_MOD];
 int g_nmod = 2;
@@ -16,6 +17,9 @@ static uint8_t expected_internal[0x34];
 static int constructed, initialized, finalized, destroyed, started, stopped;
 static int client_calls, server_calls, bound, forgotten;
 static _Atomic int processed,output_calls,device_commands;
+static int16_t captured_pcm[480*2*4];
+static size_t captured_frames;
+static int captured_peak;
 static _Atomic int event_signals;
 static _Atomic int worker_attach_calls;
 static void *last_bound;
@@ -29,6 +33,22 @@ static const void *expected_config;
 #define CHECK(c) do { if (!(c)) { printf("FAIL line %d: %s\n", __LINE__, #c); atomic_fetch_add(&fails,1); } } while (0)
 static void output_pcm(const int16_t *pcm,size_t frames){
     int call=atomic_fetch_add(&output_calls,1)+1;CHECK(frames==240 && pcm[0]==call*100 && pcm[1]==call*100);
+    for(size_t i=0;i<frames*2;i++) {
+        if (captured_frames < 240*4) captured_pcm[captured_frames*2+i%2] = pcm[i];
+        int value=pcm[i]<0?-(int)pcm[i]:pcm[i]; if(value>captured_peak) captured_peak=value;
+        if(i%2==1) captured_frames++;
+    }
+}
+static void write_test_wav(void) {
+    const char *path=getenv("SMO_AUDIO_TEST_WAV"); if(!path)return;
+    size_t frames=captured_frames>240*4?240*4:captured_frames;
+    FILE *f=fopen(path,"wb");CHECK(f!=NULL);if(!f)return;
+    uint32_t riff=36+(uint32_t)(frames*4),fmt=16,data=(uint32_t)(frames*4),rate=48000,byte_rate=rate*4;
+    uint16_t audio=1,channels=2,bits=16,block=4;
+    fwrite("RIFF",1,4,f);fwrite(&riff,4,1,f);fwrite("WAVEfmt ",1,8,f);fwrite(&fmt,4,1,f);
+    fwrite(&audio,2,1,f);fwrite(&channels,2,1,f);fwrite(&rate,4,1,f);fwrite(&byte_rate,4,1,f);
+    fwrite(&block,2,1,f);fwrite(&bits,2,1,f);fwrite("data",1,4,f);fwrite(&data,4,1,f);
+    fwrite(captured_pcm,4,frames,f);fclose(f);CHECK(captured_peak>0 && frames>=240);
 }
 static smo_audio_ring test_ring;
 static void *ring_producer(void *unused){
@@ -246,11 +266,13 @@ int main(void) {
     CHECK(!update_renderer(handle, expected_config) && atomic_load(&processed)==manual_before);
     CHECK(!execute(handle) && atomic_load(&processed)==manual_before+1);
     unsigned lookups_before=atomic_load(&symbol_lookups);
-    atomic_store(&device_commands,1);smo_audio_set_output(output_pcm);
+    captured_frames=0;captured_peak=0;atomic_store(&device_commands,1);smo_audio_set_output(output_pcm);
     CHECK(!execute(handle) && atomic_load(&processed)==manual_before+3 && output_calls==2);
+    CHECK(captured_peak>0 && captured_frames>=480);
     CHECK(atomic_load(&symbol_lookups)==lookups_before); // no symbol table scans in recurring audio frames
     atomic_store(&device_commands,0);smo_audio_set_output(NULL);
     close_renderer(handle);
+    write_test_wav();
     parameter[11]=0;expected_internal[0x22]=0;
     memset(commands,0,sizeof commands);
     CHECK(!open_renderer(&handle,NULL,parameter,work,0x8000));
