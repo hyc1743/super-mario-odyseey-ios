@@ -22,6 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=pathlib.Path)
     parser.add_argument("--seconds", type=int, default=30)
+    parser.add_argument("--press-a-after", type=int, help="press A once after this many seconds from nnMain")
     parser.add_argument("--romfs", type=pathlib.Path, help="private startup resource fixture directory")
     parser.add_argument("--output", type=pathlib.Path, default=pathlib.Path("work/boot-smoke"))
     args = parser.parse_args()
@@ -33,6 +34,11 @@ def main():
         parser.error("RomFS fixture directory does not exist")
     env = dict(os.environ)
     env["SMO_TRACE_FS_MISSING"] = "1"
+    env.pop("SMO_TEST_PRESS_A_AFTER", None)
+    if args.press_a_after is not None:
+        if args.press_a_after < 0 or args.press_a_after + 10 >= args.seconds:
+            parser.error("input test needs at least 10 seconds after the A press")
+        env["SMO_TEST_PRESS_A_AFTER"] = str(args.press_a_after)
     with tempfile.TemporaryDirectory(prefix="smo-boot-") as temporary:
         for name in ("romfs", "save", "temp"):
             directory = pathlib.Path(temporary, name)
@@ -71,8 +77,11 @@ def main():
                        max(audio_mix,default=0)>=audio_min_frames and
                        max(audio_ticks,default=0)>=audio_min_frames)
         audio_gap = "AUDIO_DEVICE_SINK_UNSUPPORTED" in data
+        after_input = data.partition("TEST_INPUT_A pressed=0")[2]
+        input_progress = args.press_a_after is None or bool(
+            re.search(r"GUEST_GPU_FRAME_COMPLETED count=\d+", after_input))
         fatal = "FATAL" in data or "【红】" in data or api_gaps
-        passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and audio_clock and not audio_gap and not fatal and not mapping_gap
+        passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and audio_clock and input_progress and not audio_gap and not fatal and not mapping_gap
         result = dict(passed=passed, scope="nnMain + guest thread + real GPU submit/completion + 60 fresh-draw offscreen frame deliveries; image correctness and physical iOS display require separate verification",
                       romfs_fixture=bool(args.romfs),
                       seconds=args.seconds, timed_out=timed_out, exit_code=code,
@@ -88,6 +97,9 @@ def main():
                       audio_event_ticks_observed=max(audio_ticks,default=0),
                       audio_update_calls_observed=max(audio_updates,default=0),
                       unsupported_audio_sink_observed=audio_gap,
+                      test_press_a_after=args.press_a_after,
+                      gpu_frames_after_input=input_progress if args.press_a_after is not None else None,
+                      audio_nonzero_samples_observed=bool(re.search(r"AUDIO_DEVICE_PCM .*audible=[1-9]\d*", data)),
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))
         (args.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)

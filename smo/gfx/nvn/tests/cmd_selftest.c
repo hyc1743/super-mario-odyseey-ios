@@ -57,6 +57,54 @@ static void init(NVNcommandBuffer *c) {
     CB(SetMemoryCallback,c,P(replenish),0,0,0,0);
     CB(SetMemoryCallbackData,c,P(&callbacks),0,0,0,0);
 }
+static void no_memory(NVNcommandBuffer *c, NVNcommandBufferMemoryEvent event,
+                      size_t minimum, void *data) {
+    (void)c; (void)minimum; (void)data;
+    assert(event == NVN_COMMAND_BUFFER_MEMORY_EVENT_OUT_OF_COMMAND_MEMORY);
+}
+static void overflow_lifetime(void) {
+    NVNcommandBuffer c, other;
+    uint32_t output[4] = {0};
+    assert(CB(Initialize,&c,0,0,0,0,0));
+    CB(SetMemoryCallback,&c,P(no_memory),0,0,0,0);
+    CB(AddCommandMemory,&c,P(&pool),0,64,0,0);
+    CB(BeginRecording,&c,0,0,0,0,0);
+    for (unsigned i=0;i<100;i++)
+        CB(ClearBuffer,&c,P(output),sizeof output,i,0,0);
+    uint64_t handle=CB(EndRecording,&c,0,0,0,0,0);
+    size_t live=nvn_cmd_spill_bytes();
+    assert(live>=65536);
+    CB(Finalize,&c,0,0,0,0,0);
+    unsigned count=0;
+    assert(nvn_cmd_walk(handle,execute,&count) && count==100 && output[0]==99);
+    /* A different range in the same pool cannot reclaim this list. */
+    assert(CB(Initialize,&other,0,0,0,0,0));
+    CB(AddCommandMemory,&other,P(&pool),128,64,0,0);
+    assert(nvn_cmd_spill_bytes()==live);
+    count=0; assert(nvn_cmd_walk(handle,execute,&count) && count==100);
+    /* Explicit reuse, rather than elapsed frames, releases the old storage. */
+    CB(AddCommandMemory,&other,P(&pool),0,64,0,0);
+    assert(nvn_cmd_spill_bytes()==0);
+    CB(BeginRecording,&other,0,0,0,0,0);
+    CB(ClearBuffer,&other,P(output),sizeof output,7,0,0);
+    CB(ClearBuffer,&other,P(output),sizeof output,8,0,0);
+    uint64_t fresh=CB(EndRecording,&other,0,0,0,0,0);
+    count=0; assert(nvn_cmd_walk(fresh,execute,&count) && count==2 && output[0]==8);
+    assert(nvn_cmd_spill_bytes()>0); /* no callback is also supported */
+    /* A single inline uniform upload may exceed the normal spill chunk. */
+    size_t bytes=128*1024;
+    unsigned char *source=malloc(bytes), *destination=calloc(1,bytes);
+    assert(source && destination); memset(source,0x5a,bytes);
+    CB(BeginRecording,&other,0,0,0,0,0);
+    CB(UpdateUniformBuffer,&other,P(destination),bytes,0,bytes,P(source));
+    uint64_t large=CB(EndRecording,&other,0,0,0,0,0);
+    count=0; assert(nvn_cmd_walk(large,execute,&count) && count==1);
+    assert(memcmp(source,destination,bytes)==0);
+    free(source); free(destination);
+    CB(Finalize,&other,0,0,0,0,0);
+    call("MemoryPoolFinalize",P(&pool),0,0,0,0,0);
+    assert(nvn_cmd_spill_bytes()==0);
+}
 int main(void) {
     NVNcommandBuffer a,b;
     uint32_t input[4]={1,2,3,4}, output[4]={0}, copied[4]={0};
@@ -108,6 +156,8 @@ int main(void) {
     memcpy(cycle,&begin,8); memcpy(cycle+1,&invoke,8);
     cycle[2]=P(cycle); memcpy(cycle+3,&end,8);
     assert(!nvn_cmd_walk(P(cycle),execute,&count));
+    overflow_lifetime();
+    nvn_cmd_reset_storage();
     nvn_st_reset();
     puts("command recording: ownership, rollover, copy/call order, lifecycle and recursion passed");
     return 0;

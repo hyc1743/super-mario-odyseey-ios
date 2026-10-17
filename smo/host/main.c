@@ -11,11 +11,26 @@
 //   · 前端（窗口/图形）与 HLE 服务实现（当前服务层全部是生成的桩）
 #include "dm.h"
 #include "hle_thread.h"
+#include "dm_input.h"
+#include <pthread.h>
 #include <unistd.h>
 
 void host_thread_keys_create(void);
 void guest_thread_init(void);
 extern void dm_jump_guest(void *arg, void *fn);
+
+/* Headless verification only: exercise the same HID state as the touch pad.
+ * The iOS frontend does not link main.c and never synthesizes these presses. */
+static void *test_press_a(void *argument) {
+    unsigned delay = (unsigned)(uintptr_t)argument;
+    sleep(delay);
+    dm_input_set_buttons(DM_BTN_A);
+    LOG("TEST_INPUT_A pressed=1");
+    usleep(300000);
+    dm_input_set_buttons(0);
+    LOG("TEST_INPUT_A pressed=0");
+    return NULL;
+}
 
 // dm_thread_returned 由 hle_thread.c 提供（客体线程入口返回 = 违反 Horizon 语义）
 int main(int argc, char **argv) {
@@ -52,6 +67,15 @@ int main(int argc, char **argv) {
     // 以前这段顺序在本文件与 iOS App 里各写了一遍，漂移过一次（真机首跑：客体构造函数必崩）。
     void *fn = host_boot(dir, mods, nmods, entry);
     if (!fn) return 1;
+    const char *press_after = getenv("SMO_TEST_PRESS_A_AFTER");
+    if (press_after) {
+        char *end; unsigned long seconds = strtoul(press_after, &end, 10);
+        if (!*press_after || *end || seconds > 120) die("Invalid test input delay");
+        pthread_t input;
+        if (pthread_create(&input, NULL, test_press_a, (void *)(uintptr_t)seconds))
+            die("Failed to create test input worker");
+        pthread_detach(input);
+    }
     dm_jump_guest(NULL, fn);
     LOG("== 客体入口返回了（正常游戏里 nnMain 不会返回）==");
     unimpl_report();

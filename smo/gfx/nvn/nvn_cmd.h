@@ -24,4 +24,8 @@ uint64_t nvn_cmd_record_missing(const char *name, const uint64_t args[8]);
 typedef int (*nvn_cmd_visit)(void *context, uint32_t op, const void *payload, size_t size);
 int nvn_cmd_walk(uint64_t handle, nvn_cmd_visit visit, void *context);
 void *nvn_cmd_alloc(void *recorder, uint32_t op, size_t payload_size);
+/* Overflow follows the lifetime of its original guest command-memory range. */
+void nvn_cmd_release_pool(const void *pool);
+void nvn_cmd_reset_storage(void);
+size_t nvn_cmd_spill_bytes(void);
 #endif

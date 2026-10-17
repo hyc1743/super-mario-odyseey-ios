@@ -3,11 +3,77 @@
 #include "nvn_cmd.h"
 #include "include/nvn.h"
 #include <limits.h>
+#include <pthread.h>
 
 enum { CMD_TYPE = 13, POOL_TYPE = 4 };
 enum { C_DEV, C_CB, C_DATA, C_CUR, C_END, C_BEGIN, C_RECORDING,
-       C_SIZE, C_USED, C_CONTROL_SIZE };
+       C_SIZE, C_USED, C_CONTROL_SIZE, C_POOL, C_ANCHOR, C_ANCHOR_END };
 enum { TAIL_BYTES = 16, MAX_DEPTH = 64, MAX_RECORDS = 1 << 22 };
+static void put_header(void *p, uint32_t op, uint32_t size);
+
+/* Host records can exceed the hardware command budget. Keep overflow storage
+ * with the guest segment that links to it, including after recorder Finalize.
+ * Regranting that range or finalizing its pool invalidates the old handles.
+ * A frame-count timeout would instead invalidate long-lived command lists. */
+typedef struct cmd_spill {
+    struct cmd_spill *next;
+    const void *pool;
+    uintptr_t anchor, end;
+    size_t bytes;
+    unsigned char memory[];
+} cmd_spill;
+static cmd_spill *spills;
+static size_t spill_bytes;
+static unsigned spill_count;
+static pthread_mutex_t spill_lock = PTHREAD_MUTEX_INITIALIZER;
+enum { SPILL_CHUNK = 64 * 1024, SPILL_LIMIT = 64 * 1024 * 1024 };
+
+static void release_spills(const void *pool, uintptr_t start, uintptr_t end) {
+    pthread_mutex_lock(&spill_lock);
+    cmd_spill **link = &spills;
+    while (*link) {
+        cmd_spill *p = *link;
+        if (!pool || (p->pool == pool && p->anchor < end && start < p->end)) {
+            *link = p->next; spill_bytes -= p->bytes; free(p);
+        } else link = &p->next;
+    }
+    pthread_mutex_unlock(&spill_lock);
+}
+void nvn_cmd_release_pool(const void *pool) { release_spills(pool, 0, UINTPTR_MAX); }
+void nvn_cmd_reset_storage(void) { release_spills(NULL, 0, 0); }
+size_t nvn_cmd_spill_bytes(void) {
+    pthread_mutex_lock(&spill_lock); size_t bytes = spill_bytes;
+    pthread_mutex_unlock(&spill_lock); return bytes;
+}
+static void use_segment(nvn_st_ent *s, uintptr_t start, uintptr_t end) {
+    if (s->v[C_RECORDING] && s->v[C_CUR]) {
+        put_header((void *)(uintptr_t)s->v[C_CUR], NVN_CMD_JUMP, 16);
+        memcpy((void *)(uintptr_t)(s->v[C_CUR] + 8), &start, 8);
+    }
+    if (s->v[C_CUR]) s->v[C_USED] += s->v[C_END] - s->v[C_CUR];
+    s->v[C_SIZE] += end - start;
+    s->v[C_CUR] = start; s->v[C_END] = end;
+}
+static void add_spill(nvn_st_ent *s, size_t minimum) {
+    if (!s->v[C_POOL] || !s->v[C_ANCHOR])
+        NVN_DIE("command memory callback supplied no initial segment");
+    size_t bytes = minimum > SPILL_CHUNK ? minimum : SPILL_CHUNK;
+    pthread_mutex_lock(&spill_lock);
+    cmd_spill *p = bytes <= SPILL_LIMIT - spill_bytes ? malloc(sizeof *p + bytes) : NULL;
+    if (!p) {
+        size_t total = spill_bytes; pthread_mutex_unlock(&spill_lock);
+        NVN_DIE("command overflow storage unavailable request=%zu live=%zu limit=%u", bytes, total, SPILL_LIMIT);
+    }
+    p->pool = (void *)(uintptr_t)s->v[C_POOL];
+    p->anchor = s->v[C_ANCHOR]; p->end = s->v[C_ANCHOR_END]; p->bytes = bytes;
+    p->next = spills; spills = p; spill_bytes += bytes;
+    size_t total = spill_bytes; unsigned count = ++spill_count;
+    pthread_mutex_unlock(&spill_lock);
+    uintptr_t start = (uintptr_t)p->memory;
+    use_segment(s, start, start + bytes);
+    if (count == 1 || count % 64 == 0)
+        NVN_LOG("NVN_COMMAND_SPILL count=%u bytes=%zu live=%zu limit=%u", count, bytes, total, SPILL_LIMIT);
+}
 
 static nvn_st_ent *cmd(const NVNcommandBuffer *c) {
     nvn_st_ent *s = nvn_st_get(c, CMD_TYPE);
@@ -26,9 +92,10 @@ static void *alloc_record(NVNcommandBuffer *c, uint32_t op, size_t payload) {
     size_t size = (sizeof(nvn_cmd_header) + payload + 7) & ~(size_t)7;
     unsigned tries = 0;
     while (!s->v[C_CUR] || s->v[C_END] - s->v[C_CUR] < size + TAIL_BYTES) {
-        if (!s->v[C_CB] || tries++ == 2)
-            NVN_DIE("command memory exhausted, request=%zu callback=%p", size + TAIL_BYTES,
-                    (void *)(uintptr_t)s->v[C_CB]);
+        if (!s->v[C_CB] || tries++ == 2) {
+            add_spill(s, size + TAIL_BYTES);
+            break;
+        }
         PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC cb =
             (PFNNVNCOMMANDBUFFERMEMORYCALLBACKPROC)(uintptr_t)s->v[C_CB];
         cb(c, NVN_COMMAND_BUFFER_MEMORY_EVENT_OUT_OF_COMMAND_MEMORY,
@@ -76,15 +143,13 @@ void nvn_CommandBufferAddCommandMemory(NVNcommandBuffer *c, const NVNmemoryPool 
     uintptr_t start = (raw + 7) & ~(uintptr_t)7;
     uintptr_t end = raw + size;
     if (end < raw || end - start < 24) NVN_DIE("invalid command memory alignment");
-    if (s->v[C_RECORDING] && s->v[C_CUR]) {
-        put_header((void *)(uintptr_t)s->v[C_CUR], NVN_CMD_JUMP, 16);
-        memcpy((void *)(uintptr_t)(s->v[C_CUR] + 8), &start, 8);
-    }
-    /* The remainder of a replaced segment cannot be allocated again. */
-    if (s->v[C_CUR]) s->v[C_USED] += s->v[C_END] - s->v[C_CUR];
-    s->v[C_SIZE] += end - start;
-    s->v[C_CUR] = start;
-    s->v[C_END] = end;
+    if (s->v[C_RECORDING] && s->v[C_POOL] == (uintptr_t)pool &&
+        s->v[C_ANCHOR] < end && start < s->v[C_ANCHOR_END])
+        NVN_DIE("command memory regranted while its recording is active");
+    release_spills(pool, start, end);
+    use_segment(s, start, end);
+    s->v[C_POOL] = (uintptr_t)pool;
+    s->v[C_ANCHOR] = start; s->v[C_ANCHOR_END] = end;
 }
 void nvn_CommandBufferAddControlMemory(NVNcommandBuffer *c, void *memory, size_t size) {
     if (!memory && size) NVN_DIE("null control memory");

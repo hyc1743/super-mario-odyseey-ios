@@ -14,6 +14,7 @@
 #include "nvn_gpu.h"
 #include "nvn_shader.h"
 #include "nvn_resources.h"
+#include "nvn_cmd.h"
 #include <time.h>
 
 /* Our GPU reports store the real Metal GPU clock converted to nanoseconds. */
@@ -237,6 +238,7 @@ uint64_t nvn_MemoryPoolInitialize(uint64_t pool, uint64_t builder, uint64_t a2, 
 uint64_t nvn_MemoryPoolFinalize(uint64_t pool, uint64_t a1, uint64_t a2, uint64_t a3,
                                 uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
+    nvn_cmd_release_pool(ARG_OBJ(pool));
     nvn_st_del(ARG_OBJ(pool), NVN_T_POOL);
     return 0;
 }
