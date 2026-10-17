@@ -58,9 +58,12 @@ int main(void) {
     unsigned char alias[192];nvn_resource_snapshot alias_snapshot;
     nvn_resources_stamp(texture,12);memcpy(alias,texture,sizeof alias);
     assert(nvn_resources_snapshot(alias,12,&alias_snapshot)&&alias_snapshot.object==U(texture)&&alias_snapshot.words[1]==128);
-    t->v[15]++;
-    assert(!nvn_resources_snapshot(alias,12,&alias_snapshot));
-    t->v[15]--;nvn_resources_stamp(texture,12);
+    /* Re-initialized original: the byte copy still describes the texture it was copied from. */
+    t->v[15]++;t->v[1]=777;
+    assert(nvn_resources_snapshot(alias,12,&alias_snapshot)&&alias_snapshot.object==U(texture)&&alias_snapshot.words[1]==128);
+    /* A corrupted embedded serial is not trusted. */
+    alias[24+15*8]^=1;assert(!nvn_resources_snapshot(alias,12,&alias_snapshot));
+    t->v[15]--;t->v[1]=128;nvn_resources_stamp(texture,12);
     CALL(TexturePoolRegisterTexture,tp,3,texture,&copy,0);
     CALL(TexturePoolRegisterTexture,tp2,3,texture2,NULL,0);
     nvn_resource_snapshot a,b; nvn_view_state view;

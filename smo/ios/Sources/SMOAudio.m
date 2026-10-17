@@ -7,6 +7,10 @@
 #include "logbuf.h"
 static smo_audio_ring ring;
 static _Atomic int accepting,flush;
+/* After running dry, wait until ~30 ms are queued before playing again: one short gap
+ * instead of a continuous crackle when the producer runs right at the consumption rate. */
+enum { PRIME_FRAMES=1440 };
+static int primed;
 static _Atomic uint64_t callbacks,played;
 static void enqueue(const int16_t *pcm,size_t frames){
     if(atomic_load_explicit(&accepting,memory_order_acquire))smo_audio_ring_push(&ring,pcm,frames);
@@ -17,7 +21,15 @@ static OSStatus render(void *context,AudioUnitRenderActionFlags *flags,
     if(atomic_exchange(&flush,0))atomic_store_explicit(&ring.read,atomic_load_explicit(&ring.write,memory_order_acquire),memory_order_release);
     if(buffers->mNumberBuffers!=1 || !buffers->mBuffers[0].mData ||
        buffers->mBuffers[0].mDataByteSize<frames*4)return kAudio_ParamError;
+    uint64_t queued=atomic_load_explicit(&ring.write,memory_order_acquire)-atomic_load_explicit(&ring.read,memory_order_relaxed);
+    if(!primed && queued<PRIME_FRAMES){
+        memset(buffers->mBuffers[0].mData,0,(size_t)frames*4);
+        atomic_fetch_add_explicit(&ring.underrun,frames,memory_order_relaxed);
+        atomic_fetch_add_explicit(&callbacks,1,memory_order_relaxed);return noErr;
+    }
+    primed=1;
     size_t count=smo_audio_ring_pop(&ring,buffers->mBuffers[0].mData,frames);
+    if(count<frames)primed=0;
     atomic_fetch_add_explicit(&callbacks,1,memory_order_relaxed);
     atomic_fetch_add_explicit(&played,count,memory_order_relaxed);return noErr;
 }

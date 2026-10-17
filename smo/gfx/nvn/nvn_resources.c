@@ -27,9 +27,17 @@ static pthread_mutex_t resource_lock = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct { uint64_t magic,owner,serial; } resource_identity;
 #define RESOURCE_MAGIC UINT64_C(0x534d4f5245530000)
+/* NVNtexture is 0xC0 bytes: identity (24) + descriptor words (128) fit. Real NVN
+ * objects are self-describing data, so a guest byte copy keeps describing the
+ * texture it was copied from even after the original object is re-initialized.
+ * 真机 v0.6.15：Start 后 ×86743 NVN_RESOURCE_MISS，诊断全是 reason=stale（原对象已重建）。 */
+enum { EMBED_OFFSET=sizeof(resource_identity), EMBED_BYTES=16*sizeof(uint64_t) };
+_Static_assert(EMBED_OFFSET+EMBED_BYTES<=0xC0,"texture descriptor embed fits NVNtexture");
 void nvn_resources_stamp(void *object,uint32_t type) {
     nvn_st_ent *e=nvn_st_get(object,type);
-    if(e){resource_identity id={RESOURCE_MAGIC|type,(uintptr_t)object,e->v[15]};memcpy(object,&id,sizeof id);}
+    if(!e)return;
+    resource_identity id={RESOURCE_MAGIC|type,(uintptr_t)object,e->v[15]};memcpy(object,&id,sizeof id);
+    if(type==T_TEXTURE)memcpy((uint8_t *)object+EMBED_OFFSET,e->v,EMBED_BYTES);
 }
 int nvn_resources_snapshot(const void *object, uint32_t type, nvn_resource_snapshot *out) {
     if(!object || !out)return 0;
@@ -46,6 +54,17 @@ int nvn_resources_snapshot(const void *object, uint32_t type, nvn_resource_snaps
             return 0;
         }
         e=nvn_st_get((void *)(uintptr_t)id.owner,type);
+        if((!e || e->v[15]!=id.serial) && type==T_TEXTURE){
+            uint64_t words[16];memcpy(words,(const uint8_t *)object+EMBED_OFFSET,sizeof words);
+            if(words[15]==id.serial){
+                static _Atomic unsigned embedded;
+                if(atomic_fetch_add(&embedded,1)<8)
+                    NVN_LOG("NVN_RESOURCE_EMBEDDED object=%p owner=%#llx serial=%llu live=%d",object,
+                        (unsigned long long)id.owner,(unsigned long long)id.serial,e!=NULL);
+                out->object=id.owner;memcpy(out->words,words,sizeof out->words);
+                return 1;
+            }
+        }
         if(!e || e->v[15]!=id.serial){
             if(atomic_fetch_add(&alias_misses,1)<16)
                 NVN_LOG("NVN_RESOURCE_ALIAS_MISS reason=%s type=%u object=%p owner=%#llx serial=%llu live_serial=%llu",

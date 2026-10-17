@@ -252,8 +252,10 @@ static void *audio_tick(void *unused) {
             struct timespec wait={(time_t)(delay/1000000000u),(long)(delay%1000000000u)};
             nanosleep(&wait,NULL);now=audio_now_ns();
         }
-        /* Never catch up with a burst after a slow render or long suspension. */
-        if(now-deadline>=period_ns)deadline=now;
+        /* A late tick renders the missed periods back to back (the speaker ring holds ~85 ms),
+         * otherwise every slow game frame drops 5 ms of audio → 卡顿（真机 v0.6.15 underrun≈19%）。
+         * Only a long stall (suspension, debugger) resets the clock instead of bursting. */
+        if(now-deadline>=8*period_ns)deadline=now;
         if(atomic_load(&app_suspended))continue;
         pthread_mutex_lock(&audio_lock);
         for (unsigned i = 0; i < SMO_ARRAY_LEN(sessions); i++) {
