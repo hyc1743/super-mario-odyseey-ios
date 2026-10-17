@@ -239,10 +239,6 @@ uint64_t nvn_MemoryPoolFinalize(uint64_t pool, uint64_t a1, uint64_t a2, uint64_
                                 uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_cmd_release_pool(ARG_OBJ(pool));
-    /* 抄一份进「退休表」再删：录下的渲染命令仍会按地址引用这块内存，而真机 NVN 不校验生命周期。
-     * 只删不留的后果（真机第十轮）：渲染时查不到存储池 → 深度附件解析失败 → 整遍渲染被跳过 → 黑屏。
-     * 公开 API 仍然按「已 Finalize = 不可用」处理（nvn_selftest 有断言）。 */
-    { nvn_st_ent *e = nvn_st_get(ARG_OBJ(pool), NVN_T_POOL); if (e) nvn_st_retire(e); }
     nvn_st_del(ARG_OBJ(pool), NVN_T_POOL);
     return 0;
 }
@@ -588,9 +584,6 @@ uint64_t nvn_TextureInitialize(uint64_t obj, uint64_t builder, uint64_t a2, uint
 uint64_t nvn_TextureFinalize(uint64_t obj, uint64_t a1, uint64_t a2, uint64_t a3,
                              uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
-    /* 同上：抄进退休表再删。场景切换时游戏会先重建纹理、后提交已录好的命令；
-     * 只删不留会让那些命令快照到全 0（NVN_RESOURCE_MISS），进而整遍渲染被跳过。 */
-    { nvn_st_ent *e = nvn_st_get((void *)(uintptr_t)obj, NVN_T_TEX); if (e) nvn_st_retire(e); }
     nvn_st_del((void *)(uintptr_t)obj, NVN_T_TEX);
     return 0;
 }

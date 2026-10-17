@@ -187,7 +187,6 @@ id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapsho
         const uint64_t *w=s->words;pixel_info p=pixel((uint32_t)w[5]);MTLTextureType type;
         nvn_tex_layout l;uint64_t layer_stride=0,storage=0;
         nvn_st_ent *pool=nvn_st_get((const void *)(uintptr_t)w[9],4);
-        if(!pool)pool=nvn_st_get_retired((const void *)(uintptr_t)w[9],4);  /* 内存池已 Finalize（场景切换） */
         /* 失败判据逐条拆开记原因：以前只有一个「UNSUPPORTED」，看不出是格式、布局还是存储池，
          * 真机上只能猜（第八/第九轮都卡在这里）。 */
         const char *why=NULL;

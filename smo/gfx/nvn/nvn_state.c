@@ -91,32 +91,6 @@ void nvn_st_del(void *obj, uint32_t type) {
     }
     pthread_mutex_unlock(&state_lock);
 }
-// ---- 退休表（见 nvn_state.h）----
-#define RETIRE_MAX 8192
-static nvn_st_ent g_retired[RETIRE_MAX];
-static unsigned g_nretired;            // 环形：满了覆盖最旧的
-void nvn_st_retire(const nvn_st_ent *entry) {
-    if (!entry) return;
-    pthread_mutex_lock(&state_lock);
-    g_retired[g_nretired % RETIRE_MAX] = *entry;
-    g_nretired++;
-    pthread_mutex_unlock(&state_lock);
-}
-nvn_st_ent *nvn_st_get_retired(const void *obj, uint32_t type) {
-    static nvn_st_ent out;
-    nvn_st_ent *found = NULL;
-    if (!obj) return NULL;
-    pthread_mutex_lock(&state_lock);
-    unsigned n = g_nretired < RETIRE_MAX ? g_nretired : RETIRE_MAX;
-    for (unsigned i = 0; i < n; i++) {
-        unsigned idx = (g_nretired >= RETIRE_MAX ? (g_nretired + i) : i) % RETIRE_MAX;
-        nvn_st_ent *e = &g_retired[idx];
-        if (e->key == obj && e->type == type) { out = *e; found = &out; break; }
-    }
-    pthread_mutex_unlock(&state_lock);
-    return found;
-}
-
 unsigned nvn_st_count(void) {
     pthread_mutex_lock(&state_lock);
     unsigned value = count;

@@ -34,7 +34,6 @@ void nvn_resources_stamp(void *object,uint32_t type) {
 int nvn_resources_snapshot(const void *object, uint32_t type, nvn_resource_snapshot *out) {
     if(!object || !out)return 0;
     nvn_st_ent *e = nvn_st_get(object, type);
-    if (!e) e = nvn_st_get_retired(object, type);   /* 已 Finalize 但录制时仍被引用（场景切换） */
     if(!e && (type==8 || type==10 || type==12)){
         resource_identity id;memcpy(&id,object,sizeof id);
         if(id.magic!=(RESOURCE_MAGIC|type) || !id.serial)return 0;
