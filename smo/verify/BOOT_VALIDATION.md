@@ -1,5 +1,18 @@
 # 出包前的真实启动检查
 
+2026-10-17 呈现验证更新：Metal 后端将窗口纹理按裁剪区域复制到独立纹理，
+复制与客体提交共用 GPU 完成时间线。窗口缓冲区只能在复制完成后重用。
+`GUEST_GPU_FRAME_COMPLETED` 仅统计输出纹理收到新客体绘制且之前的 GPU 工作均成功的
+离屏交付；重复呈现同一绘制及仅清屏不满足这个计数。它不证明实体屏幕已显示画面。
+iOS 显示层使用有界的最新帧队列，取得 drawable 和显示提交均在独立线程执行；
+`GUEST_DISPLAY_FRAME_PRESENTED` 来自 drawable 的实际呈现回调。
+
+`SMO_FRAME_CAPTURE_DIR` 保存前两次输出与第 60 个有效输出的 PPM，最多三张。
+这些图像与着色器诊断一起只上传私有仓库，不进入公开 artifact。
+通过自动启动检查后，必须检查当前代码版本的真实游戏图像；仓库变量
+`SMO_REVIEWED_RENDER_SHA` 与构建提交完全相同才允许生成真机包。
+这个变量只记录已完成的图像检查，不能用来绕过启动检查；iOS 显示、输入与稳定性仍需真机验证。
+
 `build-shell-ipa.yml` 在注入私有程序后，构建 `smo_host_embedded`，运行
 `guest_boot_smoke.py`，通过才允许生成 IPA。它使用与 IPA 相同的 Embedded.S/C、
 宿主初始化和 ARM64 门代码，不再仅靠合成单测推断真实程序能启动。

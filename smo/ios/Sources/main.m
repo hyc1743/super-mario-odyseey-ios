@@ -4,6 +4,8 @@
 // 并把宿主的**日志环形缓冲**显示在屏幕上（未接电脑也能看）。宿主启动在下一轮接入。
 
 #import <UIKit/UIKit.h>
+#import "SMOMetalView.h"
+#import "nvn_metal_private.h"
 #include <fcntl.h>      // open/O_RDONLY（HexHead 走 POSIX 读，要 errno）
 #include <stdio.h>
 #include <string.h>
@@ -302,6 +304,9 @@ static NSString *ScanDocuments(void) {
 // 屏幕只放「用户要知道的」：现在第几步、做到多少、要不要导出日志、最近几行日志。
 // 完整的东西（状态、文件、全量带时间戳日志、stderr、上一轮日志）都在「导出日志」里。
 @implementation SMOViewController {
+    SMOMetalView *_gameView;
+    UIStackView *_statusColumn;
+    UIButton *_displayLogs;
     UILabel *_title, *_step, *_detail, *_hint, *_banner;
     UIProgressView *_bar;
     UIActivityIndicatorView *_spin;
@@ -328,6 +333,13 @@ static UILabel *MakeLabel(CGFloat size, UIFontWeight w, UIColor *c) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+    _gameView=[[SMOMetalView alloc] initWithFrame:self.view.bounds];
+    _gameView.autoresizingMask=UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    [self.view addSubview:_gameView];
+    __weak SMOMetalView *weakGameView=_gameView;
+    nvn_metal_set_frame_sink(^(id<MTLTexture> texture,int interval,uint64_t ordinal){
+        [weakGameView offerTexture:texture interval:interval ordinal:ordinal];
+    });
     self.view.backgroundColor = [UIColor colorWithRed:0.04 green:0.06 blue:0.10 alpha:1.0];
     UIColor *dim = [UIColor colorWithWhite:0.62 alpha:1.0];
 
@@ -386,9 +398,27 @@ static UILabel *MakeLabel(CGFloat size, UIFontWeight w, UIColor *c) {
     [col setCustomSpacing:4 afterView:barRow];
     col.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:col];
+    _statusColumn=col;
+    _displayLogs=[UIButton buttonWithType:UIButtonTypeSystem];
+    [_displayLogs setTitle:@"日志" forState:UIControlStateNormal];
+    _displayLogs.backgroundColor=[UIColor colorWithWhite:0 alpha:0.65];
+    [_displayLogs setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _displayLogs.layer.cornerRadius=8;_displayLogs.hidden=YES;
+    _displayLogs.translatesAutoresizingMaskIntoConstraints=NO;
+    [_displayLogs addTarget:self action:@selector(toggleDisplayLogs) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:_displayLogs];
+    __weak SMOViewController *displayController=self;
+    _gameView.onFirstFrame=^{
+        SMOViewController *controller=displayController;
+        if(controller){controller->_statusColumn.hidden=YES;controller->_displayLogs.hidden=NO;}
+    };
 
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
+        [_displayLogs.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-12],
+        [_displayLogs.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
+        [_displayLogs.widthAnchor constraintEqualToConstant:64],
+        [_displayLogs.heightAnchor constraintEqualToConstant:36],
         [col.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:20],
         [col.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-20],
         [col.topAnchor constraintEqualToAnchor:safe.topAnchor constant:16],
@@ -418,6 +448,7 @@ static UILabel *MakeLabel(CGFloat size, UIFontWeight w, UIColor *c) {
     [_more setTitle:_showAll ? @"只看最近" : @"显示全部" forState:UIControlStateNormal];
     [self refresh];
 }
+- (void)toggleDisplayLogs { _statusColumn.hidden=!_statusColumn.hidden; }
 
 static NSString *FmtDuration(double s) {
     if (s < 60) return [NSString stringWithFormat:@"%.0f 秒", s];

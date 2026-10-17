@@ -17,10 +17,11 @@ static uint64_t call(const char *name,void *obj,uint64_t a,uint64_t b,uint64_t c
     return fn(P(obj),a,b,c,d,f,0,0);
 }
 #define C(n,o,a,b,c,d,f) call("nvn" #n,o,a,b,c,d,f)
-typedef struct { NVNqueue *queue;NVNsync *sync;uint64_t handle; } small_stack_submission;
+typedef struct { NVNqueue *queue;NVNsync *sync;uint64_t handle;NVNwindow *window;int index; } small_stack_submission;
 static void *submit_small_stack(void *context) {
     small_stack_submission *s=context;
     C(QueueSubmitCommands,s->queue,1,P(&s->handle),0,0,0);
+    C(QueuePresentTexture,s->queue,P(s->window),s->index,0,0,0);
     C(QueueFenceSync,s->queue,P(s->sync),0,0,0,0);
     return NULL;
 }
@@ -40,11 +41,13 @@ static void write_shader(NSString *root,FILE *index,uint8_t *code,unsigned seed,
 }
 int main(void) {
     @autoreleasepool {
-        size_t page=(size_t)sysconf(_SC_PAGESIZE);uint8_t *memory=NULL;assert(!posix_memalign((void **)&memory,page,page*8));memset(memory,0,page*8);
+        size_t page=(size_t)sysconf(_SC_PAGESIZE);uint8_t *memory=NULL;assert(!posix_memalign((void **)&memory,page,page*9));memset(memory,0,page*9);
         NVNmemoryPool pool;NVNcommandBuffer cb;NVNqueue q;NVNqueueBuilder qb;NVNsync sync;
-        NVNtexture target,sample;NVNsampler sampler;NVNsamplerBuilder sb;NVNprogram program;NVNtexturePool tp;NVNsamplerPool sp;
-        nvn_st_ent *p=nvn_st_new(&pool,4);p->v[1]=P(memory);p->v[2]=page*8;
+        NVNtexture target,target2,sample;NVNsampler sampler;NVNsamplerBuilder sb;NVNprogram program;NVNtexturePool tp;NVNsamplerPool sp;
+        NVNwindow window;NVNwindowBuilder wb;
+        nvn_st_ent *p=nvn_st_new(&pool,4);p->v[1]=P(memory);p->v[2]=page*9;
         nvn_st_ent *t=nvn_st_new(&target,12);uint64_t words[16]={0,16,16,1,1,37,16,1,1,P(&pool),page*3,64,0,0,0,1};memcpy(t->v,words,sizeof words);
+        nvn_st_ent *t2=nvn_st_new(&target2,12);memcpy(t2->v,words,sizeof words);t2->v[10]=page*8;t2->v[15]=3;
         nvn_st_ent *st=nvn_st_new(&sample,12);words[1]=words[2]=1;words[10]=page*4;words[11]=32;words[15]=2;memcpy(st->v,words,sizeof words);
         memset(memory+page*4,255,4);
         float vertices[6]={-1,-1,3,-1,-1,3};uint16_t indices[3]={0,1,2};float color[4]={1,0,0,1};
@@ -52,6 +55,7 @@ int main(void) {
         NSString *root=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
         assert([[NSFileManager defaultManager] createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:NULL]);
         setenv("SMO_SHADER_DIR",root.UTF8String,1);NSString *idx=[root stringByAppendingPathComponent:@"shaders.idx"];
+        setenv("SMO_FRAME_CAPTURE_DIR",root.UTF8String,1);
         FILE *index=fopen(idx.fileSystemRepresentation,"wb");assert(index);
         NSString *vs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct Input{float2 p[[attribute(0)]];};\nvertex float4 main0(Input v[[stage_in]]){return float4(v.p,0,1);}\n";
         NSString *fs=@"#include <metal_stdlib>\nusing namespace metal;\nstruct A{constant float4 *color[[id(0)]];texture2d<float> image[[id(1)]];sampler smp[[id(2)]];};\nfragment float4 main0(constant A &a[[buffer(0)]]){return *a.color*a.image.sample(a.smp,float2(0.5));}\n";
@@ -81,7 +85,12 @@ int main(void) {
         C(CommandBufferReportCounter,&cb,0,P(memory+page*5+128),0,0,0);
         uint64_t handle=C(CommandBufferEndRecording,&cb,0,0,0,0,0);
         C(QueueBuilderSetDefaults,&qb,0,0,0,0,0);assert(C(QueueInitialize,&q,P(&qb),0,0,0,0));assert(C(SyncInitialize,&sync,0,0,0,0,0));
-        small_stack_submission submission={&q,&sync,handle};
+        C(WindowBuilderSetDefaults,&wb,0,0,0,0,0);NVNtexture *windowTextures[2]={&target,&target2};
+        C(WindowBuilderSetTextures,&wb,2,P(windowTextures),0,0,0);
+        C(WindowBuilderSetNativeWindow,&wb,1,0,0,0,0);assert(C(WindowInitialize,&window,P(&wb),0,0,0,0));
+        C(WindowSetCrop,&window,2,2,12,12,0);int acquired=-1;
+        assert(!C(QueueAcquireTexture,&q,P(&window),P(&acquired),0,0,0)&&acquired==0);
+        small_stack_submission submission={&q,&sync,handle,&window,acquired};
         pthread_attr_t attr;pthread_t thread;assert(!pthread_attr_init(&attr));
         size_t stack=16384;if(stack<PTHREAD_STACK_MIN)stack=PTHREAD_STACK_MIN;
         assert(!pthread_attr_setstacksize(&attr,stack));
@@ -97,11 +106,30 @@ int main(void) {
         }
         NVNcounterData timestamp;memcpy(&timestamp,memory+page*5+128,sizeof timestamp);assert(timestamp.timestamp>0);
         assert(API(DeviceGetTimestampInNanoseconds,PFNNVNDEVICEGETTIMESTAMPINNANOSECONDSPROC)(NULL,&timestamp)==timestamp.timestamp);
+        NSString *frame=[root stringByAppendingPathComponent:@"frame-1.ppm"];
+        for(unsigned retry=0;retry<5000 && ![[NSFileManager defaultManager] fileExistsAtPath:frame];retry++)usleep(1000);
+        NSData *image=[NSData dataWithContentsOfFile:frame];NSData *header=[@"P6\n12 12\n255\n" dataUsingEncoding:NSASCIIStringEncoding];
+        assert(image.length==header.length+12*12*3 && !memcmp(image.bytes,header.bytes,header.length));
+        const uint8_t *rgb=(const uint8_t *)image.bytes+header.length;
+        for(int y=0;y<12;y++)for(int x=0;x<12;x++){
+            BOOL inside=x>=2&&x<10&&y>=2&&y<10;const uint8_t *pixel=rgb+(y*12+x)*3;
+            assert(pixel[0]==(inside?255:0)&&pixel[1]==0&&pixel[2]==(inside?0:255));
+        }
+        assert(nvn_metal_offscreen_frames()==1);
+        /* A second request for the same unchanged draw cannot count as a new
+         * game frame. It still copies actual pixels and completes on the GPU. */
+        nvn_present_request repeat={snapshot,{2,2,12,12},1};
+        uint64_t repeated=nvn_gpu_present_queue(&q,&repeat);assert(repeated);
+        int status=0;for(unsigned retry=0;retry<5000 && !(status=nvn_gpu_poll(repeated));retry++)usleep(1000);assert(status==1);
+        NSString *second=[root stringByAppendingPathComponent:@"frame-2.ppm"];
+        for(unsigned retry=0;retry<5000 && ![[NSFileManager defaultManager] fileExistsAtPath:second];retry++)usleep(1000);
+        assert([[NSData dataWithContentsOfFile:second] isEqualToData:image]);assert(nvn_metal_offscreen_frames()==1);
+        C(WindowFinalize,&window,0,0,0,0,0);
         C(QueueFinalize,&q,0,0,0,0,0);C(SyncFinalize,&sync,0,0,0,0,0);C(CommandBufferFinalize,&cb,0,0,0,0,0);
         C(TexturePoolFinalize,&tp,0,0,0,0,0);C(SamplerPoolFinalize,&sp,0,0,0,0,0);
         nvn_metal_resources_reset();nvn_shader_reset();nvn_st_reset();free(memory);
         assert([[NSFileManager defaultManager] removeItemAtPath:root error:NULL]);
-        puts("METAL_RENDER_PASS: guest indexed draw, vertex layout, shader compile, uniform/texture/sampler arguments, scissor, readback, GPU timestamp and fence");
+        puts("METAL_RENDER_PASS: guest indexed draw, shader bindings, scissor, GPU timestamp/fence, cropped window snapshot on 16KiB stack and stale-frame exclusion");
     }
     return 0;
 }

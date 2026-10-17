@@ -4,8 +4,9 @@
 This is a limited startup gate, not a rendering/gameplay test. A private RomFS
 fixture can be provided for startup resources. Time alone never counts
 as success: nnMain, a guest thread, real GPU submission/completion and 60
-GPU-completed frame presentations are required. Request counts alone cannot
-prove that the GPU rendered or displayed a frame.
+GPU-completed offscreen frame deliveries with fresh guest draws are required.
+Request counts alone cannot prove rendering. Physical iOS display delivery
+is verified separately; image correctness requires inspection before packaging.
 """
 import argparse
 import json
@@ -58,7 +59,7 @@ def main():
         gpu_frames = "GUEST_GPU_FRAME_COMPLETED count=60" in data
         fatal = "FATAL" in data or "【红】" in data
         passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and not fatal
-        result = dict(passed=passed, scope="nnMain + guest thread + real GPU submit/completion + 60 GPU-completed frame presentations; image correctness still requires inspection",
+        result = dict(passed=passed, scope="nnMain + guest thread + real GPU submit/completion + 60 fresh-draw offscreen frame deliveries; image correctness and physical iOS display require separate verification",
                       romfs_fixture=bool(args.romfs),
                       seconds=args.seconds, timed_out=timed_out, exit_code=code,
                       entered_nnmain=entry, started_guest_thread=thread, presented_60_frames=frames, error_log=fatal,

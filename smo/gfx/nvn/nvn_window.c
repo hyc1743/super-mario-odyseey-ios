@@ -111,6 +111,9 @@ void nvn_QueuePresentTexture(NVNqueue *q,NVNwindow *w,int index) {
     if(!sequence)NVN_DIE("NVN_GPU_PRESENT_FAILED index=%d",index);
     s->pending[index]=sequence;s->acquired&=~(1u<<index);
     pthread_mutex_unlock(&s->lock);
+    static unsigned requests;
+    unsigned count=__atomic_add_fetch(&requests,1,__ATOMIC_RELAXED);
+    if(count==1 || count%60==0)NVN_LOG("GUEST_FRAME_PRESENT count=%u",count);
 }
 void nvn_WindowSetCrop(NVNwindow *w,int x,int y,int width,int height) {
     window_state *s=window(w);

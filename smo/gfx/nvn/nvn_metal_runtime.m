@@ -8,6 +8,7 @@
 #include "nvn_state.h"
 #include "nvn_cmd_render.h"
 #import "nvn_metal_private.h"
+#import "nvn_metal_resources.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <unistd.h>
@@ -21,9 +22,18 @@ id<MTLDevice> nvn_metal_device(void) { return device; }
 static uint64_t submitted;
 static _Atomic uint64_t completed;
 static _Atomic uint64_t first_failure;
+static _Atomic uint64_t offscreen_frames;
+static NSMutableDictionary<NSString *,NSNumber *> *presented_generations;
+static pthread_mutex_t sink_lock=PTHREAD_MUTEX_INITIALIZER;
+static void (^frame_sink)(id<MTLTexture>,int,uint64_t);
+void nvn_metal_set_frame_sink(void (^sink)(id<MTLTexture>,int,uint64_t)) {
+    pthread_mutex_lock(&sink_lock);frame_sink=[sink copy];pthread_mutex_unlock(&sink_lock);
+}
+uint64_t nvn_metal_offscreen_frames(void) { return atomic_load(&offscreen_frames); }
 typedef struct completion_node {
     uint64_t sequence;
     int done;
+    void *delivery;
     struct completion_node *next;
 } completion_node;
 static completion_node *completion_head, *completion_tail;
@@ -151,6 +161,55 @@ static int encode(void *context, uint32_t op, const void *payload, size_t size) 
     [blit copyFromBuffer:staging sourceOffset:0 toBuffer:dst destinationOffset:offset size:(NSUInteger)bytes];
     return 1;
 }
+static uint64_t commit_command(id<MTLCommandBuffer> command,void (^delivery)(void)) {
+        uint64_t sequence=submitted+1;
+        completion_node *node=calloc(1,sizeof *node);
+        if (!node) return 0;
+        submitted=sequence;
+        node->sequence=sequence;
+        if(delivery)node->delivery=(void *)CFBridgingRetain([delivery copy]);
+        pthread_mutex_lock(&completion_lock);
+        if (completion_tail) completion_tail->next=node;
+        else completion_head=node;
+        completion_tail=node;
+        pthread_mutex_unlock(&completion_lock);
+        command.label=[NSString stringWithFormat:@"SMO guest submit %llu",(unsigned long long)sequence];
+        [command addCompletedHandler:^(id<MTLCommandBuffer> command) {
+            NSMutableArray *deliveries=[NSMutableArray new];
+            pthread_mutex_lock(&completion_lock);
+            if (command.status != MTLCommandBufferStatusCompleted) {
+                uint64_t old=atomic_load(&first_failure);
+                while ((!old || sequence<old) && !atomic_compare_exchange_weak(&first_failure,&old,sequence)) {}
+                NVN_LOG("NVN_GPU_ERROR sequence=%llu domain=%s code=%ld",(unsigned long long)sequence,
+                        command.error.domain.UTF8String ?: "unknown",(long)command.error.code);
+            }
+            node->done=1;
+            /* Handlers may run on different host threads. Publish only a
+             * contiguous prefix, so a later success cannot hide an error in
+             * an earlier submission whose handler has not run yet. */
+            while (completion_head && completion_head->done) {
+                completion_node *head=completion_head;
+                atomic_store(&completed,head->sequence);
+                completion_head=head->next;
+                if(head->delivery){
+                    id action=CFBridgingRelease(head->delivery);
+                    uint64_t failure=atomic_load(&first_failure);
+                    if(!failure || head->sequence<failure)[deliveries addObject:action];
+                }
+                free(head);
+            }
+            if (!completion_head) completion_tail=NULL;
+            pthread_mutex_unlock(&completion_lock);
+            for(void (^action)(void) in deliveries)action();
+            if (sequence==1 || sequence%60==0)
+                NVN_LOG("NVN_GPU_COMPLETED sequence=%llu status=%ld",(unsigned long long)sequence,(long)command.status);
+        }];
+
+        [command commit];
+        if(sequence==1 || sequence%60==0)
+            NVN_LOG("NVN_GPU_SUBMITTED sequence=%llu",(unsigned long long)sequence);
+        return sequence;
+}
 static uint64_t submit_on_worker(int count, const uint64_t *handles) {
     @autoreleasepool {
         SMOGuestEncoder *e=[SMOGuestEncoder new];
@@ -168,43 +227,7 @@ static uint64_t submit_on_worker(int count, const uint64_t *handles) {
         }
         [e.blit endEncoding]; e.blit=nil;
         nvn_metal_render_end(e);
-        uint64_t sequence=++submitted;
-        completion_node *node=calloc(1,sizeof *node);
-        if (!node) return 0;
-        node->sequence=sequence;
-        pthread_mutex_lock(&completion_lock);
-        if (completion_tail) completion_tail->next=node;
-        else completion_head=node;
-        completion_tail=node;
-        pthread_mutex_unlock(&completion_lock);
-        e.command.label=[NSString stringWithFormat:@"SMO guest submit %llu",(unsigned long long)sequence];
-        [e.command addCompletedHandler:^(id<MTLCommandBuffer> command) {
-            pthread_mutex_lock(&completion_lock);
-            if (command.status != MTLCommandBufferStatusCompleted) {
-                uint64_t old=atomic_load(&first_failure);
-                while ((!old || sequence<old) && !atomic_compare_exchange_weak(&first_failure,&old,sequence)) {}
-                NVN_LOG("NVN_GPU_ERROR sequence=%llu error=%s",(unsigned long long)sequence,
-                        command.error.description.UTF8String ?: "unknown");
-            }
-            node->done=1;
-            /* Handlers may run on different host threads. Publish only a
-             * contiguous prefix, so a later success cannot hide an error in
-             * an earlier submission whose handler has not run yet. */
-            while (completion_head && completion_head->done) {
-                completion_node *head=completion_head;
-                atomic_store(&completed,head->sequence);
-                completion_head=head->next;
-                free(head);
-            }
-            if (!completion_head) completion_tail=NULL;
-            pthread_mutex_unlock(&completion_lock);
-            if (sequence==1 || sequence%60==0)
-                NVN_LOG("NVN_GPU_COMPLETED sequence=%llu status=%ld",(unsigned long long)sequence,(long)command.status);
-        }];
-        [e.command commit];
-        if (sequence==1 || sequence%60==0)
-            NVN_LOG("NVN_GPU_SUBMITTED sequence=%llu handles=%d",(unsigned long long)sequence,count);
-        return sequence;
+        return commit_command(e.command,nil);
     }
 }
 static uint64_t submit(int count,const uint64_t *handles) {
@@ -227,6 +250,91 @@ static int poll(uint64_t sequence) {
     if (failed && sequence>=failed) return -1;
     return done>=sequence;
 }
+/* Bounded private images use a simple lossless format, with no dependency on
+ * UIKit/ImageIO in the headless runner. Never put these in public artifacts. */
+static void capture_frame(id<MTLTexture> texture,uint64_t ordinal) {
+    const char *directory=getenv("SMO_FRAME_CAPTURE_DIR");
+    if(!directory || texture.width*texture.height>4194304)return;
+    @autoreleasepool {
+        NSUInteger width=texture.width,height=texture.height;
+        NSMutableData *rgba=[NSMutableData dataWithLength:width*height*4];
+        [texture getBytes:rgba.mutableBytes bytesPerRow:width*4
+            fromRegion:MTLRegionMake2D(0,0,width,height) mipmapLevel:0];
+        NSString *header=[NSString stringWithFormat:@"P6\n%lu %lu\n255\n",(unsigned long)width,(unsigned long)height];
+        NSMutableData *ppm=[[header dataUsingEncoding:NSASCIIStringEncoding] mutableCopy];
+        NSUInteger start=ppm.length;[ppm increaseLengthBy:width*height*3];
+        const uint8_t *src=rgba.bytes;uint8_t *dst=(uint8_t *)ppm.mutableBytes+start;
+        BOOL bgra=texture.pixelFormat==MTLPixelFormatBGRA8Unorm || texture.pixelFormat==MTLPixelFormatBGRA8Unorm_sRGB;
+        for(NSUInteger i=0;i<width*height;i++){
+            dst[i*3]=src[i*4+(bgra?2:0)];dst[i*3+1]=src[i*4+1];dst[i*3+2]=src[i*4+(bgra?0:2)];
+        }
+        NSString *root=[NSString stringWithUTF8String:directory];
+        [[NSFileManager defaultManager] createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:NULL];
+        NSString *path=[root stringByAppendingPathComponent:[NSString stringWithFormat:@"frame-%llu.ppm",(unsigned long long)ordinal]];
+        if([ppm writeToFile:path atomically:YES])
+            NVN_LOG("NVN_GPU_FRAME_CAPTURE ordinal=%llu width=%lu height=%lu",(unsigned long long)ordinal,(unsigned long)width,(unsigned long)height);
+    }
+}
+static uint64_t present_on_worker(const nvn_present_request *request) {
+    @autoreleasepool {
+        id<MTLTexture> source=nvn_metal_texture(device,&request->texture,NULL,0);
+        if(!source || source.textureType!=MTLTextureType2D || source.sampleCount!=1 || source.arrayLength!=1){
+            NVN_LOG("NVN_GPU_PRESENT_UNSUPPORTED texture layout");return 0;
+        }
+        MTLPixelFormat format=source.pixelFormat;
+        if(format!=MTLPixelFormatRGBA8Unorm && format!=MTLPixelFormatRGBA8Unorm_sRGB &&
+           format!=MTLPixelFormatBGRA8Unorm && format!=MTLPixelFormatBGRA8Unorm_sRGB){
+            NVN_LOG("NVN_GPU_PRESENT_UNSUPPORTED format=%lu",(unsigned long)format);return 0;
+        }
+        int32_t x=request->crop[0],y=request->crop[1],w=request->crop[2],h=request->crop[3];
+        if(!w && !h){x=y=0;w=(int32_t)source.width;h=(int32_t)source.height;}
+        if(x<0 || y<0 || w<=0 || h<=0 || (uint64_t)x+w>source.width || (uint64_t)y+h>source.height)return 0;
+        /* An immutable snapshot releases window ownership at GPU completion.
+         * Drawable acquisition must never block this guest submission worker. */
+        MTLTextureDescriptor *desc=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:format width:w height:h mipmapped:NO];
+        desc.storageMode=MTLStorageModeShared;desc.usage=MTLTextureUsageShaderRead;
+        id<MTLTexture> output=[device newTextureWithDescriptor:desc];
+        id<MTLCommandBuffer> command=[metal_queue commandBuffer];
+        if(!output || !command)return 0;
+        id<MTLBlitCommandEncoder> blit=[command blitCommandEncoder];if(!blit)return 0;
+        [blit copyFromTexture:source sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(x,y,0)
+            sourceSize:MTLSizeMake(w,h,1) toTexture:output destinationSlice:0 destinationLevel:0 destinationOrigin:MTLOriginMake(0,0,0)];
+        [blit endEncoding];
+        NSString *key=[NSString stringWithFormat:@"%llx:%llu",(unsigned long long)request->texture.object,
+            (unsigned long long)request->texture.words[15]];
+        uint64_t generation=nvn_metal_render_generation(render_state,&request->texture);
+        BOOL fresh=generation && generation>presented_generations[key].unsignedLongLongValue;
+        static uint64_t presentations;uint64_t ordinal=++presentations;
+        int interval=request->interval;
+        uint64_t sequence=commit_command(command, ^{
+            BOOL capture=ordinal==1 || ordinal==2;
+            if(fresh){
+                uint64_t count=atomic_fetch_add(&offscreen_frames,1)+1;
+                if(count==60)capture=YES;
+                if(count==1 || count%60==0)
+                    NVN_LOG("GUEST_GPU_FRAME_COMPLETED count=%llu delivery=offscreen",(unsigned long long)count);
+            }
+            pthread_mutex_lock(&sink_lock);
+            void (^sink)(id<MTLTexture>,int,uint64_t)=frame_sink;
+            pthread_mutex_unlock(&sink_lock);
+            if(sink)sink(output,interval,ordinal);
+            if(capture)capture_frame(output,ordinal);
+        });
+        if(sequence && fresh)presented_generations[key]=@(generation);
+        return sequence;
+    }
+}
+static uint64_t present(const nvn_present_request *request) {
+    nvn_present_request copy=*request;
+    __block uint64_t sequence=0;
+    dispatch_semaphore_t finished=dispatch_semaphore_create(0);
+    dispatch_async(encoding_worker, ^{
+        sequence=present_on_worker(&copy);
+        dispatch_semaphore_signal(finished);
+    });
+    dispatch_semaphore_wait(finished,DISPATCH_TIME_FOREVER);
+    return sequence;
+}
 static void initialize(void) {
     encoding_worker=dispatch_queue_create("smo.gpu.encoding",DISPATCH_QUEUE_SERIAL);
     dispatch_semaphore_t finished=dispatch_semaphore_create(0);
@@ -237,7 +345,8 @@ static void initialize(void) {
         if (!metal_queue) { NVN_LOG("NVN_GPU_UNAVAILABLE: Metal device/queue unavailable"); }
         else {
             render_state=nvn_metal_render_state();
-            static const nvn_gpu_backend backend={submit,poll,NULL};
+            presented_generations=[NSMutableDictionary new];
+            static const nvn_gpu_backend backend={submit,poll,present};
             nvn_gpu_install_backend(&backend);
             NVN_LOG("NVN_GPU_BACKEND device=%s worker=native",device.name.UTF8String);
         }

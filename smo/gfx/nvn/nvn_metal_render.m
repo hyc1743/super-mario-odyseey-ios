@@ -39,6 +39,8 @@
 @property(nonatomic,strong) SMOMetalShader *fs;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,SMOMetalShader *> *shaders;
 @property(nonatomic,strong) NSMutableDictionary<NSString *,id<MTLRenderPipelineState>> *pipelines;
+@property(nonatomic,strong) NSMutableDictionary<NSString *,NSNumber *> *drawGenerations;
+@property(nonatomic) uint64_t nextDrawGeneration;
 @end
 @implementation SMORenderState
 @end
@@ -53,9 +55,22 @@ NSObject *nvn_metal_render_state(void) {
     NVNpolygonState p;nvn_PolygonStateSetDefaults(&p);s->polygon=nvn_polygon_snapshot(&p);
     for(unsigned i=0;i<16;i++)s->depth_ranges[i][1]=1;
     s.shaders=[NSMutableDictionary new];s.pipelines=[NSMutableDictionary new];
+    s.drawGenerations=[NSMutableDictionary new];
     return s;
 }
 void nvn_metal_render_end(SMOGuestEncoder *e) { [e.render endEncoding];e.render=nil; }
+static NSString *target_identity(const nvn_resource_snapshot *r) {
+    return [NSString stringWithFormat:@"%llx:%llu",(unsigned long long)r->object,
+        (unsigned long long)r->words[15]];
+}
+uint64_t nvn_metal_render_generation(NSObject *state,const nvn_resource_snapshot *r) {
+    return ((SMORenderState *)state).drawGenerations[target_identity(r)].unsignedLongLongValue;
+}
+static void mark_draw(SMORenderState *s) {
+    uint64_t generation=++s.nextDrawGeneration;
+    for(int i=0;i<s->targets.count;i++)if(s->targets.colors[i].resource.object)
+        s.drawGenerations[target_identity(&s->targets.colors[i].resource)]=@(generation);
+}
 static int reject(const char *what) { NVN_LOG("NVN_METAL_RENDER_UNSUPPORTED %s",what);return 0; }
 static void private_metal_error(NSString *key,NSError *error) {
     /* Metal descriptions can embed source excerpts. Only domain/code are public. */
@@ -362,7 +377,8 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
         if(!target||!full_scissor(s,target))return reject("scissored clear color");
         pass.colorAttachments[c.index].loadAction=MTLLoadActionClear;
         pass.colorAttachments[c.index].clearColor=MTLClearColorMake(c.value[0],c.value[1],c.value[2],c.value[3]);
-        id<MTLRenderCommandEncoder> clear=[e.command renderCommandEncoderWithDescriptor:pass];if(!clear)return 0;[clear endEncoding];return 1;
+        id<MTLRenderCommandEncoder> clear=[e.command renderCommandEncoderWithDescriptor:pass];if(!clear)return 0;[clear endEncoding];
+        [s.drawGenerations removeObjectForKey:target_identity(&s->targets.colors[c.index].resource)];return 1;
     }
     case NVN_CMD_CLEAR_DEPTH:{
         READ(nvn_cmd_depth,c);if(!c.depth_mask&&!c.stencil_mask)return 1;
@@ -429,7 +445,7 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
     case NVN_CMD_DRAW:{
         READ(nvn_cmd_draw,p);if(p.count<0||p.first<0||p.instances<0||p.base_instance<0)return 0;if(!p.count||!p.instances)return 1;
         MTLPrimitiveType primitive;if(!primitive_type(p.primitive,&primitive))return 0;int ready=prepare_draw(e);if(ready!=1)return ready==2;
-        [e.render drawPrimitives:primitive vertexStart:p.first vertexCount:p.count instanceCount:p.instances baseInstance:p.base_instance];return 1;
+        [e.render drawPrimitives:primitive vertexStart:p.first vertexCount:p.count instanceCount:p.instances baseInstance:p.base_instance];mark_draw(s);return 1;
     }
     case NVN_CMD_DRAW_INDEXED:{
         READ(nvn_cmd_draw_indexed,p);if(p.count<0||p.instances<0||p.base_instance<0)return 0;if(!p.count||!p.instances)return 1;
@@ -439,7 +455,7 @@ int nvn_metal_render_encode(SMOGuestEncoder *e,uint32_t op,const void *payload,s
         NSUInteger offset=0;id<MTLBuffer> buffer=nvn_metal_buffer(e,p.address,(uint64_t)p.count*stride,&offset);if(!buffer)return 0;
         int ready=prepare_draw(e);if(ready!=1)return ready==2;
         [e.render drawIndexedPrimitives:primitive indexCount:p.count indexType:stride==2?MTLIndexTypeUInt16:MTLIndexTypeUInt32
-            indexBuffer:buffer indexBufferOffset:offset instanceCount:p.instances baseVertex:p.base_vertex baseInstance:p.base_instance];return 1;
+            indexBuffer:buffer indexBufferOffset:offset instanceCount:p.instances baseVertex:p.base_vertex baseInstance:p.base_instance];mark_draw(s);return 1;
     }
     default:return reject("render opcode");
     }
