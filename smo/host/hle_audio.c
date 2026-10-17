@@ -201,7 +201,7 @@ static void *audio_tick(void *unused) {
             if (r && r->running && !r->manual && r->event) {
                 hle_signal_system_event(r->event);
                 uint64_t count=atomic_fetch_add(&audio_event_ticks,1)+1;
-                if(count==1 || count%2000==0)LOG("AUDIO_RENDERER_EVENT_TICKS count=%llu",(unsigned long long)count);
+                if(count==1 || count%1000==0)LOG("AUDIO_RENDERER_EVENT_TICKS count=%llu",(unsigned long long)count);
             }
         }
         pthread_mutex_unlock(&audio_lock);
@@ -280,7 +280,7 @@ static uint32_t h_start(renderer_handle handle) {
     if (r) {
         uint32_t (*start)(void *) = SERVER_FN("5StartEv");
         result = start(r->server);
-        if (!result){r->running=1;r->next_frame_ns=0;}
+        if (!result){r->running=1;r->next_frame_ns=0;LOG("AUDIO_RENDERER_START event=%p manual=%d",r->event,r->manual);}
     }
     pthread_mutex_unlock(&audio_lock);
     return result;
@@ -294,13 +294,14 @@ static void stop_renderer(renderer *r) {
 static void h_stop(renderer_handle handle) {
     pthread_mutex_lock(&audio_lock);
     renderer *r = find_session(handle.object);
-    if (r) stop_renderer(r);
+    if (r){LOG("AUDIO_RENDERER_STOP frames=%llu",(unsigned long long)r->frames);stop_renderer(r);}
     pthread_mutex_unlock(&audio_lock);
 }
 static void h_close(renderer_handle handle) {
     pthread_mutex_lock(&audio_lock);
     renderer *r = find_session(handle.object);
     if (r) {
+        LOG("AUDIO_RENDERER_CLOSE frames=%llu",(unsigned long long)r->frames);
         stop_renderer(r);
         void (*finalize)(void *) = SERVER_FN("8FinalizeEv");
         finalize(r->server);
