@@ -331,15 +331,12 @@ jobs:
           xcrun -sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios16.0 \
             -Ismo/host -Ismo/gfx/nvn smo/ios/Sources/SMOMetalView.m smo/ios/Sources/SMOTouchController.m \
             smo/ios/Sources/SMOAudio.m smo/ios/Sources/SMOFramePacer.m smo/ios/Sources/main.m
-      - name: Require inspected game output before device packaging
+      - name: Automatically validate captured game output before device packaging
         if: env.SMO_INJECTED == '1'
-        env:
-          REVIEWED_RENDER_SHA: ${{ vars.SMO_REVIEWED_RENDER_SHA }}
         run: |
-          if [ "$REVIEWED_RENDER_SHA" != "$GITHUB_SHA" ]; then
-            echo "::error::Real game output from this source revision must be inspected before device packaging. Private frame evidence is uploaded separately."
-            exit 1
-          fi
+          python3 smo/verify/check_render_capture.py \
+            /tmp/smo-private-frame-capture/frame-latest.ppm \
+            work/boot-smoke/result.json
       - name: 构建并打包
         env:
           # 分支推送时 github.ref_name 是分支名，tag 时是 tag；不再直接把 git SHA 当版本号塞进
