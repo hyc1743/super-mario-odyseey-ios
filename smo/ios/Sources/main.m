@@ -627,8 +627,23 @@ static NSString *ReadTextFile(NSString *path) {
     // 同时留一份固定名的最新日志（方便你在「文件」App 里直接翻）
     [text writeToURL:[docs URLByAppendingPathComponent:@"SMO-log-latest.txt"]
           atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    // 摘要：日志到几 MB 之后，回传最实用的其实这一份（同类消息合并计数 + 错误行 + 尾部原文）。
+    // 只有几十 KB，聊天窗口也能直接发。
+    NSMutableArray<NSURL *> *items = [NSMutableArray arrayWithObject:url];
+    {
+        NSString *sumName = [name stringByReplacingOccurrencesOfString:@"SMO-log-"
+                                                           withString:@"SMO-log-summary-"];
+        NSURL *sumURL = [docs URLByAppendingPathComponent:sumName];
+        char errbuf[256] = {0};
+        if (dm_log_summarize(url.path.UTF8String, sumURL.path.UTF8String, errbuf, sizeof errbuf) == 0) {
+            [items addObject:sumURL];
+            LOG("导出摘要 → %s", sumName.UTF8String ?: "?");
+        } else {
+            LOG("【红】摘要生成失败：%s", errbuf[0] ? errbuf : "原因不明");
+        }
+    }
     UIActivityViewController *avc = [[UIActivityViewController alloc]
-        initWithActivityItems:@[url] applicationActivities:nil];
+        initWithActivityItems:items applicationActivities:nil];
     avc.popoverPresentationController.sourceView = _export;   // iPad 上不给锚点会直接崩
     [self presentViewController:avc animated:YES completion:nil];
 }

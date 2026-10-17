@@ -9,7 +9,7 @@ CC      ?= clang
 CFLAGS  ?= -O2 -Wall -Wextra -Werror -g
 LDFLAGS ?=
 # CORE = 除 main.c 以外的宿主全部源（自检目标复用；内嵌装载自检也要它）
-CORE = logbuf.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_hipc.c hle_sdkinit.c hle_vi.c hle_oe.c hle_pl.c hle_audio.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_texture_transfer.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_cmd_render.c ../gfx/nvn/nvn_resources.c ../gfx/nvn/nvn_render_state.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_window.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_shader_archive.c ../gfx/nvn/nvn_replay.c
+CORE = logbuf.c logsum.c romfs_resolve.c loader_core.c host_boot.c loader_apple.c thread.c hle.c hle_svc.c hle_thread.c hle_fs.c hle_hipc.c hle_sdkinit.c hle_vi.c hle_oe.c hle_pl.c hle_audio.c hle_hid.c hle_force_gen.c hle_nvn_reg.c entry.S ../gfx/nvn/hle_nvn.c ../gfx/nvn/nvn_table.c ../gfx/nvn/nvn_state.c ../gfx/nvn/nvn_core.c ../gfx/nvn/nvn_texture_transfer.c ../gfx/nvn/nvn_cmd.c ../gfx/nvn/nvn_cmd_render.c ../gfx/nvn/nvn_resources.c ../gfx/nvn/nvn_render_state.c ../gfx/nvn/nvn_gpu.c ../gfx/nvn/nvn_window.c ../gfx/nvn/nvn_tex.c ../gfx/nvn/nvn_shader.c ../gfx/nvn/nvn_shader_archive.c ../gfx/nvn/nvn_replay.c
 METAL_RUNTIME_SRC = ../gfx/nvn/nvn_metal_runtime.m ../gfx/nvn/nvn_metal_render.m ../gfx/nvn/nvn_metal_resources.m ../gfx/nvn/nvn_texread.c ../gfx/nvn/nvn_bcdec.c
 HOST_GPU_SRC =
 HOST_GPU_FLAGS =
@@ -158,7 +158,10 @@ ifeq ($(UNAME_S),Darwin)
 TEST_EXTRA = embed_selftest gate_stack_selftest
 endif
 
-test: cmd_selftest queue_selftest cmd_render_selftest render_state_selftest resources_selftest $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
+logsum_selftest: logsum.c tests/logsum_selftest.c logsum.h
+	$(CC) $(CFLAGS) -I. -o $@ logsum.c tests/logsum_selftest.c
+
+test: logsum_selftest cmd_selftest queue_selftest cmd_render_selftest render_state_selftest resources_selftest $(TEST_EXTRA) applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_iface_selftest nvn_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest $(SYNDIR)/sdk.patched.bin
 	./applogic_selftest
 	./smoarc_selftest
 	./loader_selftest $(SYNDIR) sdk main
@@ -170,6 +173,7 @@ test: cmd_selftest queue_selftest cmd_render_selftest render_state_selftest reso
 	./oehid_selftest
 	./pl_selftest
 	./audio_selftest
+	./logsum_selftest
 	./nvn_iface_selftest
 	./nvn_selftest
 	./cmd_selftest
@@ -197,7 +201,7 @@ run: smo_host
 	./smo_host work/rewrite sdk subsdk0 main --list
 
 clean:
-	rm -f cmd_selftest queue_selftest smo_host embed_selftest gate_stack_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
+	rm -f logsum_selftest cmd_selftest queue_selftest smo_host embed_selftest gate_stack_selftest applogic_selftest smoarc_selftest loader_selftest svc_selftest thread_selftest fs_selftest hipc_selftest vi_selftest oehid_selftest pl_selftest audio_selftest nvn_selftest nvn_iface_selftest shader_selftest replay_selftest tex_selftest bcdec_selftest texread_selftest
 
 .PHONY: test run equiv clean
 

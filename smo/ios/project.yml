@@ -54,6 +54,7 @@ targets:
       - path: ../host/hle_force_gen.c
       - path: ../host/hle_nvn_reg.c
       - path: ../host/logbuf.c
+      - path: ../host/logsum.c
       - path: ../host/romfs_resolve.c
       - path: ../host/smoarc.c
       - path: ../host/entry.S

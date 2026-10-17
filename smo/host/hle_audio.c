@@ -186,7 +186,7 @@ static uint32_t render_frame(renderer *r) {
                                   (unsigned char)cmd[0x124],(unsigned char)cmd[0x125],(unsigned char)cmd[0x126],
                                   (unsigned char)cmd[0x127],(unsigned char)cmd[0x128],(unsigned char)cmd[0x129],length);
                 }
-                if(addr && ch>=1 && ch<=6 && frames && frames<=240 && bufs<=16){
+                if(addr && ch>=1 && ch<=6 && frames && frames<=240 && bufs<=64){
                     const int32_t *mix=(const int32_t *)(uintptr_t)addr;unsigned post_peak=0;
                     for(uint32_t c=0;c<ch;c++){
                         uint32_t index=(uint8_t)cmd[0x124+c];if(index>=bufs)continue;
@@ -198,8 +198,12 @@ static uint32_t render_frame(renderer *r) {
                     }
                     static unsigned post_logged;
                     if(post_logged<8 || (post_peak && post_logged<64)){post_logged++;
-                        LOG("AUDIO_SINK_POST_PROCESS peak=%u frames=%u channels=%u buffers=%u",
-                                      post_peak,frames,ch,bufs);}
+                        const int32_t *m2=(const int32_t *)(uintptr_t)addr;
+                        unsigned i0=(uint8_t)cmd[0x124];
+                        LOG("AUDIO_SINK_POST_PROCESS peak=%u frames=%u channels=%u buffers=%u samples=%d,%d,%d,%d",
+                            post_peak,frames,ch,bufs,
+                            i0<bufs?m2[i0*frames+0]:0,i0<bufs?m2[i0*frames+1]:0,
+                            i0<bufs?m2[i0*frames+2]:0,i0<bufs?m2[i0*frames+3]:0);}
                 }
             }
             int samples=smo_audio_device_pcm(list,cmd,length,r->pcm,240);

@@ -22,6 +22,11 @@ _Static_assert(sizeof(nvn_shader_data) == 16, "NVNshaderData ABI");
 // synchronize use/destruction of the same object; reset invalidates all entries.
 nvn_st_ent *nvn_st_new(void *obj, uint32_t type);
 nvn_st_ent *nvn_st_get(const void *obj, uint32_t type);
+/* 退休表：Finalize 掉的资源仍可能被「录制时引用、提交时已释放」的命令用到。
+ * 真机 NVN 按地址访问、不校验生命周期；我们把状态抄一份留在这里，供渲染路径回落查询。
+ * 公开 API（Get / Map / Wait 等）仍然按「已 Finalize = 不可用」处理 —— nvn_selftest 有断言盯着。 */
+void nvn_st_retire(const nvn_st_ent *entry);
+nvn_st_ent *nvn_st_get_retired(const void *obj, uint32_t type);
 void        nvn_st_del(void *obj, uint32_t type);
 unsigned    nvn_st_count(void);
 unsigned    nvn_st_reused(void);

@@ -159,8 +159,10 @@ static id<MTLTexture> texture_view(SMONVNMetalTexture *entry,const nvn_view_stat
     MTLPixelFormat format=base.pixelFormat;
     if(v.flags&NVN_VIEW_FORMAT){pixel_info p=pixel((uint32_t)v.format);if(p.metal==MTLPixelFormatInvalid)return nil;format=p.metal;}
     if(v.flags&NVN_VIEW_DEPTH_STENCIL){
-        if(v.depth_stencil!=0&&v.depth_stencil!=1)return nil;
-        if(v.depth_stencil==1){if(base.pixelFormat!=MTLPixelFormatDepth32Float_Stencil8)return nil;format=MTLPixelFormatX32_Stencil8;}
+        if(v.depth_stencil!=0&&v.depth_stencil!=1){NVN_LOG("NVN_METAL_VIEW_REJECT depth_stencil=%d",(int)v.depth_stencil);return nil;}
+        if(v.depth_stencil==1&&base.pixelFormat==MTLPixelFormatDepth32Float_Stencil8)format=MTLPixelFormatX32_Stencil8;
+        /* 纯深度格式（Depth32Float/Depth16Unorm/Stencil8）上的「取模板面」：NVN 允许我们按原格式用，
+         * 以前这里直接返回 nil → 深度附件解析失败 → 每一遍渲染被跳过（真机第十轮的黑屏）。 */
     }
     MTLTextureType type=base.textureType;
     if((v.flags&NVN_VIEW_TARGET)&&!texture_type((uint32_t)v.target,&type))return nil;
@@ -185,6 +187,7 @@ id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapsho
         const uint64_t *w=s->words;pixel_info p=pixel((uint32_t)w[5]);MTLTextureType type;
         nvn_tex_layout l;uint64_t layer_stride=0,storage=0;
         nvn_st_ent *pool=nvn_st_get((const void *)(uintptr_t)w[9],4);
+        if(!pool)pool=nvn_st_get_retired((const void *)(uintptr_t)w[9],4);  /* 内存池已 Finalize（场景切换） */
         /* 失败判据逐条拆开记原因：以前只有一个「UNSUPPORTED」，看不出是格式、布局还是存储池，
          * 真机上只能猜（第八/第九轮都卡在这里）。 */
         const char *why=NULL;
@@ -229,6 +232,14 @@ id<MTLTexture> nvn_metal_texture(id<MTLDevice> device,const nvn_resource_snapsho
             effective.flags|=NVN_VIEW_DEPTH_STENCIL;effective.depth_stencil=(int32_t)w[NVN_TEX_DEPTH_WORD];
         }
         id<MTLTexture> result=texture_view(entry,&effective);
+        if(!result&&render_target){
+            /* 渲染目标的视图参数不满意时退回基础纹理：宁可这一帧用非视图纹理画，也别整遍跳过。
+             * （真机第十轮：深度视图在 DEPTH32F 上被判失败 → 黑屏） */
+            static unsigned fallback_logged;
+            if(fallback_logged<8){fallback_logged++;NVN_LOG("NVN_METAL_VIEW_FALLBACK format=%llu target=%llu —— 用基础纹理当附件",
+                (unsigned long long)s->words[5],(unsigned long long)s->words[7]);}
+            result=entry.texture;
+        }
         if(!result)goto failure;
         pthread_mutex_unlock(&cache_lock);return result;
     }

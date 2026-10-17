@@ -34,7 +34,7 @@
 | 壳模式（Guest.framework dlopen → remap） | ✅ CI 编译 + 本机生成验证 | `dm_image_from_dylib` + `guest_dylib.py`（第二十六轮） |
 | App（宿主接入 / 日志上屏 / 导出日志 / 文件共享） | ✅ CI 编译验证 | `main.m`（RunHost + RecentLog + 导出按钮 + 一键展开）；v0.3.0 起文件 App 可见（第二十六轮） |
 | 资源容器（几千小文件 → 若干卷 + App 首次展开） | ✅ 展开器 6 断言 + 真产物打卷 | `smoarc.c`；`RomFS.smoa.0…5`（每卷 ≤1 GB，共 4636 文件）（第二十七轮） |
-| 出包 / 更新链路 | ✅ release v0.1.0–v0.6.6 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
+| 出包 / 更新链路 | ✅ release v0.1.0–v0.6.12 | `make_installable.py` 一条命令：下载壳 → 注入 Guest.framework → 出 `SMOMobile-<版本>-可安装.ipa`（第二十六轮）；v0.5.0 起内嵌版由公开 runner 构建 |
 | **公开 runner 出内嵌版**（私有仓计费被挡后的替代） | ✅ 端到端验证 | 公开仓免费 runner 构建：输入从私有仓 `embed-input` 分支拉、成品传私有仓 release；内容不落公开侧（第二十六轮 2.104–2.109） |
 | 触屏 / 手柄 | 🚧 | 状态层与布局已验证（hid / oe），前端未接 |
 
@@ -2428,3 +2428,33 @@ Windows 快速回归 7/7 通过（含新增 vi_selftest，共 16 个 C 自检）
 
 有这两条，下一轮就能判定是「客体 DSP 真没混音」（→ 查 guest 侧音频命令/音量/是否还没开始播）
 还是「宿主读错了缓冲区或读得太早」（→ 查 sink 命令字段与转换）。
+
+## 2.125 真机第十轮：不闪退了，但黑屏 —— 用日志摘要定位（v0.6.12）
+
+用户把两份 2.3 MB 的日志放到本机 `work/logs/`。先用新写的 `dm_log_summarize()`
+（`smo/host/logsum.c`，同类消息归一计数 + 错误行 + 尾部原文）压到 67 KB 再读 —— 27038 行里：
+
+```
+×24443  NVN_RESOURCE_MISS type=12 object=0x16df40068（render command skipped）   29.7~35.0 s 场景切换
+×129    NVN_METAL_RESOURCE_UNSUPPORTED texture=… format=52 … render=1           深度附件仍解析不出来
+×294    NVN_GPU_RENDER_ENCODING_FAILED op=105 → 每遍渲染被跳过 → 黑屏
+×165    NVN_COMMAND_UNSUPPORTED nvnCommandBufferDispatchCompute                计算着色器未实现
+×165    NVN_SHADER_EXEC_MATCH_FAILED program=23481 … matches=0                  对应程序也没匹配上
+×32     AUDIO_DEVICE_PCM peak=0 input_peak=0                                    仍然无声
+```
+
+**黑屏链条**：场景切换 → 纹理/内存池重建（`MemoryPoolInitialize` ×578）→ 录下的命令仍引用旧对象 →
+`nvn_Metal` 解析附件时查不到 → 整遍渲染跳过 → 全黑。而 `NVN_METAL_TEXTURE_REJECT` 一次都没出现，
+说明失败发生在**纹理视图**（`texture_view` 返回 nil，那条路原来不记原因）：深度格式上带
+「模板面」视图被直接判失败。
+
+修法（三层）：
+1. `nvn_state` 增加**退休表**：`Finalize` 先抄一份再删 —— 公开 API 仍按「已删除」处理
+   （`nvn_selftest` 的两条断言继续盯着），渲染路径查不到时回落退休表（NVN 按地址访问的语义）
+2. `nvn_metal_resources`：深度格式上的模板面视图不再直接失败；渲染目标的视图建不出来时**退回基础纹理**
+3. 音频诊断：`AUDIO_SINK_POST_PROCESS` 的过滤条件（`bufs<=16`）写错了，日志里 `buffers=48` 永远不满足
+   → 放宽到 64，并打进处理后前 4 个采样值
+
+另外 `dm_log_summarize()` 已接进 App 的「导出日志」：以后导出会同时产出 `SMO-log-summary-*.txt`
+（几十 KB，直接发聊天窗口即可）。`logsum_selftest` 覆盖：比原日志小一个量级、同类合并计数正确、
+错误行与最后一行保留、空日志/缺失源文件的错误路径。
