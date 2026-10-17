@@ -40,8 +40,10 @@ SKIP = {
     'nvnTextureBuilderSetDefaults',
     'nvnTextureBuilderGetStorageSize',
     'nvnTextureBuilderGetStorageAlignment',
+    'nvnTextureBuilderGetZCullStorageSize',
     'nvnTextureInitialize',
     'nvnTextureFinalize',
+    'nvnTextureGetZCullStorageSize',
 
     "nvnBootstrapLoader",            # 本体（不是表项）
     # 以下在 nvn_core.c 里手写了状态实现（见该文件）；每次新增实现都要往这里加，

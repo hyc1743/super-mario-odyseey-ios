@@ -24,4 +24,6 @@ iOS 使用 48 kHz 立体声扬声器输出。`AUDIO_RENDERER_MIX_FRAMES` 应持�
 
 r252 的本次真机日志中 `AUDIO_SPEAKER running=1`，`callbacks=978 played=422400`，但 `AUDIO_DEVICE_PCM` 仍为 `audible=0 peak=0`。这证明设备输出回调取到了静音样本，尚未验证到非零游戏音频；不能据此宣称声音已修复。
 
+后续真机日志定位到另一处崩溃：命令内存补充成功后，约 30 秒时在 `nvnTextureGetZCullStorageSize` 路径出现 `FATAL missing resource type=12`。修复包括实现纹理 ZCull 存储大小查询，并把失效纹理记录为 `NVN_RESOURCE_MISS` 后跳过该次渲染命令，避免单个资源生命周期问题直接终止进程。
+
 真机前可运行 `SMO_AUDIO_TEST_WAV=work/test-audio.wav ./smo/host/audio_selftest`，再运行 `python smo/verify/check_audio_wav.py work/test-audio.wav`。该测试使用合成的非零混音命令，检查 48 kHz PCM16 双声道、非零峰值和 WAV 数据长度；它能验证混音/转换链路，但不能证明真实游戏资源已经播放音乐。

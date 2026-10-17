@@ -42,7 +42,12 @@ int nvn_resources_snapshot(const void *object, uint32_t type, nvn_resource_snaps
         static _Atomic unsigned aliases;
         if(atomic_fetch_add(&aliases,1)<8)NVN_LOG("NVN_RESOURCE_ALIAS object=%p owner=%p type=%u serial=%llu",object,e->key,type,(unsigned long long)id.serial);
     }
-    if (!e) return 0;
+    if (!e) {
+        static _Atomic unsigned misses;
+        unsigned n=atomic_fetch_add(&misses,1);
+        if(n<32)NVN_LOG("NVN_RESOURCE_SNAPSHOT_MISS type=%u object=%p",type,object);
+        return 0;
+    }
     out->object=(uint64_t)(uintptr_t)e->key;
     memcpy(out->words,e->v,sizeof out->words);
     return 1;

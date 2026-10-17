@@ -7,7 +7,12 @@
 static void snapshot(nvn_resource_snapshot *out, const void *object, unsigned type) {
     memset(out,0,sizeof *out);
     if (!object) return;
-    if (!nvn_resources_snapshot(object,type,out)) NVN_DIE("missing resource type=%u object=%p",type,object);
+    if (!nvn_resources_snapshot(object,type,out)) {
+        /* A game can rebuild a texture between command recording passes. NVN
+         * rejects that draw; aborting the whole app makes the next valid frame
+         * impossible and obscures the real lifetime bug. */
+        NVN_LOG("NVN_RESOURCE_MISS type=%u object=%p (render command skipped)",type,object);
+    }
 }
 static void attachment(nvn_attachment *out, const NVNtexture *texture, const NVNtextureView *view) {
     memset(out,0,sizeof *out);

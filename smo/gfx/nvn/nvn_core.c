@@ -541,6 +541,19 @@ uint64_t nvn_TextureBuilderGetStorageAlignment(uint64_t obj, uint64_t a1, uint64
     if (e->v[7] == 10) return fmt.bpb == 12 ? 4 : fmt.bpb;
     return e->v[6] & 0x10 ? (e->v[6] & 0x40 ? 128 : 32) : 512;
 }
+static uint64_t zcull_size(const nvn_st_ent *e) {
+    uint64_t bytes=texture_size(e);
+    if(!bytes)return 0;
+    /* NVN's exact compression allocation is device-specific. Returning a
+     * page-aligned conservative backing size is preferable to the old record
+     * stub's zero, which made the game create an unregistered depth target. */
+    return (bytes+0xfffull)&~UINT64_C(0xfff);
+}
+uint64_t nvn_TextureBuilderGetZCullStorageSize(uint64_t obj,uint64_t a1,uint64_t a2,uint64_t a3,
+                                               uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    return zcull_size(nvn_st_get(ARG_OBJ(obj),NVN_T_TEXB));
+}
 uint64_t nvn_TextureInitialize(uint64_t obj, uint64_t builder, uint64_t a2, uint64_t a3,
                                uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
@@ -572,6 +585,14 @@ uint64_t nvn_TextureFinalize(uint64_t obj, uint64_t a1, uint64_t a2, uint64_t a3
                              uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a1; (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;
     nvn_st_del(ARG_OBJ(obj), NVN_T_TEX); return 0;
+}
+uint64_t nvn_TextureGetZCullStorageSize(uint64_t obj,uint64_t a1,uint64_t a2,uint64_t a3,
+                                        uint64_t a4,uint64_t a5,uint64_t a6,uint64_t a7) {
+    (void)a1;(void)a2;(void)a3;(void)a4;(void)a5;(void)a6;(void)a7;
+    nvn_resource_snapshot s;
+    if(!nvn_resources_snapshot(ARG_OBJ(obj),NVN_T_TEX,&s))return 0;
+    nvn_st_ent copy={0}; memcpy(copy.v,s.words,sizeof copy.v);
+    return zcull_size(&copy);
 }
 
 // ------------------------------------------------------------------ 同步对象
