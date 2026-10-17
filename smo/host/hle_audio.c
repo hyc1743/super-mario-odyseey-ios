@@ -162,8 +162,8 @@ static uint32_t render_frame(renderer *r, int signal_server_event) {
     if(!count){limit(r->processor,UINT32_MAX);setup(r->processor,commands,bytes);process(r->processor);}
     if(signal_server_event)server_event(r);
     if (!r->frames++) LOG("AUDIO_RENDERER_CPU_FRAME bytes=%zu", bytes);
-    uint64_t count=atomic_fetch_add(&audio_mix_frames,1)+1;
-    if(count==1 || count%100==0)LOG("AUDIO_RENDERER_MIX_FRAMES count=%llu",(unsigned long long)count);
+    uint64_t frame_count=atomic_fetch_add(&audio_mix_frames,1)+1;
+    if(frame_count==1 || frame_count%100==0)LOG("AUDIO_RENDERER_MIX_FRAMES count=%llu",(unsigned long long)frame_count);
     return 0;
 }
 // The SDK RequestUpdate serializes the real client configuration and invokes
