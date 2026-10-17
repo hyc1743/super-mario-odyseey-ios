@@ -166,15 +166,20 @@ int main(void) {
     }
 
     printf("== 1. 事件 + 等待 + 唤醒 ==\n");
-    uint64_t hw = 0, hr = 0;
+    uint64_t hw = 0, hr = 0, hw2 = 0, hr2 = 0;
     CHK(svc(0x45, 0, 0, 0, 0, NULL) == 0, "CreateEvent 成功");   // 下面用 out1 拿写端
     { uint64_t r[6] = {0}; svc_thread(0x45, r); hw = r[1]; hr = r[2]; }
     CHK(hw && hr && hw != hr, "拿到写端与读端两个句柄");
+    { uint64_t r[6] = {0}; svc_thread(0x45, r); hw2 = r[1]; hr2 = r[2]; }
+    CHK(hw2 && hr2 && hw2 != hr2, "second event handles are distinct");
     g_ev_w = (uint32_t)hw; g_ev_r = (uint32_t)hr;
     { uint64_t r[6] = {0}; r[1] = (uint64_t)(uintptr_t)ev_waiter; r[2] = 0; r[3] = (uint64_t)(uintptr_t)(g_fake_stack + sizeof g_fake_stack); r[4] = 16;
       svc_thread(0x08, r); svc(0x09, r[1], 0, 0, 0, NULL); }
     wait_flag((volatile int *)&g_entered, 20);
     CHK(g_entered > 0, "客体线程跑起来了（CreateThread+StartThread）");
+    svc(0x11, hw2, 0, 0, 0, NULL);
+    usleep(5000);
+    CHK(!g_ev_woken && dm_thread_waiting(4) > 0, "unrelated event leaves this waiter blocked");
     svc(0x11, hw, 0, 0, 0, NULL);                                 // SignalEvent
     wait_flag((volatile int *)&g_ev_woken, 20);
     CHK(g_ev_woken, "WaitSynchronization 被 SignalEvent 唤醒，返回下标 0");
@@ -230,6 +235,8 @@ int main(void) {
     printf("== 6. CloseHandle ==\n");
     CHK(svc(0x16, hw, 0, 0, 0, NULL) == 0, "关写端");
     CHK(svc(0x16, hr, 0, 0, 0, NULL) == 0, "关读端（两端都关才释放事件）");
+    CHK(svc(0x16, hw2, 0, 0, 0, NULL) == 0, "close unrelated event write handle");
+    CHK(svc(0x16, hr2, 0, 0, 0, NULL) == 0, "close unrelated event read handle");
 
     printf("\n%s\n", fails ? "有断言不通过" : "全部通过");
     return fails != 0;

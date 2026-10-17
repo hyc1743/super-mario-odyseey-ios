@@ -39,6 +39,7 @@ typedef struct thr {
     pthread_t pt; pthread_cond_t cv;
     // 当前等待：kind 0=无 1=锁 2=条件 3=地址 4=同步对象
     int wkind, woke; uint64_t waddr, wkey; uint32_t wtag; int64_t wres;
+    const uint32_t *wait_handles; int wait_handle_count;
     uint64_t wseq;                 // 登记等待的序号（同优先级先到先醒）
     struct thr *next;              // 等待链
     uint64_t nsvc;
@@ -117,6 +118,7 @@ static void wake(thr_t *t, int64_t res) {
     t->wkind = 0; t->woke = 1; t->wres = res;
     pthread_cond_signal(&t->cv);
 }
+static void wake_sync_waiters(uint32_t handle);
 static int64_t block(thr_t *t, int kind, int64_t ns) {   // ns<0 无限、0 立即超时
     t->wkind = kind; t->woke = 0; t->wseq = ++g_wseq;
     t->next = g_wait;                                    // 挂到等待链头
@@ -171,7 +173,7 @@ static void *thread_main(void *p) {
 
 static void thread_exit(thr_t *t) {                       // 调用方持 G
     t->exited = 1;
-    for (thr_t *w = g_wait; w; w = w->next) if (w->wkind == 4) wake(w, 0);   // 等同步对象的线程要重新判定
+    wake_sync_waiters(t->handle);
     int free_me = t->closed;                              // 句柄已关 → 这里释放；否则由 CloseHandle 释放
     pthread_mutex_unlock(&G);                             // 退出前必须放锁（否则全局锁永远锁死）
     if (free_me) thr_free(t);
@@ -210,8 +212,22 @@ static int sig_obj(uint32_t h, int *bad) {                // 该句柄是否处�
     if (!e) { *bad = 1; return 0; }
     return e->signaled;
 }
-static void wake_sync_waiters(void) {
-    for (thr_t *w = g_wait; w; w = w->next) if (w->wkind == 4) wake(w, 0);
+static void wake_sync_waiters(uint32_t handle) {
+    void *event = h_peek(handle, O_EVENT_R);
+    if (!event) event = h_peek(handle, O_EVENT_W);
+    int is_thread = !event && h_peek(handle, O_THREAD) != NULL;
+    if (!event && !is_thread) return;
+    for (thr_t *w = g_wait, *next; w; w = next) {
+        next = w->next;
+        if (w->wkind != 4 || !w->wait_handles) continue;
+        int matched = 0;
+        for (int i = 0; i < w->wait_handle_count && !matched; i++) {
+            uint32_t waiting = w->wait_handles[i];
+            if (is_thread) matched = waiting == handle;
+            else matched = h_peek(waiting, O_EVENT_R) == event || h_peek(waiting, O_EVENT_W) == event;
+        }
+        if (matched) wake(w, 0);
+    }
 }
 
 // ---------------------------------------------------------------- 分派
@@ -402,7 +418,7 @@ int svc_thread(int num, uint64_t *regs) {
                                  : (h_peek(h, O_EVENT_W) ? h_peek(h, O_EVENT_W) : h_peek(h, O_EVENT_R));
         int64_t r = 0;
         if (!e) r = (num == 0x17 && h_peek(h, O_THREAD)) ? R_BAD_STATE : R_BAD_HANDLE;
-        else if (num == 0x11) { e->signaled = 1; wake_sync_waiters(); }
+        else if (num == 0x11) { e->signaled = 1; wake_sync_waiters(h); }
         else if (num == 0x17 && !e->signaled) r = R_BAD_STATE;
         else e->signaled = 0;
         pthread_mutex_unlock(&G);
@@ -426,7 +442,12 @@ int svc_thread(int num, uint64_t *regs) {
             if (idx >= 0) { r = 0; break; }
             int64_t left = ns < 0 ? -1 : (ns == 0 ? 0 : deadline - (int64_t)now_ns());
             if (ns > 0 && left <= 0) { r = R_TIMEOUT; break; }
-            if (block(t, 4, left) == R_TIMEOUT) { r = R_TIMEOUT; break; }
+            t->wait_handles = hs;
+            t->wait_handle_count = n > 0 ? n : 0;
+            int64_t waited = block(t, 4, left);
+            t->wait_handles = NULL;
+            t->wait_handle_count = 0;
+            if (waited == R_TIMEOUT) { r = R_TIMEOUT; break; }
         }
         pthread_mutex_unlock(&G);
         regs[0] = (uint64_t)r;
@@ -498,7 +519,7 @@ void hle_signal_system_event(void *ev) {
     pthread_mutex_lock(&G);
     event_t *e = h_get(wh, O_EVENT_W);
     e->signaled = 1;
-    wake_sync_waiters();
+    wake_sync_waiters(wh);
     pthread_mutex_unlock(&G);
 }
 void hle_forget_system_event(void *ev) {
