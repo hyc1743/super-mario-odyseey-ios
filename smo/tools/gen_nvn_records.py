@@ -10,7 +10,7 @@
 """
 import os
 import sys
-from gen_nvn import COMMAND_IMPLEMENTED, QUEUE_IMPLEMENTED, STATE_FAMILIES, RESOURCE_FAMILIES, RESOURCE_HANDLES
+from gen_nvn import COMMAND_IMPLEMENTED, QUEUE_IMPLEMENTED, STATE_FAMILIES, RESOURCE_FAMILIES, RESOURCE_HANDLES, WINDOW_IMPLEMENTED
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NAMES = os.path.join(ROOT, "smo", "gfx", "nvn", "names.txt")
@@ -65,6 +65,7 @@ SKIP = {
     "nvnSamplerInitialize", "nvnSamplerFinalize",
     "nvnProgramInitialize", "nvnProgramFinalize", "nvnProgramSetShaders",
 }
+SKIP.update(WINDOW_IMPLEMENTED)
 SKIP.update("nvn" + prefix + "Get" + suffix
             for prefix in ("SamplerBuilder", "Sampler")
             for suffix in ("MinMagFilter", "WrapMode", "Compare", "LodClamp", "LodBias",

@@ -62,6 +62,14 @@ QUEUE_IMPLEMENTED = {"nvnQueue" + suffix for suffix in (
     "BuilderSetCommandMemorySize", "BuilderSetControlMemorySize", "BuilderSetComputeMemorySize",
     "BuilderSetCommandFlushThreshold", "BuilderSetQueueMemory", "BuilderGetQueueMemorySize",
     "Initialize", "Finalize", "SubmitCommands", "Flush", "Finish", "FenceSync", "WaitSync",
+    "AcquireTexture", "PresentTexture",
+)}
+
+WINDOW_IMPLEMENTED = {"nvnWindow" + suffix for suffix in (
+    "BuilderSetDefaults", "BuilderSetDevice", "BuilderSetNativeWindow", "BuilderSetTextures",
+    "BuilderSetPresentInterval", "BuilderGetNativeWindow", "BuilderGetPresentInterval",
+    "Initialize", "Finalize", "AcquireTexture", "SetCrop", "GetCrop", "SetPresentInterval",
+    "GetPresentInterval", "GetNativeWindow", "SetDebugLabel",
 )}
 
 HEAD = """// 【自动生成，不要手改】由 smo/tools/gen_nvn.py 从 smo/gfx/nvn/names.txt 生成。

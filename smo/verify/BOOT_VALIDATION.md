@@ -302,5 +302,13 @@ submission now use async dispatch to a native worker, with a semaphore retaining
 synchronous encoding semantics. `dispatch_sync` is intentionally avoided because
 it may run inline on the guest stack. The hardware render regression now submits
 its triangle and GPU fence from a 16 KiB pthread stack (or platform minimum).
-Native validation of this stack fix is pending. Window acquisition/presentation
-remain recording stubs and no completed frame is claimed.
+Run `38986143317` passes the Metal hardware render test from that small stack.
+The real guest no longer faults in Metal commit during the diagnostic rerun;
+it waits in SyncWait after the unimplemented WindowAcquireTexture call.
+Window builders, texture-array copying, crop, acquisition readiness and
+GPU-sequence-based reuse now have typed implementations and portable tests.
+All 18 signatures are checked against the supplied NVN function-pointer types.
+Presentation uses a required backend callback, serializes with queue submission
+and updates the queue's completion sequence; a missing backend fails explicitly.
+The Metal present callback, image capture and iOS display layer remain to be
+implemented. No completed frame is claimed.

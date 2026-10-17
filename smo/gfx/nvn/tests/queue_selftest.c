@@ -12,6 +12,11 @@ static uint64_t submit(int count, const uint64_t *handles) {
     return ++submitted;
 }
 static int poll(uint64_t seq) { return failed && seq>=failed ? -1 : completed>=seq; }
+static nvn_present_request last_present;
+static uint64_t present(const nvn_present_request *request) {
+    last_present=*request;
+    return ++submitted;
+}
 static uint64_t call(const char *suffix, void *obj, uint64_t a, uint64_t b, uint64_t c) {
     char name[128]; snprintf(name,sizeof name,"nvn%s",suffix);
     nvn_fn fn=nvn_lookup(name); assert(fn && fn!=nvn_unimplemented);
@@ -19,7 +24,7 @@ static uint64_t call(const char *suffix, void *obj, uint64_t a, uint64_t b, uint
 }
 int main(void) {
     NVNqueue q; NVNqueueBuilder b; NVNsync s;
-    static const nvn_gpu_backend backend={submit,poll};
+    static const nvn_gpu_backend backend={submit,poll,present};
     call("QueueBuilderSetDefaults",&b,0,0,0);
     assert(!call("QueueInitialize",&q,(uintptr_t)&b,0,0));
     nvn_gpu_install_backend(&backend);
@@ -61,9 +66,41 @@ int main(void) {
     failed=3; completed=3;
     assert(call("SyncWait",&s,0,0,0)==3);
     failed=0;
+    NVNwindow window;NVNwindowBuilder wb;NVNtexture textures[2];
+    NVNtexture *texture_array[]={&textures[0],&textures[1]};
+    for(unsigned i=0;i<2;i++){
+        nvn_st_ent *t=nvn_st_new(&textures[i],12);assert(t);
+        t->v[1]=16;t->v[2]=16;t->v[5]=37;t->v[15]=101+i;
+    }
+    call("WindowBuilderSetDefaults",&wb,0,0,0);
+    call("WindowBuilderSetNativeWindow",&wb,1,0,0);
+    call("WindowBuilderSetPresentInterval",&wb,2,0,0);
+    call("WindowBuilderSetTextures",&wb,2,(uintptr_t)texture_array,0);
+    texture_array[0]=NULL; /* The builder copied the array, not its address. */
+    assert(call("WindowInitialize",&window,(uintptr_t)&wb,0,0));
+    assert(call("WindowGetNativeWindow",&window,0,0,0)==1);
+    assert(call("WindowGetPresentInterval",&window,0,0,0)==2);
+    NVNrectangle crop={0};
+    ((PFNNVNWINDOWSETCROPPROC)(uintptr_t)nvn_lookup("nvnWindowSetCrop"))(&window,1,2,8,8);
+    ((PFNNVNWINDOWGETCROPPROC)(uintptr_t)nvn_lookup("nvnWindowGetCrop"))(&window,&crop);
+    assert(crop.x==1 && crop.y==2 && crop.width==8 && crop.height==8);
+    int index=-1;
+    assert(!call("WindowAcquireTexture",&window,(uintptr_t)&s,(uintptr_t)&index,0) && index==0);
+    assert(call("SyncWait",&s,0,0,0)==0); /* Unused buffer is initially owned by the window. */
+    call("QueuePresentTexture",&q,(uintptr_t)&window,0,0);
+    uint64_t first_present=submitted;
+    assert(first_present>completed && last_present.texture.words[15]==101 && last_present.interval==2);
+    assert(!memcmp(last_present.crop,&crop,sizeof crop));
+    assert(!call("QueueAcquireTexture",&q,(uintptr_t)&window,(uintptr_t)&index,0) && index==1);
+    call("QueuePresentTexture",&q,(uintptr_t)&window,1,0);
+    assert(last_present.texture.words[15]==102 && submitted==first_present+1);
+    completed=submitted;
+    assert(!call("WindowAcquireTexture",&window,(uintptr_t)&s,(uintptr_t)&index,0) && index==0);
+    assert(nvn_st_get(&s,9)->v[2]==first_present && call("SyncWait",&s,0,0,0)==0);
+    call("WindowFinalize",&window,0,0,0);
     call("QueueFinalize",&q,0,0,0);
     call("SyncFinalize",&s,0,0,0);
     nvn_st_reset();
-    puts("queue/fence: backend required, missing commands rejected, pool bounds, ordered completion, rearm, timeout and GPU failure passed");
+    puts("queue/fence/window: backend required, missing commands, pool bounds, ordered completion, timeout/error, copied texture arrays, crop, ownership and GPU-sequence reuse passed");
     return 0;
 }

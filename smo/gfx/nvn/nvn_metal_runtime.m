@@ -237,7 +237,7 @@ static void initialize(void) {
         if (!metal_queue) { NVN_LOG("NVN_GPU_UNAVAILABLE: Metal device/queue unavailable"); }
         else {
             render_state=nvn_metal_render_state();
-            static const nvn_gpu_backend backend={submit,poll};
+            static const nvn_gpu_backend backend={submit,poll,NULL};
             nvn_gpu_install_backend(&backend);
             NVN_LOG("NVN_GPU_BACKEND device=%s worker=native",device.name.UTF8String);
         }

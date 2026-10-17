@@ -48,6 +48,17 @@ static nvn_st_ent *queue(const NVNqueue *q) {
     if (!s) NVN_DIE("queue %p is not initialized", (const void *)q);
     return s;
 }
+uint64_t nvn_gpu_present_queue(void *q,const nvn_present_request *request) {
+    nvn_st_ent *s=queue(q);
+    if(!request || !nvn_gpu_init() || !gpu.present){
+        NVN_LOG("NVN_GPU_PRESENT_UNAVAILABLE");return 0;
+    }
+    pthread_mutex_lock(&submit_lock);
+    uint64_t sequence=gpu.present(request);
+    if(sequence)__atomic_store_n(&s->v[Q_SEQUENCE],sequence,__ATOMIC_RELEASE);
+    pthread_mutex_unlock(&submit_lock);
+    return sequence;
+}
 static nvn_st_ent *builder(const NVNqueueBuilder *b) {
     nvn_st_ent *s = nvn_st_get(b, QUEUE_BUILDER_TYPE);
     if (!s) NVN_DIE("queue builder %p is not initialized", (const void *)b);
