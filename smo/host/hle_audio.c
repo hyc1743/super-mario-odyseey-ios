@@ -76,6 +76,7 @@ struct renderer {
     void *event;
     int running, manual;
     uint64_t frames;
+    uint64_t next_frame_ns;
     uint8_t *scratch;
     size_t scratch_size;
     int16_t pcm[480];
@@ -99,14 +100,24 @@ static uint64_t audio_now_ns(void){
     struct timespec now;clock_gettime(CLOCK_MONOTONIC,&now);
     return (uint64_t)now.tv_sec*1000000000u+(uint64_t)now.tv_nsec;
 }
+static void pace_renderer(renderer *r){
+    uint64_t now=audio_now_ns();
+    while(r->next_frame_ns>now){
+        uint64_t delay=r->next_frame_ns-now;
+        struct timespec wait={(time_t)(delay/1000000000u),(long)(delay%1000000000u)};
+        nanosleep(&wait,NULL);now=audio_now_ns();
+    }
+    /* A signaled event must never turn repeated client updates into a mix loop. */
+    if(!r->next_frame_ns || now-r->next_frame_ns>=5000000u)r->next_frame_ns=now;
+    r->next_frame_ns+=5000000u;
+}
 /* SDK EventType::SignalEvent enters Horizon arbitration and needs a registered
- * guest thread. Auto mixing runs on a host scheduler thread, so that path uses
- * the already-bound client SystemEvent instead. */
+ * guest thread. Call it only from guest-thread service paths. */
 static void server_event(renderer *r) {
     void (*signal)(void *) = sdk_function("_ZN2nn2os11SignalEventEPNS0_9EventTypeE");
     signal(r->server + 0x1d0);
 }
-static uint32_t render_frame(renderer *r, int signal_server_event) {
+static uint32_t render_frame(renderer *r) {
     void *(*buffer)(const void *) = sdk_function(
         "_ZNK2nn5audio6server17AudioRenderSystem26GetCommandBufferWorkBufferEv");
     size_t (*capacity)(const void *) = sdk_function(
@@ -160,7 +171,7 @@ static uint32_t render_frame(renderer *r, int signal_server_event) {
         begin=offset;segment_count=0;
     }
     if(!count){limit(r->processor,UINT32_MAX);setup(r->processor,commands,bytes);process(r->processor);}
-    if(signal_server_event)server_event(r);
+    server_event(r);
     if (!r->frames++) LOG("AUDIO_RENDERER_CPU_FRAME bytes=%zu", bytes);
     uint64_t frame_count=atomic_fetch_add(&audio_mix_frames,1)+1;
     if(frame_count==1 || frame_count%100==0)LOG("AUDIO_RENDERER_MIX_FRAMES count=%llu",(unsigned long long)frame_count);
@@ -178,10 +189,9 @@ static uint32_t update_service(renderer *r, const audio_buffer *out,
 }
 static const void *const renderer_vtable[16] = { [8] = (void *)update_service };
 
-// Auto-mode AudioRenderSystem is normally advanced by audren's service worker.
-// This host replaces that worker, so it must generate and process each 5 ms
-// command list here before waking the guest's renderer event. Config updates
-// are independent and must not be used as the audio clock.
+// Host thread delivers the renderer's completion event. SDK audio processing
+// stays on the guest thread because its kernel EventType operations require
+// guest thread identity.
 static void *audio_tick(void *unused) {
     (void)unused;
     const uint64_t period_ns=5000000u;
@@ -200,15 +210,10 @@ static void *audio_tick(void *unused) {
         pthread_mutex_lock(&audio_lock);
         for (unsigned i = 0; i < SMO_ARRAY_LEN(sessions); i++) {
             renderer *r = sessions[i];
-            if (r && r->running && !r->manual) {
-                uint32_t result=render_frame(r,0);
-                if(result){
-                    LOG("AUDIO_RENDERER_TICK_FAILED result=%#x frames=%llu",result,(unsigned long long)r->frames);
-                    continue;
-                }
+            if (r && r->running && !r->manual && r->event) {
+                hle_signal_system_event(r->event);
                 uint64_t count=atomic_fetch_add(&audio_event_ticks,1)+1;
                 if(count==1 || count%100==0)LOG("AUDIO_RENDERER_EVENT_TICKS count=%llu",(unsigned long long)count);
-                if(r->event)hle_signal_system_event(r->event);
             }
         }
         pthread_mutex_unlock(&audio_lock);
@@ -275,8 +280,7 @@ static uint32_t h_update(renderer_handle handle, const void *config) {
         uint32_t (*client)(renderer_handle, const void *) = sdk_function(
             "_ZN2nn5audio26RequestUpdateAudioRendererENS0_19AudioRendererHandleEPKNS0_19AudioRendererConfigE");
         result = client(handle, config);
-        /* RequestUpdateAuto applies client state; the service's 5 ms audio
-         * worker, not this comparatively rare configuration call, mixes PCM. */
+        if(!result && r->running && !r->manual){pace_renderer(r);result=render_frame(r);}
     }
     pthread_mutex_unlock(&audio_lock);
     return result;
@@ -288,7 +292,7 @@ static uint32_t h_start(renderer_handle handle) {
     if (r) {
         uint32_t (*start)(void *) = SERVER_FN("5StartEv");
         result = start(r->server);
-        if (!result){r->running=1;LOG("AUDIO_RENDERER_START event=%p manual=%d",r->event,r->manual);}
+        if (!result){r->running=1;r->next_frame_ns=0;LOG("AUDIO_RENDERER_START event=%p manual=%d",r->event,r->manual);}
     }
     pthread_mutex_unlock(&audio_lock);
     return result;
@@ -323,7 +327,7 @@ static void h_close(renderer_handle handle) {
 static uint32_t h_execute(renderer_handle handle) {
     pthread_mutex_lock(&audio_lock);
     renderer *r = find_session(handle.object);
-    uint32_t result = r && r->running && r->manual ? render_frame(r,1) : AUDIO_INVALID;
+    uint32_t result = r && r->running && r->manual ? render_frame(r) : AUDIO_INVALID;
     if (!result && r->event) hle_signal_system_event(r->event);
     pthread_mutex_unlock(&audio_lock);
     return result;

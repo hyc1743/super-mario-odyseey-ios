@@ -16,6 +16,7 @@ static uint8_t expected_internal[0x34];
 static int constructed, initialized, finalized, destroyed, started, stopped;
 static int client_calls, server_calls, bound, forgotten;
 static _Atomic int processed,output_calls,device_commands;
+static _Atomic int event_signals;
 static void *last_bound;
 static uint32_t server_result, init_result;
 static int budget;
@@ -69,7 +70,7 @@ static uint64_t size(const void *p) {
     return 0x8000;
 }
 void hle_bind_system_event(void *event) { CHECK(event); last_bound = event; bound++; }
-void hle_signal_system_event(void *event) { (void)event; }
+void hle_signal_system_event(void *event) { (void)event; atomic_fetch_add(&event_signals,1); }
 void hle_forget_system_event(void *event) { CHECK(event); forgotten++; }
 static void construct(void *p) { CHECK(p); constructed++; }
 static uint32_t initialize(void *p, const void *parameters, uint32_t process,
@@ -219,9 +220,9 @@ int main(void) {
     CHECK(execute(handle) != 0); // explicit execution is only valid in manual mode
     CHECK(!set_budget(handle, 65) && get_budget(handle) == 65);
     CHECK(set_budget(handle, 101) != 0 && get_budget(handle) == 65);
-    automatic_before=atomic_load(&processed);
+    int signals_before=atomic_load(&event_signals);
     struct timespec auto_wait={0,30000000};nanosleep(&auto_wait,NULL);
-    CHECK(atomic_load(&processed)-automatic_before>=1);
+    CHECK(atomic_load(&event_signals)-signals_before>=1);
     stop_renderer(handle);
     automatic_before=atomic_load(&processed);
     CHECK(!update_renderer(handle, expected_config) && atomic_load(&processed)==automatic_before && stopped == 1);
@@ -249,10 +250,12 @@ int main(void) {
     CHECK(!open_renderer(&handle,NULL,parameter,work,0x8000));
     int prior=atomic_load(&processed);
     CHECK(!start_renderer(handle));
+    struct timespec before,after;clock_gettime(CLOCK_MONOTONIC,&before);
     for(int i=0;i<10;i++)CHECK(!update_renderer(handle,expected_config));
-    struct timespec wait={0,100000000};nanosleep(&wait,NULL);
+    clock_gettime(CLOCK_MONOTONIC,&after);
+    double elapsed=(after.tv_sec-before.tv_sec)+(after.tv_nsec-before.tv_nsec)/1e9;
     int auto_frames=atomic_load(&processed)-prior;
-    CHECK(auto_frames>=4 && auto_frames<=30); // paced service clock, independent of config update frequency
+    CHECK(auto_frames==10 && elapsed>=0.04); // already-signaled events cannot busy-mix
     close_renderer(handle);
     free(allocation);
     // Native boot previously aborted while polling this uninitialized event.
