@@ -214,7 +214,32 @@ static void texture_transfer_test(void) {
         "volume texture writes address interleaved depth tiles and GOB rows");
     nvn_st_del(&texture,12);nvn_st_del(&pool,4);
 }
+static void virtual_pool_test(void) {
+    NVNmemoryPool physical={0},mapped={0};uint8_t bytes[4096]={0};
+    nvn_st_ent *p=nvn_st_new(&physical,4),*v=nvn_st_new(&mapped,4);
+    p->v[1]=(uintptr_t)bytes;p->v[2]=sizeof bytes;p->v[3]=NVN_MEMORY_POOL_FLAGS_PHYSICAL;
+    v->v[2]=2048;v->v[3]=NVN_MEMORY_POOL_FLAGS_VIRTUAL;
+    NVNmappingRequest requests[2]={{&physical,1024,0,1024,0},{&physical,2048,1024,1024,0}};
+    _Static_assert(sizeof(NVNmappingRequest)==40,"mapping request size");
+    _Static_assert(offsetof(NVNmappingRequest,storageClass)==32,"mapping request class offset");
+    CHK(API(MemoryPoolMapVirtual,PFNNVNMEMORYPOOLMAPVIRTUALPROC)(&mapped,2,requests)&&v->v[1]==(uintptr_t)(bytes+1024),
+        "contiguous virtual mapping aliases physical storage with offsets");
+    bytes[1031]=79;((uint8_t *)(uintptr_t)v->v[1])[8]=91;
+    uint64_t base,length;
+    CHK(((uint8_t *)(uintptr_t)v->v[1])[7]==79&&bytes[1032]==91&&
+        nvn_st_pool_range(v->v[1],2048,&base,&length),"virtual mapping preserves live physical updates and GPU range lookup");
+    requests[1].physicalOffset=3072;
+    CHK(!API(MemoryPoolMapVirtual,PFNNVNMEMORYPOOLMAPVIRTUALPROC)(&mapped,2,requests)&&v->v[1]==(uintptr_t)(bytes+1024),
+        "unsupported fragmented mapping leaves previous mapping intact");
+    NVNmappingRequest unmap={NULL,0,0,2048,0};
+    CHK(API(MemoryPoolMapVirtual,PFNNVNMEMORYPOOLMAPVIRTUALPROC)(&mapped,1,&unmap)&&!v->v[1],"full virtual mapping can be unmapped");
+    requests[0].size=4097;
+    CHK(!API(MemoryPoolMapVirtual,PFNNVNMEMORYPOOLMAPVIRTUALPROC)(&mapped,1,requests)&&!v->v[1],
+        "physical and virtual bounds checked before mapping");
+    nvn_st_del(&physical,4);nvn_st_del(&mapped,4);
+}
 int main(void) {
+    virtual_pool_test();
     texture_transfer_test();
     texture_layout_test();
     sampler_abi_test();

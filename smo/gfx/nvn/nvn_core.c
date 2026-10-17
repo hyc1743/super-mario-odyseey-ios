@@ -277,6 +277,54 @@ uint64_t nvn_BufferBuilderSetDefaults(uint64_t b, uint64_t a1, uint64_t a2, uint
     return 0;
 }
 
+/* SMO main+0x773e0c constructs a 40-byte mapping request at offsets
+ * 0=physical pool, 8=physical offset, 16=virtual offset, 24=size, 32=class.
+ * The startup allocation maps an entire virtual pool onto contiguous physical
+ * storage. Preserve a true alias to those bytes, never a snapshot copy. Sparse
+ * or noncontiguous address spaces require an OS alias allocator and fail here. */
+typedef struct {
+    const void *physical_pool;
+    int64_t physical_offset,virtual_offset;
+    uint64_t size;
+    int32_t storage_class;
+} nvn_mapping_request;
+_Static_assert(sizeof(nvn_mapping_request)==40,"NVNmappingRequest ABI");
+_Static_assert(offsetof(nvn_mapping_request,size)==24,"NVNmappingRequest size offset");
+uint8_t nvn_MemoryPoolMapVirtual(void *object,int count,const nvn_mapping_request *requests) {
+    nvn_st_ent *virtual_pool=nvn_st_get(object,NVN_T_POOL);
+    if(!virtual_pool||!(virtual_pool->v[POOL_FLAGS]&0x200)||count<0||count>4096||(!requests&&count))return 0;
+    if(!count)return 1;
+    if(count==1&&!requests[0].physical_pool&&requests[0].virtual_offset==0&&requests[0].size==virtual_pool->v[POOL_SIZE]){
+        virtual_pool->v[POOL_STORAGE]=0;return 1;
+    }
+    uint64_t base=0,total=0;
+    for(int i=0;i<count;i++){
+        nvn_mapping_request r;memcpy(&r,&requests[i],sizeof r);
+        nvn_st_ent *p=nvn_st_get(r.physical_pool,NVN_T_POOL);
+        if(!p||!(p->v[POOL_FLAGS]&0x100)||!p->v[POOL_STORAGE]||r.physical_offset<0||r.virtual_offset<0||!r.size||
+           (uint64_t)r.physical_offset>p->v[POOL_SIZE]||r.size>p->v[POOL_SIZE]-(uint64_t)r.physical_offset||
+           (uint64_t)r.virtual_offset>virtual_pool->v[POOL_SIZE]||r.size>virtual_pool->v[POOL_SIZE]-(uint64_t)r.virtual_offset||
+           p->v[POOL_STORAGE]>UINT64_MAX-(uint64_t)r.physical_offset)goto unsupported;
+        uint64_t address=p->v[POOL_STORAGE]+(uint64_t)r.physical_offset;
+        if(address<(uint64_t)r.virtual_offset)goto unsupported;
+        uint64_t next=address-(uint64_t)r.virtual_offset;
+        if((i&&base!=next)||r.size>UINT64_MAX-total)goto unsupported;
+        base=next;total+=r.size;
+        for(int j=0;j<i;j++){
+            nvn_mapping_request previous;memcpy(&previous,&requests[j],sizeof previous);
+            if((uint64_t)r.virtual_offset<(uint64_t)previous.virtual_offset+previous.size&&
+               (uint64_t)previous.virtual_offset<(uint64_t)r.virtual_offset+r.size)goto unsupported;
+        }
+    }
+    if(total!=virtual_pool->v[POOL_SIZE]||!base||base>UINT64_MAX-total)goto unsupported;
+    virtual_pool->v[POOL_STORAGE]=base;
+    NVN_LOG("NVN_VIRTUAL_POOL_MAPPED bytes=%llu requests=%d mode=contiguous-alias",(unsigned long long)total,count);
+    return 1;
+unsupported:
+    NVN_LOG("NVN_VIRTUAL_POOL_MAPPING_UNSUPPORTED requests=%d bytes=%llu",count,(unsigned long long)virtual_pool->v[POOL_SIZE]);
+    return 0;
+}
+
 uint64_t nvn_BufferBuilderSetDevice(uint64_t b, uint64_t dev, uint64_t a2, uint64_t a3,
                                     uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7) {
     (void)a2; (void)a3; (void)a4; (void)a5; (void)a6; (void)a7;

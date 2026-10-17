@@ -58,8 +58,9 @@ def main():
         gpu_complete = "NVN_GPU_COMPLETED" in data
         gpu_frames = "GUEST_GPU_FRAME_COMPLETED count=60" in data
         api_gaps = "NVN_API_UNIMPLEMENTED" in data
+        mapping_gap = "NVN_VIRTUAL_POOL_MAPPING_UNSUPPORTED" in data
         fatal = "FATAL" in data or "【红】" in data or api_gaps
-        passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and not fatal
+        passed = timed_out and entry and thread and frames and gpu_submit and gpu_complete and gpu_frames and not fatal and not mapping_gap
         result = dict(passed=passed, scope="nnMain + guest thread + real GPU submit/completion + 60 fresh-draw offscreen frame deliveries; image correctness and physical iOS display require separate verification",
                       romfs_fixture=bool(args.romfs),
                       seconds=args.seconds, timed_out=timed_out, exit_code=code,
@@ -67,6 +68,7 @@ def main():
                       fence_wait_observed="NVN_FENCE_WAIT" in data,
                       gpu_submitted=gpu_submit, gpu_completed=gpu_complete, gpu_presented_60_frames=gpu_frames,
                       unimplemented_api_observed=api_gaps,
+                      unsupported_mapping_observed=mapping_gap,
                       host_page_size=os.sysconf("SC_PAGE_SIZE"))
         (args.output / "result.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False), flush=True)
