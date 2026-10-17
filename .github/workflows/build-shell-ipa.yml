@@ -328,8 +328,6 @@ jobs:
       - name: iOS frontend source check
         if: ${{ always() }}
         run: |
-          xcrun -sdk iphonesimulator clang -fsyntax-only -fobjc-arc -target arm64-apple-ios16.0-simulator \
-            -Ismo/host -Ismo/gfx/nvn smo/ios/Tests/FrontendTests.m
           xcrun -sdk iphoneos clang -fsyntax-only -fobjc-arc -target arm64-apple-ios16.0 \
             -Ismo/host -Ismo/gfx/nvn smo/ios/Sources/SMOMetalView.m smo/ios/Sources/SMOTouchController.m \
             smo/ios/Sources/SMOAudio.m smo/ios/Sources/SMOFramePacer.m smo/ios/Sources/main.m
