@@ -277,11 +277,16 @@ int main(void) {
     memset(commands,0,sizeof commands);
     CHECK(!open_renderer(&handle,NULL,parameter,work,0x8000));
     int prior=atomic_load(&processed);
+    struct timespec t0,t1;clock_gettime(CLOCK_MONOTONIC,&t0);
     CHECK(!start_renderer(handle));
     for(int i=0;i<10;i++)CHECK(!update_renderer(handle,expected_config));
     struct timespec wait={0,100000000};nanosleep(&wait,NULL);
     int auto_frames=atomic_load(&processed)-prior;
-    CHECK(auto_frames>=1 && auto_frames<=30); // automatic rendering runs without an update-driven mix loop
+    clock_gettime(CLOCK_MONOTONIC,&t1);
+    /* The 5 ms clock renders late periods back to back, so the count tracks wall time.
+     * An update-driven mix loop would add one frame per update (+10) on top. */
+    long periods=((t1.tv_sec-t0.tv_sec)*1000000000L+(t1.tv_nsec-t0.tv_nsec))/5000000L;
+    CHECK(auto_frames>=1 && auto_frames<=periods+2);
     close_renderer(handle);
     free(allocation);
     // Native boot previously aborted while polling this uninitialized event.
